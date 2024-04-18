@@ -4,6 +4,7 @@ import pandas as pd
 from numpy.typing import ArrayLike
 from typing import Any
 import matplotlib
+import matplotlib.pyplot as plt
 from copy import copy
 
 class MosaicHandler:
@@ -293,3 +294,90 @@ class Shapes:
         head_y = np.asarray(head_y)+body_y[-1] if angle >= 0 else -np.asarray(head_y)+body_y[-1]
         
         return np.c_[np.r_[body_x, head_x], np.r_[body_y, head_y]].T
+
+
+class PlotPreparation:
+    @staticmethod
+    def _prepare_force_plot(
+        equal_y: tuple[str]=None) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]:
+        """Prepares the pyplot figure and axes and a MosaicHandler instance for a force plot.
+
+        :param equal_y: Sets the axes that will have the same y limits, defaults to None
+        :type equal_y: tuple[str], optional
+        :return: A pyplot figure, axes and an instance of MosaicHandler for the same figure and axes
+        :rtype: tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]
+        """
+        fig, axs = plt.subplot_mosaic([["profile", "aoa", "aero"], 
+                                       ["profile", "stiff", "damp"]], figsize=(10, 5), tight_layout=True)
+        handler = MosaicHandler(fig, axs)
+        x_labels = {
+            "profile": "normal (m)",
+            "aoa": "t (s)",
+            "aero": "t (s)",
+            "damp": "t (s)",
+            "stiff": "t (s)",
+        }
+        y_labels = {
+            "profile": "tangential (m)",
+            "aoa": "angle of attack (°)",
+            "aero": "aero (N) or (Nm)",
+            "damp": "struct. damping, (N) or (Nm)",
+            "stiff": "struct. stiffness, (N) or (Nm)",
+        }
+        aspect = {
+            "profile": "equal"
+        }
+        return *handler.update(x_labels=x_labels, y_labels=y_labels, aspect=aspect), handler
+
+    def _prepare_energy_plot(
+            equal_y: tuple[str]=None
+            ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]:
+        """Prepares the pyplot figure and axes and a MosaicHandler instance for a energy plot.
+
+        :param equal_y: Sets the axes that will have the same y limits, defaults to None
+        :type equal_y: tuple[str], optional
+        :return: A pyplot figure, axes and an instance of MosaicHandler for the same figure and axes
+        :rtype: tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]
+        """
+        fig, axs = plt.subplot_mosaic([["profile", "total", "work"],
+                                       ["profile", "kinetic", "potential"]], figsize=(10, 5), tight_layout=True)
+        handler = MosaicHandler(fig, axs)
+        x_labels = {
+            "profile": "normal (m)",
+            "total": "t (s)",
+            "work": "t (s)",
+            "kinetic": "t (s)",
+            "potential": "t (s)",
+        }
+        y_labels = {
+            "profile": "tangential (m)",
+            "total": "energy (Nm)",
+            "work": "work (Nm)",
+            "kinetic": "kinetic energy (Nm)",
+            "potential": "potential energy (Nm)",
+        }
+        aspect = {
+            "profile": "equal"
+        }
+        return handler.update(x_labels=x_labels, y_labels=y_labels, aspect=aspect), handler
+    
+    @staticmethod
+    def _get_aoas(df_aero: pd.DataFrame) -> tuple[list[str], pd.DataFrame]:
+        """Extracts all columns out of the dataframe "df_aero" that are angles of attack. It does that 
+        by looking for columns that have "alpha" in them. Then returns the name of the columns and a 
+        new dataframe containing these columns. The values from "df_aero" to the new dataframe undergo
+        a radian to degree conversion.
+
+        :param df_aero: Dataframe containing the simulation results related to the aerodynamics.
+        :type df_aero: pd.DataFrame
+        :return: A list of the columns that contain angles of attack and a dataframe of these values. A radians
+        to degree conversion is applied to the new dataframe.
+        :rtype: tuple[list[str], pd.DataFrame]
+        """
+        aoas = [column for column in df_aero if "alpha" in column]
+        aoas.pop(aoas.index("alpha_steady"))
+        aoas = ["alpha_steady"] + aoas  # plot "alpha_steady" first
+        dfs_aoas = df_aero[aoas]
+        dfs_aoas = dfs_aoas.apply(np.rad2deg)
+        return aoas, dfs_aoas
+    
