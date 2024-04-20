@@ -30,7 +30,8 @@ class MosaicHandler:
             y_lims_from: tuple | dict=_default,
             legend: bool | dict[bool]=_default,
             aspect: str | float | dict[str] | dict[float] =_default,
-            equal_y_lim: tuple[str] = _default
+            equal_y_lim: tuple[str] = _default,
+            scale_limits: float=1,
             ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]:
         """Function to automate and simplify the annotation of axes created with plt.subplot_mosaic(). Except for 'axs',
         all arguments can be a single value or a dictionary of values. The cases are:
@@ -59,13 +60,13 @@ class MosaicHandler:
         largest y limits of the axes.
         :type: tuple[str]
         """
-        lcs = {k: v for k,v in locals().items() if k != "self"}
+        lcs = {k: v for k,v in locals().items() if k not in ["self", "scale_limits"]}
         
         self._check_input_exculsivity(x_lims, y_lims, x_lims_from, y_lims_from)
         if x_lims_from != self._default:
-            lcs["x_lims_from"] = self._get_limits(x_lims_from)
+            lcs["x_lims_from"] = self._get_limits(x_lims_from, scale_limits)
         if y_lims_from != self._default:
-            lcs["y_lims_from"] = self._get_limits(y_lims_from)
+            lcs["y_lims_from"] = self._get_limits(y_lims_from, scale_limits)
 
         # self._check_mosaic_options_completeness(self._ax_labels, **lcs)  # not used/wanted
         # filter for parameters that the user wants to update
@@ -211,7 +212,7 @@ class MosaicHandler:
         return filled
     
     @staticmethod
-    def _get_limits(limits_from: tuple | dict[tuple]) -> tuple[float, float] | dict[tuple[float, float]]:
+    def _get_limits(limits_from: tuple | dict[tuple], scale: float) -> tuple[float, float] | dict[tuple[float, float]]:
         """Loops through all values and finds the overall max and min values. Returns those for each axis.
 
         :param limits_from: tuple containing iterables of values at each index or a dictionary with such a tuple for 
@@ -237,7 +238,7 @@ class MosaicHandler:
             for values in param_values:
                 lim_max = max(lim_max, max(values))
                 lim_min = min(lim_min, min(values))
-            limits[ax_label] = (lim_min, lim_max)
+            limits[ax_label] = (lim_min*scale, lim_max*scale)
         return limits if "tmp" not in limits.keys() else (limits["tmp"][0], limits["tmp"][1])     
     
     @staticmethod
