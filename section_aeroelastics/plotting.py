@@ -1,5 +1,7 @@
 import matplotlib.axes
 import matplotlib.figure
+import matplotlib.lines
+import matplotlib.patches
 from utils_plot import MosaicHandler, Shapes, PlotPreparation
 from calculations import Rotations
 from defaults import DefaultsPlots, DefaultStructure
@@ -7,10 +9,13 @@ import pandas as pd
 import numpy as np
 import json
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+from functools import partial
 import matplotlib
 from os.path import join
 from helper_functions import Helper
 from copy import copy
+from typing import Callable
 helper = Helper()
 
 
@@ -66,8 +71,8 @@ class Plotter(DefaultStructure, DefaultsPlots, PlotPreparation):
         rot = self._rot.passive_2D(pos[-1, 2])
         rot_profile = rot@(self.profile[:, :2]-np.asarray([self.section_data["chord"]/4, 0])).T
         rot_profile += np.asarray([[pos[-1, 0]], [pos[-1, 1]]])
-        axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plt_settings["profile"])
-        axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plt_settings["qc_trail"])
+        axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plot_settings["profile"])
+        axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plot_settings["qc_trail"])
         
         # grab all angles of attack from the data
         aoas, df_aoas = self._get_aoas(self.df_f_aero)
@@ -105,8 +110,8 @@ class Plotter(DefaultStructure, DefaultsPlots, PlotPreparation):
         rot = self._rot.passive_2D(pos[-1, 2])
         rot_profile = rot@(self.profile[:, :2]-np.asarray([self.section_data["chord"]/4, 0])).T
         rot_profile += np.asarray([[pos[-1, 0]], [pos[-1, 1]]])
-        axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plt_settings["profile"])
-        axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plt_settings["qc_trail"])
+        axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plot_settings["profile"])
+        axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plot_settings["qc_trail"])
         
         df_total = pd.concat([self.df_e_kin.sum(axis=1), self.df_e_pot.sum(axis=1)], keys=["e_kin", "e_pot"], axis=1)
         df_total["e_total"] = df_total.sum(axis=1)
@@ -127,19 +132,19 @@ class Plotter(DefaultStructure, DefaultsPlots, PlotPreparation):
 
     def _plot_to_mosaic(
             self,
-            axes: dict[str: matplotlib.axes.Axes],
-            plot: dict[str: list[str]],
-            data: dict[str: pd.DataFrame],
-            map_column_to_settings: callable) -> dict[str: matplotlib.axes.Axes]:
+            axes: dict[str, matplotlib.axes.Axes],
+            plot: dict[str, list[str]],
+            data: dict[str, pd.DataFrame],
+            map_column_to_settings: Callable) -> dict[str, matplotlib.axes.Axes]:
 
         for ax, cols in plot.items():
             time = self.time if ax != "work" else self.time[:-1]
             for col in cols:
                 try: 
-                    self.plt_settings[map_column_to_settings(col)]
+                    self.plot_settings[map_column_to_settings(col)]
                 except KeyError:
                     raise NotImplementedError(f"Default plot styles for '{col}' are missing.")
-                axes[ax].plot(time, data[ax][col].to_numpy(), **self.plt_settings[map_column_to_settings(col)])
+                axes[ax].plot(time, data[ax][col].to_numpy(), **self.plot_settings[map_column_to_settings(col)])
         return axes
 
 
@@ -179,10 +184,38 @@ class Animator(DefaultStructure, DefaultsPlots, Shapes, PlotPreparation):
         helper.create_dir(self.dir_plots)
         self._rot = Rotations()
     
-    def force(self):
-        fig, ax, handler = self._prepare_force_plot()
+    def force(
+            self,
+            angle_lift: str,
+            arrow_scale_forces: float=1,
+            arrow_scale_moment: float=1,
+            plot_qc_trailing_every: int=2,
+            keep_qc_trailing: int=40):
+        qc_pos = self.df_general[["pos_x", "pos_y"]].to_numpy()
+        profile = np.zeros((self.time.size, *self.profile.shape))
+        norm_moments = self.df_f_aero["aero_mom"]/np.abs(self.df_f_aero["aero_mom"]).max()
+        mom_arrow_res = 40
+        mom_arrow = np.zeros((self.time.size, mom_arrow_res+3, 2))
+        prof = self.profile-np.c_[0.25*self.section_data["chord"], 0]
+        for i, (angle, moment) in enumerate(zip(self.df_general["pos_tors"], norm_moments)):
+            rot_mat = self._rot.passive_2D(angle)
+            profile[i, :, :] = (rot_mat@prof.T).T+qc_pos[i, :]
+
+            trailing_edge = (rot_mat@np.c_[(0.75-arrow_scale_moment)*self.section_data["chord"], 0].T).T+qc_pos[i, :]
+            moment_arrow = rot_mat@self.circle_arrow(180*moment)*arrow_scale_moment
+            mom_arrow[i, :, :] = moment_arrow.T+trailing_edge.squeeze()
+        
+        ids = np.arange(self.time.size)-1
+        trailing_idx_from = ids-(keep_qc_trailing+ids%plot_qc_trailing_every)
+        trailing_idx_from[trailing_idx_from < 0] = 0
+        
+        angle_aero_to_xyz = (self.df_general["pos_tors"]-self.df_f_aero[angle_lift]).to_numpy()
+        aero_force = np.c_[self.df_f_aero["aero_drag"], self.df_f_aero["aero_lift"], np.zeros(self.time.size)]
+        force_arrows = self._rot.project_separate(aero_force, angle_aero_to_xyz)*arrow_scale_forces
+        
+        fig, axs, handler = self._prepare_force_plot()
         x_lims_from = {
-        "profile": [self.df_general["pos_x"]-.25, self.df_general["pos_x"]+1],
+        "profile": [self.df_general["pos_x"]-.4, self.df_general["pos_x"]+1],
         "aoa": self.time,
         "aero": self.time,
         "damp": self.time,
@@ -190,14 +223,202 @@ class Animator(DefaultStructure, DefaultsPlots, Shapes, PlotPreparation):
         }
         aoas, df_aoas = self._get_aoas(self.df_f_aero)
         y_lims_from = {
-            "profile": [self.df_general["pos_y"][:, 1]-.4, self.df_general["pos_y"][:, 1]+0.3],
+            "profile": [self.df_general["pos_y"]-.4, self.df_general["pos_y"]+0.3],
             "aoa": [df_aoas[col] for col in df_aoas.columns],
-            "aero": [self.df_f_aero["drag"], self.df_f_aero["lift"], self.df_f_aero["moment"]],
-            "damp": [self.df_f_structural["f_struct_damping_edge"], self.df_f_structural["f_struct_damping_flap"], 
-                        self.df_f_structural["f_struct_damping_tors"]],
-            "stiff": [self.df_f_structural["f_struct_stiff_edge"], self.df_f_structural["f_struct_stiff_flap"], 
-                        self.df_f_structural["f_struct_stiff_tors"]],
+            "aero": [self.df_f_aero["aero_edge"], self.df_f_aero["aero_flap"], self.df_f_aero["aero_mom"]],
+            "damp": [self.df_f_structural["damp_edge"], self.df_f_structural["damp_flap"], 
+                        self.df_f_structural["damp_tors"]],
+            "stiff": [self.df_f_structural["stiff_edge"], self.df_f_structural["stiff_flap"], 
+                        self.df_f_structural["stiff_tors"]],
         }
-        ax, fig = handler.update(x_lims_from=x_lims_from, y_lims_from=y_lims_from)
+        fig, axs = handler.update(x_lims_from=x_lims_from, y_lims_from=y_lims_from, scale_limits=1.2)
+
+        plot = {
+            "profile": ["profile", "drag", "lift", "mom", "qc_trail"],
+            "aoa": aoas,
+            "aero": ["aero_edge", "aero_flap", "aero_mom"],
+            "damp": ["damp_edge", "damp_flap", "damp_tors"],
+            "stiff": ["stiff_edge", "stiff_flap", "stiff_tors"]
+        }
+        def map_cols_to_settings(column: str) -> str:
+            if any([force_type in column for force_type in ["aero", "damp", "stiff"]]):
+                return column[column.find("_")+1:]
+            else:
+                return column 
+        plt_lines, plt_arrows = self._get_lines_and_arrows(axs, plot, map_cols_to_settings)
+        handler.update(legend=True)
+        
+        dfs = {line: self.df_f_aero for line in ["aero_edge", "aero_flap", "aero_mom"]} |\
+              {line: df_aoas for line in aoas} |\
+              {line: self.df_f_structural for line in ["damp_edge", "damp_flap", "damp_tors"]+
+                                                      ["stiff_edge", "stiff_flap", "stiff_tors"]}
+        data = {line: df[line] for line, df in dfs.items()}
+        data_lines = data | {"profile": profile, # data with dict[line: data_for_line]
+                             "mom": mom_arrow,
+                             "qc_trail": qc_pos}
+        data_arrows = {"drag": force_arrows[:, :2], "lift": force_arrows[:, 2:4]}
+        
+        def update(
+                i: int,
+                time: np.ndarray,
+                plt_lines: dict[str, matplotlib.lines.Line2D],
+                plt_arrows: dict[str, matplotlib.patches.Patch],
+                data_lines: dict[str, pd.DataFrame|dict],
+                data_arrows: dict[str, np.ndarray]):
+            i += 1
+            for linename, data in data_lines.items():
+                match linename:
+                    case "profile"|"mom":
+                        plt_lines[linename].set_data(data[i, :, 0], data[i, :, 1])
+                    case "qc_trail":
+                        plt_lines[linename].set_data(data[trailing_idx_from[i]:i:plot_qc_trailing_every, 0], 
+                                                     data[trailing_idx_from[i]:i:plot_qc_trailing_every, 1])
+                    case _:
+                        plt_lines[linename].set_data(time[:i], data[:i])
+            for arrow_name, data in data_arrows.items():
+                plt_arrows[arrow_name].set_data(x=data_lines["qc_trail"][i, 0], y=data_lines["qc_trail"][i, 1], 
+                                                dx=data[i, 0], dy=data[i, 1])
+            rtrn = [*plt_lines.values()]+[*plt_arrows.values()]
+            return tuple(rtrn)
+        
+        ani = animation.FuncAnimation(fig=fig, frames=self.time.size-1, interval=15, blit=True,
+                                      func=partial(update, 
+                                                   time=self.time,
+                                                   plt_lines=plt_lines, 
+                                                   plt_arrows=plt_arrows, 
+                                                   data_lines=data_lines, 
+                                                   data_arrows=data_arrows))
+        writer = animation.FFMpegWriter(fps=30)
+        ani.save(join(self.dir_plots, "animation_force.mp4"), writer=writer)
+
+    def energy(
+            self,
+            angle_lift: str,
+            arrow_scale_forces: float=1,
+            arrow_scale_moment: float=1,
+            plot_qc_trailing_every: int=2,
+            keep_qc_trailing: int=40):
+        qc_pos = self.df_general[["pos_x", "pos_y"]].to_numpy()
+        profile = np.zeros((self.time.size, *self.profile.shape))
+        norm_moments = self.df_f_aero["aero_mom"]/np.abs(self.df_f_aero["aero_mom"]).max()
+        mom_arrow_res = 40
+        mom_arrow = np.zeros((self.time.size, mom_arrow_res+3, 2))
+        prof = self.profile-np.c_[0.25*self.section_data["chord"], 0]
+        for i, (angle, moment) in enumerate(zip(self.df_general["pos_tors"], norm_moments)):
+            rot_mat = self._rot.passive_2D(angle)
+            profile[i, :, :] = (rot_mat@prof.T).T+qc_pos[i, :]
+
+            trailing_edge = (rot_mat@np.c_[(0.75-arrow_scale_moment)*self.section_data["chord"], 0].T).T+qc_pos[i, :]
+            moment_arrow = rot_mat@self.circle_arrow(180*moment)*arrow_scale_moment
+            mom_arrow[i, :, :] = moment_arrow.T+trailing_edge.squeeze()
+        
+        ids = np.arange(self.time.size)-1
+        trailing_idx_from = ids-(keep_qc_trailing+ids%plot_qc_trailing_every)
+        trailing_idx_from[trailing_idx_from < 0] = 0
+        
+        angle_aero_to_xyz = (self.df_general["pos_tors"]-self.df_f_aero[angle_lift]).to_numpy()
+        aero_force = np.c_[self.df_f_aero["aero_drag"], self.df_f_aero["aero_lift"], np.zeros(self.time.size)]
+        force_arrows = self._rot.project_separate(aero_force, angle_aero_to_xyz)*arrow_scale_forces
+        
+        fig, axs, handler = self._prepare_energy_plot()
+        x_lims_from = {
+        "profile": [self.df_general["pos_x"]-.4, self.df_general["pos_x"]+1],
+        "aoa": self.time,
+        "aero": self.time,
+        "damp": self.time,
+        "stiff": self.time,
+        }
+        aoas, df_aoas = self._get_aoas(self.df_f_aero)
+        y_lims_from = {
+            "profile": [self.df_general["pos_y"]-.4, self.df_general["pos_y"]+0.3],
+            "aoa": [df_aoas[col] for col in df_aoas.columns],
+            "aero": [self.df_f_aero["aero_edge"], self.df_f_aero["aero_flap"], self.df_f_aero["aero_mom"]],
+            "damp": [self.df_f_structural["damp_edge"], self.df_f_structural["damp_flap"], 
+                        self.df_f_structural["damp_tors"]],
+            "stiff": [self.df_f_structural["stiff_edge"], self.df_f_structural["stiff_flap"], 
+                        self.df_f_structural["stiff_tors"]],
+        }
+        fig, axs = handler.update(x_lims_from=x_lims_from, y_lims_from=y_lims_from, scale_limits=1.2)
+
+        plot = {
+            "profile": ["profile", "drag", "lift", "mom", "qc_trail"],
+            "aoa": aoas,
+            "aero": ["aero_edge", "aero_flap", "aero_mom"],
+            "damp": ["damp_edge", "damp_flap", "damp_tors"],
+            "stiff": ["stiff_edge", "stiff_flap", "stiff_tors"]
+        }
+        def map_cols_to_settings(column: str) -> str:
+            if any([force_type in column for force_type in ["aero", "damp", "stiff"]]):
+                return column[column.find("_")+1:]
+            else:
+                return column 
+        plt_lines, plt_arrows = self._get_lines_and_arrows(axs, plot, map_cols_to_settings)
+        handler.update(legend=True)
+        
+        dfs = {line: self.df_f_aero for line in ["aero_edge", "aero_flap", "aero_mom"]} |\
+              {line: df_aoas for line in aoas} |\
+              {line: self.df_f_structural for line in ["damp_edge", "damp_flap", "damp_tors"]+
+                                                      ["stiff_edge", "stiff_flap", "stiff_tors"]}
+        data = {line: df[line] for line, df in dfs.items()}
+        data_lines = data | {"profile": profile, # data with dict[line: data_for_line]
+                             "mom": mom_arrow,
+                             "qc_trail": qc_pos}
+        data_arrows = {"drag": force_arrows[:, :2], "lift": force_arrows[:, 2:4]}
+        
+        def update(
+                i: int,
+                time: np.ndarray,
+                plt_lines: dict[str, matplotlib.lines.Line2D],
+                plt_arrows: dict[str, matplotlib.patches.Patch],
+                data_lines: dict[str, pd.DataFrame|dict],
+                data_arrows: dict[str, np.ndarray]):
+            i += 1
+            for linename, data in data_lines.items():
+                match linename:
+                    case "profile"|"mom":
+                        plt_lines[linename].set_data(data[i, :, 0], data[i, :, 1])
+                    case "qc_trail":
+                        plt_lines[linename].set_data(data[trailing_idx_from[i]:i:plot_qc_trailing_every, 0], 
+                                                     data[trailing_idx_from[i]:i:plot_qc_trailing_every, 1])
+                    case _:
+                        plt_lines[linename].set_data(time[:i], data[:i])
+            for arrow_name, data in data_arrows.items():
+                plt_arrows[arrow_name].set_data(x=data_lines["qc_trail"][i, 0], y=data_lines["qc_trail"][i, 1], 
+                                                dx=data[i, 0], dy=data[i, 1])
+            rtrn = [*plt_lines.values()]+[*plt_arrows.values()]
+            return tuple(rtrn)
+        
+        ani = animation.FuncAnimation(fig=fig, frames=self.time.size-1, interval=15, blit=True,
+                                      func=partial(update, 
+                                                   time=self.time,
+                                                   plt_lines=plt_lines, 
+                                                   plt_arrows=plt_arrows, 
+                                                   data_lines=data_lines, 
+                                                   data_arrows=data_arrows))
+        writer = animation.FFMpegWriter(fps=30)
+        ani.save(join(self.dir_plots, "animation_force.mp4"), writer=writer)
+        
+
+    def _get_lines_and_arrows(   
+            self,
+            axes: dict[str, matplotlib.axes.Axes],
+            plot: dict[str, list[str]],
+            map_column_to_settings: Callable) -> tuple[dict[str, matplotlib.lines.Line2D],
+                                                       dict[str, matplotlib.patches.Patch]]:
+        lines = {}
+        force_arrows = {}
+        for ax, cols in plot.items():
+            for col in cols:
+                try: 
+                    self.plot_settings[map_column_to_settings(col)]
+                except KeyError:
+                    raise NotImplementedError(f"Default plot styles for '{map_column_to_settings(col)}' are missing.")
+                if col in ["lift", "drag"]:
+                    force_arrows[col] = axes[ax].arrow(0, 0, 0, 0, **self.arrow_settings[map_column_to_settings(col)])
+                else:
+                    lines[col] = axes[ax].plot(0, 0, **self.plot_settings[map_column_to_settings(col)])[0]
+        return lines, force_arrows
+
+
 
         
