@@ -47,9 +47,9 @@ class DefaultsPlots:
         # a base default parameter of '_plot_params' (value)
         "aero_drag": "drag",
         "aero_lift": "lift",
-        "aero_mom": "mom"
-    }
-
+        "aero_mom": "mom",
+    } | {f"{spec}_{direction}": direction for direction in ["edge", "flap", "tors"] for spec in ["damp", "kin", "pot"]} 
+    
     _arrow_params = [
         "lift", 
         "drag"
