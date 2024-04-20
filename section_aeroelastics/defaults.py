@@ -12,7 +12,7 @@ class DefaultsPlots:
     This will cause the plot to have all axes settings defined in this class to be set for the values connected 
     to "lift.
     """
-    _settings_implemented = {  # which axes settings are implemented; maps class attributes to plot() kwargs
+    _plot_settings_implemented = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
         "_colours": "color",
         "_labels": "label",
         "_markers": "marker",
@@ -21,7 +21,13 @@ class DefaultsPlots:
         "_linewidths": "lw"
     }
 
-    _params = [  # parameters that are supported by default
+    _arrow_settings_implemented = {  # which axes.arrow() settings are implemented; maps class attributes to arrow()
+        # kwargs
+        "_arr_width": "width",
+        "_arr_colour": "color"
+    }
+
+    _plot_params = [  # parameters that are supported by default
         "alpha_steady",
         "alpha_qs",
         "lift",
@@ -37,12 +43,17 @@ class DefaultsPlots:
         "e_total"
     ]
 
-    _params_copy =  {  # default mapping from additional parameters (keys) that have the same settings as 
-        # a base default parameter of '_params' (value)
+    _plot_params_copy =  {  # default mapping from additional parameters (keys) that have the same settings as 
+        # a base default parameter of '_plot_params' (value)
         "aero_drag": "drag",
         "aero_lift": "lift",
         "aero_mom": "mom"
     }
+
+    _arrow_params = [
+        "lift", 
+        "drag"
+    ]
 
     _colours = {  # line colour
         "_dfl": "black",
@@ -113,7 +124,7 @@ class DefaultsPlots:
     }
 
     _linewidths = {  # line width
-        param: 1 for param in ["_dfl"]+_params
+        param: 1 for param in ["_dfl"]+_plot_params
     }
 
     _ms = {  # marker size
@@ -133,18 +144,37 @@ class DefaultsPlots:
         "e_total": None
     }
 
+    _arr_width = {
+        "lift": 0.01,
+        "drag": 0.01
+    }
+
+    _arr_colour = {
+        "lift": _colours["lift"],
+        "drag": _colours["drag"]
+    }
+
     def __init__(self) -> None:
-        # add copy parameters to class attributes so they can be accessed in the definition of self.plt_settings
-        for param, copy_from in self._params_copy.items():
-            for setting in self._settings_implemented.keys():
+        # add copy parameters to class attributes so they can be accessed in the definition of self.plot_settings
+        for param, copy_from in self._plot_params_copy.items():
+            for setting in self._plot_settings_implemented.keys():
                 getattr(self, setting)[param] = getattr(self, setting)[copy_from]
         
-        # initialise the settings; now plt.settings[param] holds all settings for that param
-        self.plt_settings = {}
-        for param in self._params+[*self._params_copy.keys()]:
-            self.plt_settings[param] = {}
-            for setting, pyplot_setting in self._settings_implemented.items():
-                self.plt_settings[param][pyplot_setting] = getattr(self, setting)[param]
+        # initialise the plot settings; now self.plot.settings[param] holds all settings for that param and using
+        # plt.plot()
+        self.plot_settings = {}
+        for param in self._plot_params+[*self._plot_params_copy.keys()]:
+            self.plot_settings[param] = {}
+            for setting, pyplot_setting in self._plot_settings_implemented.items():
+                self.plot_settings[param][pyplot_setting] = getattr(self, setting)[param]
+
+        # initialise the arrow settings; now self.arrow.settings[param] holds all settings for that param and using 
+        # plt.arrow()
+        self.arrow_settings = {}
+        for param in self._arrow_params:
+            self.arrow_settings[param] = {}
+            for setting, pyplot_setting in self._arrow_settings_implemented.items():
+                self.arrow_settings[param][pyplot_setting] = getattr(self, setting)[param]
                 
     def add_params(self, **kwargs: dict[dict]):
         """Add parameters to the settings. Each kwarg must be a dictionary. The kwarg's name should be the parameter
@@ -159,19 +189,19 @@ class DefaultsPlots:
         """
         map_plt_to_attr = {plt_name: attr for attr, plt_name in self._settings_implemented.items()}
         for param, user_def_settings in kwargs.items():
-            self.plt_settings[param] = user_def_settings
+            self.plot_settings[param] = user_def_settings
             skip_setting = user_def_settings.keys()
             for setting in self._settings_implemented.values():
                 if setting in skip_setting:
                     continue
-                self.plt_settings[param][setting] = getattr(self, map_plt_to_attr[setting])["_dfl"]
+                self.plot_settings[param][setting] = getattr(self, map_plt_to_attr[setting])["_dfl"]
 
     def _update_colours(self, _colours: dict):
         self._update(_colours, "color")
 
     def _update(self, to_update: dict, setting: str):
         for param, value_setting in to_update.items():
-            self.plt_settings[param][setting] = value_setting
+            self.plot_settings[param][setting] = value_setting
 
 
 class DefaultStructure:
