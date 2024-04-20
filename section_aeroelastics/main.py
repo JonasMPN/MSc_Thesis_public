@@ -1,13 +1,14 @@
 from calculations import ThreeDOFsAirfoil
 from post_calculations import PostCaluculations
 import numpy as np
-from plotting import Plotter
+from plotting import Plotter, Animator
 from os.path import join
 
 do = {
-    "simulate": True,  # run a simulation
-    "post_calc": True,  # peform post calculations
-    "plot_results": True  # plot results
+    "simulate": False,  # run a simulation
+    "post_calc": False,  # peform post calculations
+    "plot_results": False,  # plot results,
+    "animate_results": True
 }
 
 root = "data/NACA_643_618"  # set which airfoil polars to use. Simulatenously defines to root for the simulation data
@@ -26,7 +27,7 @@ if do["simulate"]:
         "stiffness_flap": 1,
         "stiffness_tors": 1,
     }
-    t = np.linspace(0, 40, 1300)  # set the time array for the simulation
+    t = np.linspace(0, 10, 100)  # set the time array for the simulation
     NACA_643_618 = ThreeDOFsAirfoil(file_polar_data, t, **struct_def)
 
     # the following lines define the inflow at each time step
@@ -62,3 +63,12 @@ if do["plot_results"]:
     plotter = Plotter(file_profile, dir_sim, dir_plots) 
     plotter.force()  # plot various forces of the simulation
     plotter.energy()  # plot various energies and work done by forces of the simulation
+
+if do["animate_results"]:
+    file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
+    dir_sim = join(root, "simulation")  # define path to the root of the simulation results
+    dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
+    animator = Animator(file_profile, dir_sim, dir_plots) 
+    animator.force(angle_lift="alpha_qs", arrow_scale_forces=0.5, arrow_scale_moment=.1, 
+                   plot_qc_trailing_every=2, keep_qc_trailing=20)  # plot various forces of the simulation
+    # plotter.energy()  # plot various energies and work done by forces of the simulation
