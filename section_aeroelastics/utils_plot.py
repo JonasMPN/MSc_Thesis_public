@@ -1,8 +1,9 @@
 import matplotlib.figure
+from defaults import DefaultsPlots
 import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike
-from typing import Any
+from typing import Callable
 import matplotlib
 import matplotlib.pyplot as plt
 from copy import copy
@@ -309,7 +310,7 @@ class PlotPreparation:
         :rtype: tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]
         """
         fig, axs = plt.subplot_mosaic([["profile", "aoa", "aero"], 
-                                       ["profile", "stiff", "damp"]], figsize=(10, 5), tight_layout=True)
+                                       ["profile", "stiff", "damp"]], figsize=(10, 5), tight_layout=True, dpi=300)
         handler = MosaicHandler(fig, axs)
         x_labels = {
             "profile": "normal (m)",
@@ -330,6 +331,7 @@ class PlotPreparation:
         }
         return *handler.update(x_labels=x_labels, y_labels=y_labels, aspect=aspect), handler
 
+    @staticmethod
     def _prepare_energy_plot(
             equal_y: tuple[str]=None
             ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]:
@@ -341,7 +343,8 @@ class PlotPreparation:
         :rtype: tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]
         """
         fig, axs = plt.subplot_mosaic([["profile", "total", "work"],
-                                       ["profile", "kinetic", "potential"]], figsize=(10, 5), tight_layout=True)
+                                       ["profile", "kinetic", "potential"]], figsize=(10, 5), tight_layout=True,
+                                      dpi=300)
         handler = MosaicHandler(fig, axs)
         x_labels = {
             "profile": "normal (m)",
@@ -360,7 +363,7 @@ class PlotPreparation:
         aspect = {
             "profile": "equal"
         }
-        return handler.update(x_labels=x_labels, y_labels=y_labels, aspect=aspect), handler
+        return *handler.update(x_labels=x_labels, y_labels=y_labels, aspect=aspect), handler
     
     @staticmethod
     def _get_aoas(df_aero: pd.DataFrame) -> tuple[list[str], pd.DataFrame]:
@@ -382,3 +385,96 @@ class PlotPreparation:
         dfs_aoas = dfs_aoas.apply(np.rad2deg)
         return aoas, dfs_aoas
     
+class AnimationPreparation(PlotPreparation, DefaultsPlots):
+    def __init__(self) -> None:
+        PlotPreparation.__init__(self)
+        DefaultsPlots.__init__(self)
+    
+    def _prepare_force_animation(self, dfs: pd.DataFrame, equal_y: tuple[str]=None):
+        fig, axs, handler = self._prepare_force_plot(equal_y)
+        aoas, df_aoas = self._get_aoas(dfs["f_aero"])
+        x_lims_from = {
+            "profile": [dfs["general"]["pos_x"]-.4, dfs["general"]["pos_x"]+1],
+            "aoa": dfs["general"]["time"],
+            "aero": dfs["general"]["time"],
+            "damp": dfs["general"]["time"],
+            "stiff": dfs["general"]["time"],
+        }
+        y_lims_from = {
+            "profile": [dfs["general"]["pos_y"]-.4, dfs["general"]["pos_y"]+0.3],
+            "aoa": [df_aoas[col] for col in df_aoas.columns],
+            "aero": [dfs["f_aero"]["aero_edge"], dfs["f_aero"]["aero_flap"], self.df_f_aero["aero_mom"]],
+            "damp": [dfs["f_structural"]["damp_edge"], dfs["f_structural"]["damp_flap"], 
+                     dfs["f_structural"]["damp_tors"]],
+            "stiff": [dfs["f_structural"]["stiff_edge"], dfs["f_structural"]["stiff_flap"], 
+                      dfs["f_structural"]["stiff_tors"]],
+        }
+        
+        plot = {
+            "profile": ["qc_trail", "profile", "drag", "lift", "mom"],
+            "aoa": aoas,
+            "aero": ["aero_edge", "aero_flap", "aero_mom"],
+            "damp": ["damp_edge", "damp_flap", "damp_tors"],
+            "stiff": ["stiff_edge", "stiff_flap", "stiff_tors"]
+        }
+        def map_cols_to_settings(column: str) -> str:
+            if any([force_type in column for force_type in ["aero", "damp", "stiff"]]):
+                return column[column.find("_")+1:]
+            else:
+                return column 
+        fig, axs = handler.update(x_lims_from=x_lims_from, y_lims_from=y_lims_from, scale_limits=1.2)
+        plt_lines, plt_arrows = self._get_lines_and_arrows(axs, plot, map_cols_to_settings)
+        fig, axs = handler.update(legend=True)
+        return fig, plt_lines, plt_arrows, df_aoas
+    
+    def _prepare_energy_animation(self, dfs: pd.DataFrame, equal_y: tuple[str]=None):
+        fig, axs, handler = self._prepare_energy_plot(equal_y)
+        x_lims_from = {
+            "profile": [dfs["general"]["pos_x"]-.4, dfs["general"]["pos_x"]+1],
+            "total": dfs["general"]["time"],
+            "work": dfs["general"]["time"],
+            "kinetic": dfs["general"]["time"],
+            "potential": dfs["general"]["time"],
+        }
+        y_lims_from = {
+            "profile": [dfs["general"]["pos_y"]-.4, dfs["general"]["pos_y"]+0.3],
+            "total": [dfs["e_tot"]["e_total"], dfs["e_tot"]["e_kin"], dfs["e_tot"]["e_pot"]],
+            "work": [dfs["work"]["aero_drag"], dfs["work"]["aero_lift"], dfs["work"]["aero_mom"],
+                     dfs["work"]["damp_edge"], dfs["work"]["damp_flap"], dfs["work"]["damp_tors"]],
+            "kinetic": [dfs["e_kin"]["edge"], dfs["e_kin"]["flap"], dfs["e_kin"]["tors"]],
+            "potential": [dfs["e_pot"]["edge"], dfs["e_pot"]["flap"], dfs["e_pot"]["tors"]],
+        }
+        
+        plot = {
+            "profile": ["qc_trail", "profile", "drag", "lift", "mom"],
+            "total": ["e_total", "e_kin", "e_pot"],
+            "work": ["aero_drag", "aero_lift", "aero_mom", "damp_edge", "damp_flap", "damp_tors"],
+            "kinetic": ["kin_edge", "kin_flap", "kin_tors"],
+            "potential": ["pot_edge", "pot_flap", "pot_tors"]
+        }
+        def map_cols_to_settings(column: str) -> str:
+            return column
+        fig, axs = handler.update(x_lims_from=x_lims_from, y_lims_from=y_lims_from, scale_limits=1.2)
+        plt_lines, plt_arrows = self._get_lines_and_arrows(axs, plot, map_cols_to_settings)
+        fig, axs = handler.update(legend=True)
+        return fig, plt_lines, plt_arrows
+    
+    def _get_lines_and_arrows(   
+            self,
+            axes: dict[str, matplotlib.axes.Axes],
+            plot: dict[str, list[str]],
+            map_column_to_settings: Callable) -> tuple[dict[str, matplotlib.lines.Line2D],
+                                                       dict[str, matplotlib.patches.Patch]]:
+        lines = {}
+        force_arrows = {}
+        for ax, cols in plot.items():
+            for col in cols:
+                try: 
+                    self.plot_settings[map_column_to_settings(col)]
+                except KeyError:
+                    raise NotImplementedError(f"Default plot styles for '{map_column_to_settings(col)}' are missing.")
+                if col in ["lift", "drag"]:
+                    force_arrows[col] = axes[ax].arrow(0, 0, 0, 0, **self.arrow_settings[map_column_to_settings(col)])
+                else:
+                    lines[col] = axes[ax].plot(0, 0, **self.plot_settings[map_column_to_settings(col)])[0]
+        return lines, force_arrows
