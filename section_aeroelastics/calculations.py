@@ -347,10 +347,10 @@ class Rotations:
     """Class providing methods for anything related to performing rotations.
     """
     def project(self, array: np.ndarray, angles: int|float|np.ndarray) -> np.ndarray:
-        """Projecst (rotates) the points in "array" by the angles given in "angles". The rotation is around the third
-        component of "array", meaning it doesn't change that value. If "angles" is a single value, all points are 
-        rotated by that angle. If "angles" has as many values as "array" has points, each point is 
-        rotated by the angle in "angles" of the same index.
+        """Projecst the points in "array" into a coordinate system rotated by the angles given in "angles". The 
+        rotation is around the third component of "array", meaning it doesn't change that value. If "angles" is a 
+        single value, all points are rotated by that angle. If "angles" has as many values as "array" has points, each 
+        point is rotated by the angle in "angles" of the same index.
 
         :param array: (n, 3) numpy.ndarray
         :type array: np.ndarray
@@ -420,6 +420,19 @@ class Rotations:
         """
         return np.asarray([[np.cos(angle), np.sin(angle)],
                            [-np.sin(angle), np.cos(angle)]])
+
+    @staticmethod
+    @_process_rotation
+    def acitve_2D(angle: float) -> np.ndarray:
+        """Active 2D rotation.
+
+        :param angle: Rotation angle in rad
+        :type angle: float
+        :return: rotation matrix as (2, 2) np.ndarray 
+        :rtype: np.ndarray
+        """
+        return np.asarray([[np.cos(angle), -np.sin(angle)],
+                           [np.sin(angle), np.cos(angle)]])
                 
     @staticmethod
     @_process_rotation
