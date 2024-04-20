@@ -48,8 +48,8 @@ class SimulationResults(DefaultsSimulation):
     def _save(
         self, 
         root: str, 
-        files: dict[str: list[str]]=None, 
-        split: dict[str: list[str]]=None, 
+        files: dict[str, list[str]]=None, 
+        split: dict[str, list[str]]=None, 
         use_default: bool=True):
         """Saves instance attributes to CSV .dat files.
 
@@ -404,7 +404,8 @@ class Rotations:
             elif is_numpy:
                 return rot_mat.transpose(2, 0, 1)
             else:
-                raise NotImplementedError
+                raise ValueError(f"The angle(s) for '{func.__name__}()' have to be given as int, float, or "
+                                 f"np.ndarray but they were {type(angle)}.")
         return wrapper
     
     @staticmethod
