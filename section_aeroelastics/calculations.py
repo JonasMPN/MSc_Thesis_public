@@ -124,7 +124,7 @@ class ThreeDOFsAirfoil(SimulationResults):
         damping_edge: float, 
         damping_flap: float,
         damping_tors: float,
-        file_polar: str="polar.dat"
+        file_polar: str="polars.dat"
         ) -> None:
         """Initialises instance object.
 
@@ -154,7 +154,7 @@ class ThreeDOFsAirfoil(SimulationResults):
         """
         SimulationResults.__init__(self, time)
         self.dir_polar = dir_polar
-        self.file_polar_data = join(dir_polar, file_polar)
+        self.file_polar_data = file_polar
 
         self.mass = mass
         self.mom_inertia = mom_inertia
@@ -199,12 +199,17 @@ class ThreeDOFsAirfoil(SimulationResults):
                 add_aero_sim_params = ["alpha_qs"]
             case "BL":
                 must_haves = ["A1", "A2", "b1", "b2"]
+                can_haves = ["a", "K_alpha", "Tp", "Tbl", "Cn_vortex_detach", "tau_vortex_pure_decay", "Tv",
+                             "pitching_around", "alpha_at"]
                 self._check_scheme_settings("BL", "set_aero_calc", must_haves, params_given)
-                self._aero_scheme_settings = {param: value for param, value in kwargs.items() if param in must_haves}
-                raise NotImplementedError
+                self._aero_scheme_settings = {param: value for param, value in kwargs.items() if param in 
+                                              must_haves+can_haves}
+                add_aero_sim_params = ["s", "alpha_qs", "X_lag", "Y_lag", "alpha_eff", "CnC", "d_alpha_qs_dt", "Dnc", 
+                                       "CnI", "CnPot", "CtPot", "Dp", "Cn_sEq", "alpha_sEq", "f_t_Dp", "f_n_Dp", 
+                                       "Dbl_t", "Dbl_n", "f_t", "f_n", "Cnf", "Ctf", "tau_vortex", "CnVinstant", "CnV"]
         # add parameters the AeroForce method needs to calculate the aero forces or that are parameters the method
         # calculates that are interesting to save.
-        self._added_sim_params[self._dfl_filenames["f_aero"]] = add_aero_sim_params 
+        self._added_sim_params[self._dfl_filenames["f_aero"]] = add_aero_sim_params
         for param in add_aero_sim_params:
             self.add_param(param)  # adds instance attribute to self
         self._aero_force = AeroForce(dir_polar=self.dir_polar, file_polar=self.file_polar_data).get_function(scheme)
@@ -268,7 +273,8 @@ class ThreeDOFsAirfoil(SimulationResults):
         :type init_velocity: np.ndarray
         """
         inflow_angle = np.arctan(inflow[:, 1]/inflow[:, 0])
-        self.set_param(inflow=inflow, inflow_angle=inflow_angle, density=density)
+        dt = self.time[1:]-self.time[:-1]
+        self.set_param(inflow=inflow, inflow_angle=inflow_angle, density=density, dt=dt)
         # check whether all necessary settings have been set.
         self._check_simulation_readiness(_aero_force=self._aero_force, 
                                          _struct_force=self._struct_force,
@@ -386,6 +392,24 @@ class Rotations:
         combined = (rot_matrices@array).reshape(n_rot, 5)
         return combined
     
+    def project_2D(self, array: np.ndarray, angles: int|float|np.ndarray) -> np.ndarray:
+        """Projecst the points in "array" into a coordinate system rotated by the angles given in "angles". The 
+        rotation is around the third component of "array", meaning it doesn't change that value. If "angles" is a 
+        single value, all points are rotated by that angle. If "angles" has as many values as "array" has points, each 
+        point is rotated by the angle in "angles" of the same index.
+
+        :param array: (n, 3) numpy.ndarray
+        :type array: np.ndarray
+        :param angles: A single value or an array of values by which the points in "array" are rotated
+        :type angles: np.int|float|np.ndarray
+        :return: projected points
+        :rtype: np.ndarray
+        """
+        n_rot = angles.size
+        array = array.reshape((n_rot, 2, 1))
+        rot_matrices = self.passive_2D(angles)
+        return (rot_matrices@array).reshape(n_rot, 2)
+    
     def rotate_2D(self, array: np.ndarray, angles: int|float|np.ndarray) -> np.ndarray:
         """Rotates the points in "array" in the current coordinate system rotated by the angles given in "angles". 
         Assuming the coordinates are [x, y], the rotation is around a hypothetical z-axis following the right-hand
@@ -493,7 +517,7 @@ class AeroForce(Rotations):
     """
     _implemented_schemes = ["steady", "quasi_steady", "BL"]
     
-    def __init__(self, dir_polar: str, file_polar: str="polar.dat") -> None:
+    def __init__(self, dir_polar: str, file_polar: str="polars.dat") -> None:
         """Initialises an instance.
 
         :param file_polar_data: Path to the file from the current working directory containing the polar data.
@@ -506,6 +530,11 @@ class AeroForce(Rotations):
         self.Cd = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["Cd"])
         self.Cl = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["Cl"])
         self.Cm = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["Cm"])
+
+        self._alpha_0 = None
+        self._Cl_slope = 2*np.pi
+        self._f_n = None
+        self._f_t = None
 
     def get_function(self, scheme: str) -> callable:
         """Returns a function object that receives a ThreeDOFsAirfoil instance and returns a numpy array with
@@ -534,21 +563,47 @@ class AeroForce(Rotations):
         match scheme:
             case "BL":
                 dir_BL_data = join(self.dir_polar, "Beddoes_Leishman_calculations")
+                f_alpha_0 = join(dir_BL_data, "alpha_0.json")
+                f_sep = join(dir_BL_data, "sep_points.dat")
                 if not isdir(dir_BL_data):
                     helper.create_dir(dir_BL_data)
-                    self._write_separation_points()
-    
-    def _write_separation_points(
+                    self._alpha_0 = self._write_and_get_alpha0(alpha=self.df_polars["alpha"].to_numpy(),
+                                                               Cl=self.df_polars["Cl"].to_numpy(),
+                                                               save_as=f_alpha_0)
+                    df_sep = self._write_and_get_separation_points(alpha_0=self._alpha_0, save_as=f_sep)
+                else:
+                    with open(f_alpha_0, "r") as f:
+                        self._alpha_0 = json.load(f)
+                    df_sep = pd.read_csv(f_sep)
+                self._f_n = interpolate.interp1d(df_sep["alpha"], df_sep["f_n"])
+                self._f_t = interpolate.interp1d(df_sep["alpha"], df_sep["f_t"])
+
+    def _write_and_get_separation_points(
             self,
             alpha_0: float,
-            alpha: np.ndarray,
-            C_l: np.ndarray,
-            C_d: np.ndarray,
-            save_as: str
-            ):
-        coefficients = np.c_[C_d, C_l]
-        coeff_rot = self.pro(coefficients, alpha)
-        C_
+            save_as: str,
+            res: int=1000
+            ) -> pd.DataFrame:
+        alpha_given = self.df_polars["alpha"]
+        alpha_interp = np.linspace(alpha_given.min(), alpha_given.max(), res)
+        coefficients = np.c_[self.Cd(alpha_interp), self.Cl(alpha_interp)]
+        
+        alpha_given = np.deg2rad(alpha_given)
+        alpha_interp = np.deg2rad(alpha_interp)
+        alpha_0 = np.deg2rad(alpha_0)
+
+        coeff_rot = self.project_2D(coefficients, -alpha_interp)
+        C_t, C_n = -coeff_rot[:, 0], coeff_rot[:, 1]
+        
+        f_t = C_t/(self._lift_slope*np.sin(alpha_interp-alpha_0)**2)
+        f_t = f_t**2*np.sign(f_t)
+
+        f_n = 2*np.sqrt(C_n/(self._lift_slope*np.sin(alpha_interp-alpha_0)))-1
+        f_n = f_n**2*np.sign(f_n)
+
+        df = pd.DataFrame({"alpha": np.rad2deg(alpha_interp), "f_t": f_t, "f_n": f_n})
+        df.to_csv(save_as, index=None)
+        return df
     
     @staticmethod
     def _steady():
@@ -556,7 +611,7 @@ class AeroForce(Rotations):
 
     def _quasi_steady(
             self,
-            sim_results: ThreeDOFsAirfoil, 
+            sim_res: ThreeDOFsAirfoil, 
             i: int,
             pitching_around: float=0.25,
             alpha_at: float=0.7,
@@ -565,8 +620,8 @@ class AeroForce(Rotations):
         turns the nose down (if pitch=0). Positive x is downstream for inflow_angle=0. Positive y is to the suction
         side of the airfoilf (if AoA=0).
 
-        :param sim_results: Instance of ThreeDOFsAirfoil. This instance has the state of the system as its attributes.
-        :type sim_results: ThreeDOFsAirfoilBase
+        :param sim_res: Instance of ThreeDOFsAirfoil. This instance has the state of the system as its attributes.
+        :type sim_res: ThreeDOFsAirfoilBase
         :param i: Index of the current time step 
         :type i: int
         :param pitching_around: position of the pitch axis as distance from the leading edge, normalised on the chord.
@@ -578,31 +633,139 @@ class AeroForce(Rotations):
         :return: Numpy array containing [aero_force_x, aero_force_y, aero_force_moment].
         :rtype: np.ndarray
         """
-        sim_results.alpha_steady[i] = -sim_results.pos[i, 2]+sim_results.inflow_angle[i]
-        pitching_speed = sim_results.vel[i, 2]*sim_results.chord*(alpha_at-pitching_around)
-        v_pitching_x = np.sin(-sim_results.pos[i, 2])*pitching_speed  # velocity of the point
-        v_pitching_y = np.cos(sim_results.pos[i, 2])*pitching_speed  # velocity of the point
-    
-        v_x = sim_results.inflow[i, 0]-sim_results.vel[i, 0]-v_pitching_x
-        v_y = sim_results.inflow[i, 1]-sim_results.vel[i, 1]-v_pitching_y
-        flow_angle = np.arctan(v_y/v_x)
+        sim_res.alpha_steady[i] = -sim_res.pos[i, 2]+sim_res.inflow_angle[i]
+        qs_flow_angle = self._quasi_steady_flow_angle(sim_res.vel[i, :], sim_res.pos[i, :],
+                                                      sim_res.inflow[i, :], sim_res.chord, pitching_around, 
+                                                      alpha_at)
         
-        rot = self.passive_3D_planar(-flow_angle)
-        sim_results.alpha_qs[i] = -sim_results.pos[i, 2]+flow_angle
+        rot = self.passive_3D_planar(-qs_flow_angle)
+        sim_res.alpha_qs[i] = -sim_res.pos[i, 2]+qs_flow_angle
 
-        rel_speed = np.sqrt((sim_results.inflow[i, 0]-sim_results.vel[i, 0])**2+
-                            (sim_results.inflow[i, 1]-sim_results.vel[i, 1])**2)
+        rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
+                            (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
 
-        dynamic_pressure = sim_results.density/2*rel_speed
-        alpha_qs_deg = np.rad2deg(sim_results.alpha_qs[i])
+        dynamic_pressure = sim_res.density/2*rel_speed
+        alpha_qs_deg = np.rad2deg(sim_res.alpha_qs[i])
         coefficients = np.asarray([self.Cd(alpha_qs_deg), self.Cl(alpha_qs_deg), -self.Cm(alpha_qs_deg)])
-        return dynamic_pressure*sim_results.chord*rot@coefficients
-
-    @staticmethod
-    def _BL():
-        raise NotImplementedError
+        return dynamic_pressure*sim_res.chord*rot@coefficients
     
+    def _BL(self, 
+            sim_res: ThreeDOFsAirfoil,
+            i: int,
+            A1: float, A2: float, b1: float, b2: float,
+            a: float=343, K_alpha: float=0.7,
+            Tp: float=1.5, Tbl: float=5,
+            Cn_vortex_detach: float=1.0093, tau_vortex_pure_decay: float=11, Tv: float=5,
+            pitching_around: float=0.25, alpha_at: float=0.75,):
+        i = i if i != 0 else 1
 
+        # --------- MODULE unsteady attached flow
+        flow_vel = np.sqrt(sim_res.inflow[i, :]@sim_res.inflow[i, :].T)
+        ds = 2*sim_res.dt[i]*flow_vel/sim_res.chord
+        sim_res.s[i] = sim_res.s[i-1]+ds
+        qs_flow_angle = self._quasi_steady_flow_angle(sim_res.vel[i, :], sim_res.pos[i, :], 
+                                                      sim_res.inflow[i, :], sim_res.chord, pitching_around, 
+                                                      alpha_at)
+        sim_res.alpha_qs[i] = -sim_res.pos[i, 2]+qs_flow_angle
+        d_alpha_qs = sim_res.alpha_qs[i]-sim_res.alpha_qs[i-1]
+        sim_res.X_lag[i] = sim_res.X_lag[i-1]*np.exp(-b1*ds)+d_alpha_qs*A1*np.exp(-b1*ds/2)
+        sim_res.Y_lag[i] = sim_res.Y_lag[i-1]*np.exp(-b2*ds)+d_alpha_qs*A2*np.exp(-b1*ds/2)
+        sim_res.alpha_eff[i] = sim_res.alpha_qs[i]-sim_res.X_lag[i]-sim_res.Y_lag[i]
+        
+        sim_res.CnC[i] = self._Cl_slope*np.sin(sim_res.alpha_eff[i]-self._alpha_0)  #todo check that this sin() is also 
+        #todo correct for high aoa in potential flow
+
+        # impulsive (non-circulatory) normal force coefficient
+        sim_res.d_alpha_qs_dt[i] = d_alpha_qs/sim_res.dt[i]
+        tmp = -a/(K_alpha*sim_res.chord)
+        tmp_2 = sim_res.d_alpha_qs_dt[i]-sim_res.d_alpha_qs_dt[i-1]
+        sim_res.Dnc[i] = sim_res.Dnc[i-1]*np.exp(tmp*sim_res.dt[i])+tmp_2*np.exp(0.5*tmp*sim_res.dt[i])
+        sim_res.CnI[i] = 4*K_alpha*sim_res.chord/flow_vel*(sim_res.d_alpha_qs_dt[i]-sim_res.Dnc[i])
+
+        # add circulatory and impulsive
+        sim_res.CnPot[i] = sim_res.CnC[i]+sim_res.CnI[i]
+        sim_res.CtPot[i] = sim_res.CnPot[i]*np.tan(sim_res.alpha_eff[i])
+
+        # --------- MODULE nonlinear trailing edge separation
+        #todo why does the impulsive part of the potential flow solution go into the lag term?
+        sim_res.Dp[i] = sim_res.Dp[i-1]*np.exp(-ds/Tp)+(sim_res.CnPot[i]-sim_res.CnPot[i-1])*np.exp(-0.5*ds/Tp)
+        sim_res.Cn_sEq[i] = sim_res.CnPot[i]-sim_res.Dp[i]
+        sim_res.alpha_sEq[i] = sim_res.Cn_sEq[i]/self._Cl_slope+self._alpha_0  #todo check alpha_0 rad or deg
+
+        sim_res.f_t_Dp[i] = self._f_t(np.rad2deg(sim_res.alpha_sEq[i]))
+        sim_res.f_n_Dp[i] = self._f_n(np.rad2deg(sim_res.alpha_sEq[i]))
+
+        sim_res.Dbl_t[i] = sim_res.Dbl_t[i-1]*np.exp(-ds/Tbl)+\
+            (sim_res.f_t_Dp[i]-sim_res.f_t_Dp[i-1])*np.exp(-0.5*ds/Tbl)
+        sim_res.Dbl_n[i] = sim_res.Dbl_n[i-1]*np.exp(-ds/Tbl)+\
+            (sim_res.f_n_Dp[i]-sim_res.f_n_Dp[i-1])*np.exp(-0.5*ds/Tbl)
+        
+        sim_res.f_t[i] = sim_res.f_t_Dp[i]-sim_res.Dbl_t[i]
+        sim_res.f_n[i] = sim_res.f_n_Dp[i]-sim_res.Dbl_n[i]
+
+        sim_res.Cnf[i] = sim_res.CnC[i]*((1+np.sign(sim_res.f_t[i])*np.sqrt(sim_res.f_t[i]))/2)**2
+        sim_res.Ctf[i] = self._Cl_slope*np.sin(sim_res.alpha_eff[i]-self._alpha_0)**2*\
+            np.sign(sim_res.f_n[i])*np.sqrt(sim_res.f_n[i])
+        
+        # --------- MODULE leading-edge vortex position
+        if sim_res.Cn_sEq[i] >= Cn_vortex_detach or d_alpha_qs < 0:
+            sim_res.tau_vortex[i] = sim_res.tau_vortex[i-1]+0.45*ds
+        else:
+            sim_res.tau_vortex[i] = 0
+
+        # --------- MODULE leading-edge vortex lift
+        sim_res.CnVinstant[i] = sim_res.CnC[i]*(1-((1+np.sign(sim_res.f_t[i])*np.sqrt(sim_res.f_t[i]))/2)**2)
+        sim_res.CnV[i] = sim_res.CnV[i-1]*np.exp(-ds/Tv)
+        if sim_res.tau_vortex[i] < tau_vortex_pure_decay:
+            sim_res.CnV[i] += (sim_res.CnVinstant[i]-sim_res.CnVinstant[i-1])*np.exp(-0.5*ds/Tv)
+        
+
+        # --------- Combining everything
+        # -Ct because Ct and Cd are defined in opposite direction
+        # todo update Cm!!!
+        coefficients = np.asarray([-sim_res.Ctf[i], sim_res.Cnf[i]+sim_res.CnV[i], 1])
+        rot = self.passive_3D_planar(sim_res.pos[i, 2])
+        rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
+                            (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
+        dynamic_pressure = sim_res.density/2*rel_speed
+        return dynamic_pressure*sim_res.chord*rot@coefficients
+        
+    
+    @staticmethod
+    def _quasi_steady_flow_angle(
+        velocity: np.ndarray,
+        position: np.ndarray,
+        flow: np.ndarray,
+        chord: float,
+        pitching_around: float,
+        alpha_at: float
+        ):
+        pitching_speed = velocity[2]*chord*(alpha_at-pitching_around)
+        v_pitching_x = np.sin(-position[2])*pitching_speed  # velocity of the point
+        v_pitching_y = np.cos(position[2])*pitching_speed  # velocity of the point
+
+        v_x = flow[0]-velocity[0]-v_pitching_x
+        v_y = flow[1]-velocity[1]-v_pitching_y
+        return np.arctan(v_y/v_x)
+    
+    @staticmethod
+    def _write_and_get_alpha0(alpha: np.ndarray, Cl: np.ndarray, save_as: str, alpha0_in: tuple=(-10, 5)):
+        ids_subset = np.logical_and(alpha>=alpha0_in[0], alpha<=alpha0_in[1])
+        alpha_subset = alpha[ids_subset]
+        Cl_subset = Cl[ids_subset]
+        find_sign_change = Cl_subset[1:]*Cl_subset[:-1]
+        if np.all(find_sign_change>0):
+            raise ValueError("The given C_n does not have a sign change in the current AoA interval of "
+                            f"{alpha0_in} degree. Linear interpolation can thus not find alpha_0.")
+        idx_greater_0 = np.argmax(Cl_subset > 0)
+        d_Cn = Cl_subset[idx_greater_0]-Cl_subset[idx_greater_0-1]
+        d_alpha = alpha_subset[idx_greater_0]-alpha_subset[idx_greater_0-1]
+        alpha_0 = alpha_subset[idx_greater_0]-Cl_subset[idx_greater_0]*d_alpha/d_Cn
+        with open(save_as, "w") as f:
+            json.dump({"alpha_0": alpha_0}, f)
+        return alpha_0
+
+         
 class StructForce(Rotations):
     """Class implementing differnt ways to calculate the structural stiffness and damping forces depending on the
     state of the system.
@@ -643,21 +806,21 @@ class StructForce(Rotations):
 
     def _linear(
         self, 
-        sim_results: ThreeDOFsAirfoil, 
+        sim_res: ThreeDOFsAirfoil, 
         i: int, 
         **kwargs) -> tuple[np.ndarray, np.ndarray]:  # the kwargs are needed because of the call in simulate()
         """Calculates the structural stiffness and damping forces based on linear theory.
 
-        :param sim_results: Instance of ThreeDOFsAirfoil. This instance has the state of the system as its attributes.
-        :type sim_results: ThreeDOFsAirfoilBase
+        :param sim_res: Instance of ThreeDOFsAirfoil. This instance has the state of the system as its attributes.
+        :type sim_res: ThreeDOFsAirfoilBase
         :param i: index of current time step
         :type i: int
         :return: Damping and stiffness forces
         :rtype: tuple[np.ndarray, np.ndarray]
         """
-        rot = self.passive_3D_planar(sim_results.pos[i, 2])
-        stiff = -rot.T@self.stiffness@rot@sim_results.pos[i, :]
-        damping = -rot.T@self.damp@rot@sim_results.vel[i, :]
+        rot = self.passive_3D_planar(sim_res.pos[i, 2])
+        stiff = -rot.T@self.stiffness@rot@sim_res.pos[i, :]
+        damping = -rot.T@self.damp@rot@sim_res.vel[i, :]
         return damping, stiff
 
  
@@ -694,15 +857,15 @@ class TimeIntegration:
     
     def _eE(
         self,
-        sim_results: ThreeDOFsAirfoil, 
+        sim_res: ThreeDOFsAirfoil, 
         i: int,
         dt: float,
         **kwargs  # the kwargs are needed because of the call in simulate()
     ):
         """Calculates the system's next position, velocity, and acceleration
 
-        :param sim_results: Instance of ThreeDOFsAirfoil. This instance has the state of the system as its attributes.
-        :type sim_results: ThreeDOFsAirfoilBase
+        :param sim_res: Instance of ThreeDOFsAirfoil. This instance has the state of the system as its attributes.
+        :type sim_res: ThreeDOFsAirfoilBase
         :param i: index of current time step
         :type i: int
         :param dt: time step duration
@@ -710,9 +873,9 @@ class TimeIntegration:
         :return: next position, velocity, and acceleration
         :rtype: np.ndarray
         """
-        accel = self.get_accel(sim_results, i)
-        next_vel = sim_results.vel[i, :]+sim_results.accel[i, :]*dt
-        next_pos = sim_results.pos[i, :]+(sim_results.vel[i, :]+next_vel)/2*dt
+        accel = self.get_accel(sim_res, i)
+        next_vel = sim_res.vel[i, :]+sim_res.accel[i, :]*dt
+        next_pos = sim_res.pos[i, :]+(sim_res.vel[i, :]+next_vel)/2*dt
         return next_pos, next_vel, accel
     
     @staticmethod
@@ -725,18 +888,18 @@ class TimeIntegration:
         pass
     
     @staticmethod
-    def get_accel(sim_results: ThreeDOFsAirfoil, i: int) -> np.ndarray:
+    def get_accel(sim_res: ThreeDOFsAirfoil, i: int) -> np.ndarray:
         """Calculates the acceleration for the current time step based on the forces acting on the system.
 
-        :param sim_results: Instance of ThreeDOFsAirfoil. This instance has the state of the system as its attributes.
-        :type sim_results: ThreeDOFsAirfoilBase
+        :param sim_res: Instance of ThreeDOFsAirfoil. This instance has the state of the system as its attributes.
+        :type sim_res: ThreeDOFsAirfoilBase
         :param i: index of current time step
         :type i: int
         :return: acceleration in [x, y, rot z] direction
         :rtype: np.ndarray
         """
-        inertia = np.asarray([sim_results.mass, sim_results.mass, sim_results.mom_inertia])
-        return (sim_results.aero[i, :]+sim_results.damp[i, :]+sim_results.stiff[i, :])/inertia
+        inertia = np.asarray([sim_res.mass, sim_res.mass, sim_res.mom_inertia])
+        return (sim_res.aero[i, :]+sim_res.damp[i, :]+sim_res.stiff[i, :])/inertia
 
 
 
