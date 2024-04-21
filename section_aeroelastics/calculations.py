@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.linalg import solve
 import pandas as pd
-from os.path import join
+from os.path import join, isdir
 from copy import copy
 import json
 from helper_functions import Helper
@@ -113,7 +113,7 @@ class ThreeDOFsAirfoil(SimulationResults):
 
     def __init__(
         self, 
-        file_polar_data: str,
+        dir_polar: str,
         time: np.ndarray, 
         mass: float,
         mom_inertia: float,
@@ -123,7 +123,8 @@ class ThreeDOFsAirfoil(SimulationResults):
         stiffness_tors: float,
         damping_edge: float, 
         damping_flap: float,
-        damping_tors: float
+        damping_tors: float,
+        file_polar: str="polar.dat"
         ) -> None:
         """Initialises instance object.
 
@@ -152,7 +153,8 @@ class ThreeDOFsAirfoil(SimulationResults):
         :type damping_tors: float
         """
         SimulationResults.__init__(self, time)
-        self.file_polar_data = file_polar_data
+        self.dir_polar = dir_polar
+        self.file_polar_data = join(dir_polar, file_polar)
 
         self.mass = mass
         self.mom_inertia = mom_inertia
@@ -205,7 +207,7 @@ class ThreeDOFsAirfoil(SimulationResults):
         self._added_sim_params[self._dfl_filenames["f_aero"]] = add_aero_sim_params 
         for param in add_aero_sim_params:
             self.add_param(param)  # adds instance attribute to self
-        self._aero_force = AeroForce(self.file_polar_data).get_function(scheme)
+        self._aero_force = AeroForce(dir_polar=self.dir_polar, file_polar=self.file_polar_data).get_function(scheme)
 
     def set_struct_calc(self, scheme: str="linear", **kwargs):
         """Sets how the structural forces are calculated in the simulation. If the scheme is dependet on constants,
@@ -383,6 +385,24 @@ class Rotations:
         rot_matrices = self.passive_3D_planar_separate(angles)
         combined = (rot_matrices@array).reshape(n_rot, 5)
         return combined
+    
+    def rotate_2D(self, array: np.ndarray, angles: int|float|np.ndarray) -> np.ndarray:
+        """Rotates the points in "array" in the current coordinate system rotated by the angles given in "angles". 
+        Assuming the coordinates are [x, y], the rotation is around a hypothetical z-axis following the right-hand
+        convention. If "angles" is a single value, all points are rotated by that angle. If "angles" has as many values 
+        as "array" has points, each point is rotated by the angle in "angles" of the same index.
+
+        :param array: (n, 2) numpy.ndarray
+        :type array: np.ndarray
+        :param angles: A single value or an array of values by which the points in "array" are rotated
+        :type angles: np.int|float|np.ndarray
+        :return: rotated points
+        :rtype: np.ndarray
+        """
+        n_rot = angles.size
+        array = array.reshape((n_rot, 2, 1))
+        rot_matrices = self.acitve_2D(angles)
+        return (rot_matrices@array).reshape(n_rot, 2)
         
     @staticmethod
     def _process_rotation(func):
@@ -473,7 +493,7 @@ class AeroForce(Rotations):
     """
     _implemented_schemes = ["steady", "quasi_steady", "BL"]
     
-    def __init__(self, file_polar_data: str) -> None:
+    def __init__(self, dir_polar: str, file_polar: str="polar.dat") -> None:
         """Initialises an instance.
 
         :param file_polar_data: Path to the file from the current working directory containing the polar data.
@@ -481,10 +501,11 @@ class AeroForce(Rotations):
         :type file_polar_data: str
         """
         super().__init__()
-        df_polars = pd.read_csv(file_polar_data, delim_whitespace=True)
-        self.Cd = interpolate.interp1d(df_polars["alpha"], df_polars["Cd"])
-        self.Cl = interpolate.interp1d(df_polars["alpha"], df_polars["Cl"])
-        self.Cm = interpolate.interp1d(df_polars["alpha"], df_polars["Cm"])
+        self.dir_polar = dir_polar
+        self.df_polars = pd.read_csv(join(dir_polar, file_polar), delim_whitespace=True)
+        self.Cd = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["Cd"])
+        self.Cl = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["Cl"])
+        self.Cm = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["Cm"])
 
     def get_function(self, scheme: str) -> callable:
         """Returns a function object that receives a ThreeDOFsAirfoil instance and returns a numpy array with
@@ -501,12 +522,33 @@ class AeroForce(Rotations):
         if scheme not in self._implemented_schemes:
             raise NotImplementedError(f"Scheme '{scheme}' is not implemented. Implemented schemes are "
                                       f"{self._implemented_schemes}.")
+        self._prepare(scheme)
         scheme_map = {
             "steady": self._steady,
             "quasi_steady": self._quasi_steady,
             "BL": self._BL
         }
         return scheme_map[scheme]
+    
+    def _prepare(self, scheme: str):
+        match scheme:
+            case "BL":
+                dir_BL_data = join(self.dir_polar, "Beddoes_Leishman_calculations")
+                if not isdir(dir_BL_data):
+                    helper.create_dir(dir_BL_data)
+                    self._write_separation_points()
+    
+    def _write_separation_points(
+            self,
+            alpha_0: float,
+            alpha: np.ndarray,
+            C_l: np.ndarray,
+            C_d: np.ndarray,
+            save_as: str
+            ):
+        coefficients = np.c_[C_d, C_l]
+        coeff_rot = self.pro(coefficients, alpha)
+        C_
     
     @staticmethod
     def _steady():
@@ -559,7 +601,7 @@ class AeroForce(Rotations):
     @staticmethod
     def _BL():
         raise NotImplementedError
-
+    
 
 class StructForce(Rotations):
     """Class implementing differnt ways to calculate the structural stiffness and damping forces depending on the
