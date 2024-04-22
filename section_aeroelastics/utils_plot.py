@@ -18,7 +18,7 @@ class MosaicHandler:
     
     def __init__(self, mosaic_figure, mosaic_axes):
         self.fig = mosaic_figure
-        self.axs = mosaic_axes
+        self.axs = mosaic_axes if isinstance(mosaic_axes, dict) else {"_": mosaic_axes}
         self._ax_labels = self.axs.keys()
 
     def update(
@@ -86,6 +86,10 @@ class MosaicHandler:
         }
         self._handle_mosaic(**{map_params_to_axs_methods[param]: values for param, values in filled.items()})
         return self.fig, self.axs
+    
+    def save(self, save_as: str):
+        self.fig.savefig(save_as)
+        plt.close(self.fig)
         
     def _handle_mosaic(
             self,
