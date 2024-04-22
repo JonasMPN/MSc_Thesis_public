@@ -1,3 +1,7 @@
 __pycache__/
 simulation/
 test.py
+*.pdf
+*.txt
+*.dat
+*.json
