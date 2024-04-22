@@ -1,9 +1,9 @@
 import matplotlib.pyplot as plt
 
-plt.rcParams.update({"font.size": 6})
+plt.rcParams.update({"font.size": 10})
 
 class DefaultsPlots:
-    """Class to specify plot settings for parameters of this project. Example:
+    """C_lass to specify plot settings for parameters of this project. Example:
     Assume time, lift given.
     >>> dfl = DefaultsPlots()
     >>> fig, ax = plt.subplots()
@@ -33,14 +33,29 @@ class DefaultsPlots:
         "lift",
         "drag",
         "mom",
+
         "edge",
         "flap",
         "tors",
+
         "profile",
         "qc_trail",
+
         "e_kin",
         "e_pot",
-        "e_total"
+        "e_total",
+
+        "f_n_aerohor",
+        "f_n_section",
+        "f_t_aerohor",
+        "f_t_section",
+        "C_l_rec_aerohor",
+        "C_l_rec_section",
+        "C_d_rec_aerohor",
+        "C_d_rec_section",
+
+        "C_l_meas",
+        "C_d_meas"
     ]
 
     _plot_params_copy =  {  # default mapping from additional parameters (keys) that have the same settings as 
@@ -69,7 +84,17 @@ class DefaultsPlots:
         "qc_trail": "gray",
         "e_kin": "blue",
         "e_pot": "green",
-        "e_total": "black"
+        "e_total": "black",
+        "f_n_aerohor": "black",
+        "f_n_section": "black",
+        "f_t_aerohor": "black",
+        "f_t_section": "black",
+        "C_l_rec_aerohor": "black",
+        "C_l_rec_section": "black",
+        "C_d_rec_aerohor": "black",
+        "C_d_rec_section": "black",
+        "C_l_meas": "black",
+        "C_d_meas": "black",
     }
 
     _labels = {  # line label
@@ -86,7 +111,17 @@ class DefaultsPlots:
         "qc_trail": "qc",
         "e_kin": r"$E_\text{kin}$",
         "e_pot": r"$E_\text{pot}$",
-        "e_total": r"$E_\text{total}$"
+        "e_total": r"$E_\text{total}$",
+        "f_n_aerohor": r"aerohor $f_n$", 
+        "f_n_section": r"section $f_n$", 
+        "f_t_aerohor": r"aerohor $f_t$", 
+        "f_t_section": r"section $f_tn$", 
+        "C_l_rec_aerohor": r"aerohor reconstructed $C_l$", 
+        "C_l_rec_section": r"section reconstructed $C_l$", 
+        "C_d_rec_aerohor": r"aerohor reconstructed $C_d$", 
+        "C_d_rec_section": r"section reconstructed $C_d$", 
+        "C_l_meas": r"$meas. \alpha_l$",
+        "C_d_meas": r"$meas. \alpha_d$",
     }
 
     _markers = {  # line marker
@@ -103,7 +138,17 @@ class DefaultsPlots:
         "qc_trail": "x",
         "e_kin": None,
         "e_pot": None,
-        "e_total": None
+        "e_total": None,
+        "f_n_aerohor": None,
+        "f_n_section": None,
+        "f_t_aerohor": None,
+        "f_t_section": None,
+        "C_l_rec_aerohor": None,
+        "C_l_rec_section": None,
+        "C_d_rec_aerohor": None,
+        "C_d_rec_section": None,
+        "C_l_meas": "x",
+        "C_d_meas": "x",
     }
 
     _linestyles = {  # line style
@@ -120,7 +165,17 @@ class DefaultsPlots:
         "qc_trail": "",
         "e_kin": None,
         "e_pot": None,
-        "e_total": None
+        "e_total": None,
+        "f_n_aerohor": None,
+        "f_n_section": None,
+        "f_t_aerohor": None,
+        "f_t_section": None,
+        "C_l_rec_aerohor": None,
+        "C_l_rec_section": None,
+        "C_d_rec_aerohor": None,
+        "C_d_rec_section": None,
+        "C_l_meas": "",
+        "C_d_meas": "",
     }
 
     _linewidths = {  # line width
@@ -141,7 +196,17 @@ class DefaultsPlots:
         "qc_trail": 1,
         "e_kin": None,
         "e_pot": None,
-        "e_total": None
+        "e_total": None,
+        "f_n_aerohor": None,
+        "f_n_section": None,
+        "f_t_aerohor": None,
+        "f_t_section": None,
+        "C_l_rec_aerohor": None,
+        "C_l_rec_section": None,
+        "C_d_rec_aerohor": None,
+        "C_d_rec_section": None,
+        "C_l_meas": 3,
+        "C_d_meas": 3,
     }
 
     _arr_width = {
@@ -205,7 +270,7 @@ class DefaultsPlots:
 
 
 class DefaultStructure:
-    """Class that maps parameters of a certain kind to the filename they should be saved into. The keys must not
+    """C_lass that maps parameters of a certain kind to the filename they should be saved into. The keys must not
     be changed other than new keys added. Change the values if new names are required.
     """
     _dfl_filenames = {
@@ -220,7 +285,7 @@ class DefaultStructure:
 
 
 class DefaultsSimulation(DefaultStructure):
-    """Class that is used for class SimulationResults.
+    """C_lass that is used for class SimulationResults.
     """
     _dfl_params = [
         # parameters that are automatically created as property of SimulationResults
