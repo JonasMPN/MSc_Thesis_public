@@ -3,6 +3,7 @@ from scipy.linalg import solve
 import pandas as pd
 from os.path import join, isdir
 from copy import copy
+from typing import Callable
 import json
 from helper_functions import Helper
 from defaults import DefaultsSimulation
@@ -91,7 +92,10 @@ class SimulationResults(DefaultsSimulation):
             for param in params:
                 if param in split.keys():
                     for i, split_name in enumerate(split[param]):
-                        df[param+"_"+split_name] = vars(self)[param][:, i]
+                        try:
+                            df[param+"_"+split_name] = vars(self)[param][:, i]
+                        except ValueError:
+                            raise ValueError(f"The above ValueError was caused for parameter {param}.")
                 else:
                     df[param] = vars(self)[param]
             df.to_csv(join(root, file), index=False)
@@ -129,7 +133,7 @@ class ThreeDOFsAirfoil(SimulationResults):
         """Initialises instance object.
 
         :param file_polar_data: Path to the file containing polar data for the airfoil. The file must contain the
-        columns ["alpha", "Cd", "Cl", "Cm"].
+        columns ["alpha", "C_d", "C_l", "C_m"].
         :type file_polar_data: str
         :param time: Numpy array of the time series of the time used for the simulation.
         :type time: np.ndarray
@@ -172,6 +176,11 @@ class ThreeDOFsAirfoil(SimulationResults):
         self._aero_force = None
         self._struct_force = None
         self._time_integration = None
+
+        self._init_aero_force = None
+        self._init_struct_force = None
+        self._init_time_integration = None
+
         self._aero_scheme_settings = None
         self._struct_scheme_settings = None
         self._time_integration_scheme_settings = None
@@ -199,20 +208,23 @@ class ThreeDOFsAirfoil(SimulationResults):
                 add_aero_sim_params = ["alpha_qs"]
             case "BL":
                 must_haves = ["A1", "A2", "b1", "b2"]
-                can_haves = ["a", "K_alpha", "Tp", "Tbl", "Cn_vortex_detach", "tau_vortex_pure_decay", "Tv",
+                can_haves = ["a", "K_alpha", "T_p", "T_bl", "Cn_vortex_detach", "tau_vortex_pure_decay", "T_v",
                              "pitching_around", "alpha_at"]
                 self._check_scheme_settings("BL", "set_aero_calc", must_haves, params_given)
                 self._aero_scheme_settings = {param: value for param, value in kwargs.items() if param in 
                                               must_haves+can_haves}
-                add_aero_sim_params = ["s", "alpha_qs", "X_lag", "Y_lag", "alpha_eff", "CnC", "d_alpha_qs_dt", "Dnc", 
-                                       "CnI", "CnPot", "CtPot", "Dp", "Cn_sEq", "alpha_sEq", "f_t_Dp", "f_n_Dp", 
-                                       "Dbl_t", "Dbl_n", "f_t", "f_n", "Cnf", "Ctf", "tau_vortex", "CnVinstant", "CnV"]
+                add_aero_sim_params = ["s", "alpha_qs", "X_lag", "Y_lag", "alpha_eff", "C_nc", "d_alpha_qs_dt", "D_i", 
+                                       "C_ni", "C_npot", "C_tpot", "D_p", "C_nsEq", "alpha_sEq", "f_t_Dp", "f_n_Dp", 
+                                       "D_bl_t", "D_bl_n", "f_t", "f_n", "C_nf", "C_tf", "tau_vortex", "C_nv_instant",
+                                       "C_nv"]
         # add parameters the AeroForce method needs to calculate the aero forces or that are parameters the method
         # calculates that are interesting to save.
         self._added_sim_params[self._dfl_filenames["f_aero"]] = add_aero_sim_params
         for param in add_aero_sim_params:
             self.add_param(param)  # adds instance attribute to self
-        self._aero_force = AeroForce(dir_polar=self.dir_polar, file_polar=self.file_polar_data).get_function(scheme)
+        AF = AeroForce(dir_polar=self.dir_polar, file_polar=self.file_polar_data)
+        self._aero_force = AF.get_function(scheme)
+        self._init_aero_force = AF.get_init_function(scheme)
 
     def set_struct_calc(self, scheme: str="linear", **kwargs):
         """Sets how the structural forces are calculated in the simulation. If the scheme is dependet on constants,
@@ -321,7 +333,12 @@ class ThreeDOFsAirfoil(SimulationResults):
         :type use_default: bool, optional
         """
         helper.create_dir(root)
-        files = files if files is not None else {}
+        files = files if files is not None else {filename: [] for filename in self._dfl_files.keys()}
+        if use_default:
+            for filename, params in self._added_sim_params.items():
+                if params == None:
+                    continue
+                files[filename] = set(files[filename]+params)
         self._save(root, files|self._added_sim_params, split, use_default)
         section_data = {
             "mass": self.mass,
@@ -521,22 +538,22 @@ class AeroForce(Rotations):
         """Initialises an instance.
 
         :param file_polar_data: Path to the file from the current working directory containing the polar data.
-        The file must contain the columns ["alpha", "Cd", "Cl", "Cm"].
+        The file must contain the columns ["alpha", "C_d", "C_l", "C_m"].
         :type file_polar_data: str
         """
         super().__init__()
         self.dir_polar = dir_polar
         self.df_polars = pd.read_csv(join(dir_polar, file_polar), delim_whitespace=True)
-        self.Cd = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["Cd"])
-        self.Cl = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["Cl"])
-        self.Cm = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["Cm"])
+        self.C_d = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["C_d"])
+        self.C_l = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["C_l"])
+        self.C_m = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["C_m"])
 
         self._alpha_0 = None
         self._Cl_slope = 2*np.pi
         self._f_n = None
         self._f_t = None
 
-    def get_function(self, scheme: str) -> callable:
+    def get_function(self, scheme: str) -> Callable:
         """Returns a function object that receives a ThreeDOFsAirfoil instance and returns a numpy array with
         [aero_force_x, aero_force_y, aero_force_moment]. "scheme" sets which kind of calculation for the aerodynamic
         forces is used. Implemented schemes are defined in _implemented_schemes.
@@ -546,7 +563,7 @@ class AeroForce(Rotations):
         :type scheme: str
         :raises NotImplementedError: If a scheme is wanted that is not implemented.
         :return: Function calculating the aerodynamic forces.
-        :rtype: callable
+        :rtype: Callable
         """
         if scheme not in self._implemented_schemes:
             raise NotImplementedError(f"Scheme '{scheme}' is not implemented. Implemented schemes are "
@@ -559,21 +576,32 @@ class AeroForce(Rotations):
         }
         return scheme_map[scheme]
     
+    def get_init_function(self, scheme: str) -> Callable:
+        if scheme not in self._implemented_schemes:
+            raise NotImplementedError(f"Scheme '{scheme}' is not implemented. Implemented schemes are "
+                                      f"{self._implemented_schemes}.")
+        scheme_map = {
+            "steady": self._init_steady,
+            "quasi_steady": self._init_quasi_steady,
+            "BL": self._init_BL
+        }
+        return scheme_map[scheme]
+    
     def _prepare(self, scheme: str):
         match scheme:
             case "BL":
-                dir_BL_data = join(self.dir_polar, "Beddoes_Leishman_calculations")
+                dir_BL_data = join(self.dir_polar, "Beddoes_Leishman_preparation")
                 f_alpha_0 = join(dir_BL_data, "alpha_0.json")
                 f_sep = join(dir_BL_data, "sep_points.dat")
                 if not isdir(dir_BL_data):
                     helper.create_dir(dir_BL_data)
                     self._alpha_0 = self._write_and_get_alpha0(alpha=self.df_polars["alpha"].to_numpy(),
-                                                               Cl=self.df_polars["Cl"].to_numpy(),
+                                                               C_l=self.df_polars["C_l"].to_numpy(),
                                                                save_as=f_alpha_0)
                     df_sep = self._write_and_get_separation_points(alpha_0=self._alpha_0, save_as=f_sep)
                 else:
                     with open(f_alpha_0, "r") as f:
-                        self._alpha_0 = json.load(f)
+                        self._alpha_0 = np.deg2rad(json.load(f)["alpha_0"])
                     df_sep = pd.read_csv(f_sep)
                 self._f_n = interpolate.interp1d(df_sep["alpha"], df_sep["f_n"])
                 self._f_t = interpolate.interp1d(df_sep["alpha"], df_sep["f_t"])
@@ -586,7 +614,7 @@ class AeroForce(Rotations):
             ) -> pd.DataFrame:
         alpha_given = self.df_polars["alpha"]
         alpha_interp = np.linspace(alpha_given.min(), alpha_given.max(), res)
-        coefficients = np.c_[self.Cd(alpha_interp), self.Cl(alpha_interp)]
+        coefficients = np.c_[self.C_d(alpha_interp), self.C_l(alpha_interp)]
         
         alpha_given = np.deg2rad(alpha_given)
         alpha_interp = np.deg2rad(alpha_interp)
@@ -595,11 +623,15 @@ class AeroForce(Rotations):
         coeff_rot = self.project_2D(coefficients, -alpha_interp)
         C_t, C_n = -coeff_rot[:, 0], coeff_rot[:, 1]
         
-        f_t = C_t/(self._lift_slope*np.sin(alpha_interp-alpha_0)**2)
+        f_t = C_t/(self._Cl_slope*np.sin(alpha_interp-alpha_0)**2)
         f_t = f_t**2*np.sign(f_t)
+        # f_t[f_t>1] = 1
+        # f_t[f_t< -1] = -1
 
-        f_n = 2*np.sqrt(C_n/(self._lift_slope*np.sin(alpha_interp-alpha_0)))-1
+        f_n = 2*np.sqrt(C_n/(self._Cl_slope*np.sin(alpha_interp-alpha_0)))-1
         f_n = f_n**2*np.sign(f_n)
+        # f_n[f_n>1] = 1
+        # f_n[f_n< -1] = -1
 
         df = pd.DataFrame({"alpha": np.rad2deg(alpha_interp), "f_t": f_t, "f_n": f_n})
         df.to_csv(save_as, index=None)
@@ -609,6 +641,10 @@ class AeroForce(Rotations):
     def _steady():
         raise NotImplementedError
 
+    @staticmethod
+    def _init_steady():
+        raise NotImplementedError
+    
     def _quasi_steady(
             self,
             sim_res: ThreeDOFsAirfoil, 
@@ -646,18 +682,22 @@ class AeroForce(Rotations):
 
         dynamic_pressure = sim_res.density/2*rel_speed
         alpha_qs_deg = np.rad2deg(sim_res.alpha_qs[i])
-        coefficients = np.asarray([self.Cd(alpha_qs_deg), self.Cl(alpha_qs_deg), -self.Cm(alpha_qs_deg)])
+        coefficients = np.asarray([self.C_d(alpha_qs_deg), self.C_l(alpha_qs_deg), -self.C_m(alpha_qs_deg)])
         return dynamic_pressure*sim_res.chord*rot@coefficients
     
+    @staticmethod
+    def _init_quasi_steady():
+        raise NotImplemented
+
     def _BL(self, 
             sim_res: ThreeDOFsAirfoil,
             i: int,
             A1: float, A2: float, b1: float, b2: float,
-            a: float=343, K_alpha: float=0.7,
-            Tp: float=1.5, Tbl: float=5,
-            Cn_vortex_detach: float=1.0093, tau_vortex_pure_decay: float=11, Tv: float=5,
-            pitching_around: float=0.25, alpha_at: float=0.75,):
-        i = i if i != 0 else 1
+            a: float=343, K_alpha: float=0.75,
+            T_p: float=1.5, T_bl: float=5,
+            Cn_vortex_detach: float=1.0093, tau_vortex_pure_decay: float=11, T_v: float=5,
+            pitching_around: float=0.25, alpha_at: float=0.75):
+        sim_res.alpha_steady[i] = -sim_res.pos[i, 2]+sim_res.inflow_angle[i]
 
         # --------- MODULE unsteady attached flow
         flow_vel = np.sqrt(sim_res.inflow[i, :]@sim_res.inflow[i, :].T)
@@ -667,69 +707,82 @@ class AeroForce(Rotations):
                                                       sim_res.inflow[i, :], sim_res.chord, pitching_around, 
                                                       alpha_at)
         sim_res.alpha_qs[i] = -sim_res.pos[i, 2]+qs_flow_angle
-        d_alpha_qs = sim_res.alpha_qs[i]-sim_res.alpha_qs[i-1]
-        sim_res.X_lag[i] = sim_res.X_lag[i-1]*np.exp(-b1*ds)+d_alpha_qs*A1*np.exp(-b1*ds/2)
-        sim_res.Y_lag[i] = sim_res.Y_lag[i-1]*np.exp(-b2*ds)+d_alpha_qs*A2*np.exp(-b1*ds/2)
+        d_alpha_qs = sim_res.alpha_qs[i]-sim_res.alpha_qs[i-1] if i != 0 else 0
+        sim_res.X_lag[i] = sim_res.X_lag[i-1]*np.exp(-b1*ds)+d_alpha_qs*A1*np.exp(-0.5*b1*ds)
+        sim_res.Y_lag[i] = sim_res.Y_lag[i-1]*np.exp(-b2*ds)+d_alpha_qs*A2*np.exp(-0.5*b2*ds)
         sim_res.alpha_eff[i] = sim_res.alpha_qs[i]-sim_res.X_lag[i]-sim_res.Y_lag[i]
-        
-        sim_res.CnC[i] = self._Cl_slope*np.sin(sim_res.alpha_eff[i]-self._alpha_0)  #todo check that this sin() is also 
-        #todo correct for high aoa in potential flow
+        sim_res.C_nc[i] = self._Cl_slope*np.sin(sim_res.alpha_eff[i]-self._alpha_0)  #todo check that this sin() is
+        #todo also correct for high aoa in potential flow
 
         # impulsive (non-circulatory) normal force coefficient
-        sim_res.d_alpha_qs_dt[i] = d_alpha_qs/sim_res.dt[i]
-        tmp = -a/(K_alpha*sim_res.chord)
+        sim_res.d_alpha_qs_dt[i] = d_alpha_qs/sim_res.dt[i-1]
+        tmp = -a*sim_res.dt[i]/(K_alpha*sim_res.chord)
         tmp_2 = sim_res.d_alpha_qs_dt[i]-sim_res.d_alpha_qs_dt[i-1]
-        sim_res.Dnc[i] = sim_res.Dnc[i-1]*np.exp(tmp*sim_res.dt[i])+tmp_2*np.exp(0.5*tmp*sim_res.dt[i])
-        sim_res.CnI[i] = 4*K_alpha*sim_res.chord/flow_vel*(sim_res.d_alpha_qs_dt[i]-sim_res.Dnc[i])
+        sim_res.D_i[i] = sim_res.D_i[i-1]*np.exp(tmp)+tmp_2*np.exp(0.5*tmp)
+        sim_res.C_ni[i] = 4*K_alpha*sim_res.chord/flow_vel*(sim_res.d_alpha_qs_dt[i]-sim_res.D_i[i])
 
         # add circulatory and impulsive
-        sim_res.CnPot[i] = sim_res.CnC[i]+sim_res.CnI[i]
-        sim_res.CtPot[i] = sim_res.CnPot[i]*np.tan(sim_res.alpha_eff[i])
+        sim_res.C_npot[i] = sim_res.C_nc[i]+sim_res.C_ni[i]
+        sim_res.C_tpot[i] = sim_res.C_npot[i]*np.tan(sim_res.alpha_eff[i])
 
         # --------- MODULE nonlinear trailing edge separation
         #todo why does the impulsive part of the potential flow solution go into the lag term?
-        sim_res.Dp[i] = sim_res.Dp[i-1]*np.exp(-ds/Tp)+(sim_res.CnPot[i]-sim_res.CnPot[i-1])*np.exp(-0.5*ds/Tp)
-        sim_res.Cn_sEq[i] = sim_res.CnPot[i]-sim_res.Dp[i]
-        sim_res.alpha_sEq[i] = sim_res.Cn_sEq[i]/self._Cl_slope+self._alpha_0  #todo check alpha_0 rad or deg
-
+        sim_res.D_p[i] = sim_res.D_p[i-1]*np.exp(-ds/T_p)+(sim_res.C_npot[i]-sim_res.C_npot[i-1])*np.exp(-0.5*ds/T_p)
+        sim_res.C_nsEq[i] = sim_res.C_npot[i]-sim_res.D_p[i]
+        sim_res.alpha_sEq[i] = sim_res.C_nsEq[i]/self._Cl_slope+self._alpha_0  #todo check alpha_0 rad or deg
+        
         sim_res.f_t_Dp[i] = self._f_t(np.rad2deg(sim_res.alpha_sEq[i]))
         sim_res.f_n_Dp[i] = self._f_n(np.rad2deg(sim_res.alpha_sEq[i]))
 
-        sim_res.Dbl_t[i] = sim_res.Dbl_t[i-1]*np.exp(-ds/Tbl)+\
-            (sim_res.f_t_Dp[i]-sim_res.f_t_Dp[i-1])*np.exp(-0.5*ds/Tbl)
-        sim_res.Dbl_n[i] = sim_res.Dbl_n[i-1]*np.exp(-ds/Tbl)+\
-            (sim_res.f_n_Dp[i]-sim_res.f_n_Dp[i-1])*np.exp(-0.5*ds/Tbl)
+        sim_res.D_bl_t[i] = sim_res.D_bl_t[i-1]*np.exp(-ds/T_bl)+\
+            (sim_res.f_t_Dp[i]-sim_res.f_t_Dp[i-1])*np.exp(-0.5*ds/T_bl)
+        sim_res.D_bl_n[i] = sim_res.D_bl_n[i-1]*np.exp(-ds/T_bl)+\
+            (sim_res.f_n_Dp[i]-sim_res.f_n_Dp[i-1])*np.exp(-0.5*ds/T_bl)
         
-        sim_res.f_t[i] = sim_res.f_t_Dp[i]-sim_res.Dbl_t[i]
-        sim_res.f_n[i] = sim_res.f_n_Dp[i]-sim_res.Dbl_n[i]
+        sim_res.f_t[i] = sim_res.f_t_Dp[i]-sim_res.D_bl_t[i]
+        sim_res.f_n[i] = sim_res.f_n_Dp[i]-sim_res.D_bl_n[i]
 
-        sim_res.Cnf[i] = sim_res.CnC[i]*((1+np.sign(sim_res.f_t[i])*np.sqrt(sim_res.f_t[i]))/2)**2
-        sim_res.Ctf[i] = self._Cl_slope*np.sin(sim_res.alpha_eff[i]-self._alpha_0)**2*\
-            np.sign(sim_res.f_n[i])*np.sqrt(sim_res.f_n[i])
+        sim_res.C_nf[i] = sim_res.C_nc[i]*((1+np.sign(sim_res.f_n[i])*np.sqrt(np.abs(sim_res.f_n[i])))/2)**2+sim_res.C_ni[i]
+        sim_res.C_tf[i] = self._Cl_slope*np.sin(sim_res.alpha_eff[i]-self._alpha_0)**2*\
+            np.sign(sim_res.f_t[i])*np.sqrt(np.abs(sim_res.f_t[i]))
         
         # --------- MODULE leading-edge vortex position
-        if sim_res.Cn_sEq[i] >= Cn_vortex_detach or d_alpha_qs < 0:
+        if sim_res.C_nsEq[i] >= Cn_vortex_detach or d_alpha_qs < 0:
             sim_res.tau_vortex[i] = sim_res.tau_vortex[i-1]+0.45*ds
         else:
             sim_res.tau_vortex[i] = 0
 
         # --------- MODULE leading-edge vortex lift
-        sim_res.CnVinstant[i] = sim_res.CnC[i]*(1-((1+np.sign(sim_res.f_t[i])*np.sqrt(sim_res.f_t[i]))/2)**2)
-        sim_res.CnV[i] = sim_res.CnV[i-1]*np.exp(-ds/Tv)
+        sim_res.C_nv_instant[i] = sim_res.C_nc[i]*(1-((1+np.sign(sim_res.f_n[i])*np.sqrt(sim_res.f_n[i]))/2)**2)
+        sim_res.C_nv[i] = sim_res.C_nv[i-1]*np.exp(-ds/T_v)
         if sim_res.tau_vortex[i] < tau_vortex_pure_decay:
-            sim_res.CnV[i] += (sim_res.CnVinstant[i]-sim_res.CnVinstant[i-1])*np.exp(-0.5*ds/Tv)
+            sim_res.C_nv[i] += (sim_res.C_nv_instant[i]-sim_res.C_nv_instant[i-1])*np.exp(-0.5*ds/T_v)
         
 
         # --------- Combining everything
-        # -Ct because Ct and Cd are defined in opposite direction
-        # todo update Cm!!!
-        coefficients = np.asarray([-sim_res.Ctf[i], sim_res.Cnf[i]+sim_res.CnV[i], 1])
-        rot = self.passive_3D_planar(sim_res.pos[i, 2])
+        # C_t and C_d point in opposite directions!
+        # todo update C_m!!!
+        coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], 1])
+        # rot = self.passive_3D_planar(sim_res.pos[i, 2])  # for [f_x, f_y, mom]
+        rot = self.passive_3D_planar(sim_res.pos[i, 2]+sim_res.inflow_angle[i])  # for [-C_d, C_l, C_m]
         rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
                             (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
         dynamic_pressure = sim_res.density/2*rel_speed
-        return dynamic_pressure*sim_res.chord*rot@coefficients
-        
+        # return dynamic_pressure*sim_res.chord*rot@coefficients  # for [-f_x, f_y, mom]
+        return rot@coefficients  # for [-C_d, C_l, C_m]
+    
+    def _init_BL(
+            self,
+            sim_res: ThreeDOFsAirfoil,
+            init_pos: np.ndarray,
+            init_vel: np.ndarray, 
+            init_inflow: np.ndarray,
+            **kwargs
+            ):
+        sim_res.alpha_steady[0] = -init_pos[2]+np.arctan(init_inflow[1]/init_inflow[0])
+        qs_flow_angle = self._quasi_steady_flow_angle(init_vel, init_pos, init_inflow, sim_res.chord,
+                                                      kwargs["pitching_around"], kwargs["alpha_at"])
+        sim_res.alpha_qs[0] = -init_pos[2]+qs_flow_angle
     
     @staticmethod
     def _quasi_steady_flow_angle(
@@ -749,10 +802,10 @@ class AeroForce(Rotations):
         return np.arctan(v_y/v_x)
     
     @staticmethod
-    def _write_and_get_alpha0(alpha: np.ndarray, Cl: np.ndarray, save_as: str, alpha0_in: tuple=(-10, 5)):
+    def _write_and_get_alpha0(alpha: np.ndarray, C_l: np.ndarray, save_as: str, alpha0_in: tuple=(-10, 5)):
         ids_subset = np.logical_and(alpha>=alpha0_in[0], alpha<=alpha0_in[1])
         alpha_subset = alpha[ids_subset]
-        Cl_subset = Cl[ids_subset]
+        Cl_subset = C_l[ids_subset]
         find_sign_change = Cl_subset[1:]*Cl_subset[:-1]
         if np.all(find_sign_change>0):
             raise ValueError("The given C_n does not have a sign change in the current AoA interval of "
@@ -784,7 +837,7 @@ class StructForce(Rotations):
         self.stiffness = np.diag([stiffness_edge, stiffness_flap, stiffness_tors])
         self.damp = np.diag([damping_edge, damping_flap, damping_tors])
 
-    def get_function(self, scheme: str) -> callable:
+    def get_function(self, scheme: str) -> Callable:
         """ Returns a function object that receives a ThreeDOFsAirfoil instance and returns a tuple with two numpy
         arrays of the forces ([damping_x, damping_y, damping_torsion], [stiffness_x, stiffness_y, 
         stiffness_torsion]). "scheme" sets which kind of calculation for the structural forces is used. Implemented 
@@ -794,7 +847,7 @@ class StructForce(Rotations):
         :type scheme: str
         :raises NotImplementedError: If a scheme is wanted that is not implemented.
         :return: Function calculating the structural forces.
-        :rtype: callable
+        :rtype: Callable
         """
         if scheme not in self._implemented_schemes:
             raise NotImplementedError(f"Scheme '{scheme}' is not implemented. Implemented schemes are "
@@ -834,7 +887,7 @@ class TimeIntegration:
     # HHT_alpha: algorithm as given in #todo add paper
     # RK4: Runge-Kutta 4th order    
 
-    def get_time_step_function(self, scheme: str) -> callable:
+    def get_time_step_function(self, scheme: str) -> Callable:
         """ Returns a function object that receives a ThreeDOFsAirfoil instance and returns a numpy array with
         [position, velocity, acceleration] of the system at the next time step. "scheme" sets which kind of calculation for the next state used. Implemented schemes are defined in _implemented_schemes.
 
@@ -843,7 +896,7 @@ class TimeIntegration:
         :type scheme: str
         :raises NotImplementedError: If a scheme is wanted that is not implemented.
         :return: Function calculating the next [position, velocity, acceleration]
-        :rtype: callable
+        :rtype: Callable
         """
         if scheme not in self._implemented_schemes:
             raise NotImplementedError(f"Scheme '{scheme}' is not implemented. Implemented schemes are "
