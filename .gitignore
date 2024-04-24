@@ -3,6 +3,11 @@ simulation/
 test.py
 *.pdf
 *.txt
+
 *.dat
+!polars.dat
+!info.dat
+!unsteady*.dat
+
 *.json
 *.mp4
