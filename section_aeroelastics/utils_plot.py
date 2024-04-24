@@ -18,7 +18,7 @@ class MosaicHandler:
     
     def __init__(self, mosaic_figure, mosaic_axes):
         self.fig = mosaic_figure
-        self.axs = mosaic_axes
+        self.axs = mosaic_axes if isinstance(mosaic_axes, dict) else {"_": mosaic_axes}
         self._ax_labels = self.axs.keys()
 
     def update(
@@ -86,6 +86,10 @@ class MosaicHandler:
         }
         self._handle_mosaic(**{map_params_to_axs_methods[param]: values for param, values in filled.items()})
         return self.fig, self.axs
+    
+    def save(self, save_as: str):
+        self.fig.savefig(save_as)
+        plt.close(self.fig)
         
     def _handle_mosaic(
             self,
@@ -366,6 +370,40 @@ class PlotPreparation:
         return *handler.update(x_labels=x_labels, y_labels=y_labels, aspect=aspect), handler
     
     @staticmethod
+    def _prepare_BL_plot(
+            equal_y: tuple[str]=None
+            ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]:
+        """Prepares the pyplot figure and axes and a MosaicHandler instance for a energy plot.
+
+        :param equal_y: Sets the axes that will have the same y limits, defaults to None
+        :type equal_y: tuple[str], optional
+        :return: A pyplot figure, axes and an instance of MosaicHandler for the same figure and axes
+        :rtype: tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]
+        """
+        fig, axs = plt.subplot_mosaic([["profile", "aoa", "C_combined"],
+                                       ["profile", "C_n", "C_t"]], figsize=(10, 5), tight_layout=True,
+                                      dpi=300)
+        handler = MosaicHandler(fig, axs)
+        x_labels = {
+            "profile": "normal (m)",
+            "total": "t (s)",
+            "work": "t (s)",
+            "kinetic": "t (s)",
+            "potential": "t (s)",
+        }
+        y_labels = {
+            "profile": "tangential (m)",
+            "total": "energy (Nm)",
+            "work": "work (Nm)",
+            "kinetic": "kinetic energy (Nm)",
+            "potential": "potential energy (Nm)",
+        }
+        aspect = {
+            "profile": "equal"
+        }
+        return *handler.update(x_labels=x_labels, y_labels=y_labels, aspect=aspect), handler
+    
+    @staticmethod
     def _get_aoas(df_aero: pd.DataFrame) -> tuple[list[str], pd.DataFrame]:
         """Extracts all columns out of the dataframe "df_aero" that are angles of attack. It does that 
         by looking for columns that have "alpha" in them. Then returns the name of the columns and a 
@@ -378,7 +416,7 @@ class PlotPreparation:
         to degree conversion is applied to the new dataframe.
         :rtype: tuple[list[str], pd.DataFrame]
         """
-        aoas = [column for column in df_aero if "alpha" in column]
+        aoas = [column for column in df_aero.columns if "alpha" in column and column != "d_alpha_qs_dt"]
         aoas.pop(aoas.index("alpha_steady"))
         aoas = ["alpha_steady"] + aoas  # plot "alpha_steady" first
         dfs_aoas = df_aero[aoas]

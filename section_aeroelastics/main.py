@@ -8,13 +8,13 @@ do = {
     "simulate": True,  # run a simulation
     "post_calc": True,  # peform post calculations
     "plot_results": True,  # plot results,
-    "animate_results": True
+    "animate_results": False
 }
 
 root = "data/NACA_643_618"  # set which airfoil polars to use. Simulatenously defines to root for the simulation data
+case_dir = "HHT_alpha"
 
 if do["simulate"]:
-    file_polar_data = join(root, "polars.dat")  
     density = 1  # density of the fluid
     struct_def = {  # definition of structural parameters
         "chord": 1,
@@ -28,7 +28,7 @@ if do["simulate"]:
         "stiffness_tors": 1,
     }
     t = np.linspace(0, 40, 1300)  # set the time array for the simulation
-    NACA_643_618 = ThreeDOFsAirfoil(file_polar_data, t, **struct_def)
+    NACA_643_618 = ThreeDOFsAirfoil(root, t, **struct_def)
 
     # the following lines define the inflow at each time step
     inflow_speed = 1*np.ones((t.size, 1)) 
@@ -42,14 +42,17 @@ if do["simulate"]:
     init_pos = np.zeros(3)  # initial conditions for the position in [x, y, rotation in rad]
     init_vel = np.zeros(3)  # initial conditions for the velocity in [x, y, rotation in rad/s]
 
-    NACA_643_618.set_aero_calc()  # set the calculation scheme for the aerodynamic forces
+    # set the calculation scheme for the aerodynamic forces
+    NACA_643_618.set_aero_calc()
+    # NACA_643_618.set_aero_calc("BL", A1=0.3, A2=0.7, b1=0.14, b2=0.53, pitching_around=0.25, alpha_at=0.75)
     NACA_643_618.set_struct_calc()  # set the calculation scheme for the structural damping and stiffness forces
-    NACA_643_618.set_time_integration()  # set the time integration scheme
+    # NACA_643_618.set_time_integration()  # set the time integration scheme
+    NACA_643_618.set_time_integration("HHT-alpha", alpha=0.1, dt=t[1])  # set the time integration scheme
     NACA_643_618.simuluate(inflow, density, init_pos, init_vel)  # perform simulation
-    NACA_643_618.save(join(root, "simulation"))  # save simulation results
+    NACA_643_618.save(join(root, "simulation", case_dir))  # save simulation results
 
 if do["post_calc"]:
-    post_calc = PostCaluculations(dir_sim_res=join(root, "simulation"), alpha_lift="alpha_qs")
+    post_calc = PostCaluculations(dir_sim_res=join(root, "simulation", case_dir), alpha_lift="alpha_qs")
     post_calc.project_data()  # projects the simulation's x-y-rot_z data into different coordinate systems such as
     # edgewise-flapwise-rot_z or drag-lift_rot_z.
     post_calc.work()  # calculate and save the work done by the aerodynamic and structural damping forces
@@ -58,7 +61,7 @@ if do["post_calc"]:
 
 if do["plot_results"]:
     file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
-    dir_sim = join(root, "simulation")  # define path to the root of the simulation results
+    dir_sim = join(root, "simulation", case_dir)  # define path to the root of the simulation results
     dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
     plotter = Plotter(file_profile, dir_sim, dir_plots) 
     plotter.force()  # plot various forces of the simulation
@@ -66,7 +69,7 @@ if do["plot_results"]:
 
 if do["animate_results"]:
     file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
-    dir_sim = join(root, "simulation")  # define path to the root of the simulation results
+    dir_sim = join(root, "simulation", case_dir)  # define path to the root of the simulation results
     dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
     animator = Animator(file_profile, dir_sim, dir_plots) 
     animator.force(angle_lift="alpha_qs", arrow_scale_forces=0.5, arrow_scale_moment=.1, 

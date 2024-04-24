@@ -69,7 +69,6 @@ class Plotter(DefaultStructure, DefaultsPlots, PlotPreparation):
         
         # grab all angles of attack from the data
         aoas, df_aoas = self._get_aoas(self.df_f_aero)
-
         # prepare dictionary of dataframes to plot
         dfs = {"aoa": df_aoas, "aero": self.df_f_aero, "damp": self.df_f_structural, 
                "stiff": self.df_f_structural}
@@ -97,6 +96,43 @@ class Plotter(DefaultStructure, DefaultsPlots, PlotPreparation):
         :rtype: None
         """
         fig, axs, handler = self._prepare_energy_plot(equal_y)
+        
+        # get final position of the profile. Displace it such that the qc is at (0, 0) at t=0.
+        pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
+        rot = self._rot.passive_2D(pos[-1, 2])
+        rot_profile = rot@(self.profile[:, :2]-np.asarray([self.section_data["chord"]/4, 0])).T
+        rot_profile += np.asarray([[pos[-1, 0]], [pos[-1, 1]]])
+        axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plot_settings["profile"])
+        axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plot_settings["qc_trail"])
+        
+        df_total = pd.concat([self.df_e_kin.sum(axis=1), self.df_e_pot.sum(axis=1)], keys=["e_kin", "e_pot"], axis=1)
+        df_total["e_total"] = df_total.sum(axis=1)
+        dfs = {"total": df_total, "work": self.df_work, "kinetic": self.df_e_kin, 
+               "potential": self.df_e_pot}
+        
+        plot = {
+            "total": ["e_total", "e_kin", "e_pot"],
+            "work": ["aero_drag", "aero_lift", "aero_mom", "damp_edge", "damp_flap", "damp_tors"],
+            "kinetic": ["edge", "flap", "tors"],
+            "potential": ["edge", "flap", "tors"]
+        }        
+        def param_name(param: str):
+            return param if "damp" not in param and "stiff" not in param else param[param.rfind("_")+1:]
+        axs = self._plot_to_mosaic(axs, plot, dfs, param_name)
+        handler.update(legend=True)
+        fig.savefig(join(self.dir_plots, "energy.pdf"))
+    
+    def Beddoes_Leishman(self, equal_y: tuple[str]=None, trailing_every: int=2):
+        """Plots the history of the airfoil movement and different BL parameters.
+
+        :param equal_y: Whether the force axes should have equal y scaling, defaults to None
+        :type equal_y: tuple[str], optional
+        :param trailing_every: How many quarter-chord points to skip while plotting, defaults to 2
+        :type trailing_every: int, optional
+        :return: None
+        :rtype: None
+        """
+        fig, axs, handler = self._prepare_BL_plot(equal_y)
         
         # get final position of the profile. Displace it such that the qc is at (0, 0) at t=0.
         pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()

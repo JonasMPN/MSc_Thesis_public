@@ -1,5 +1,13 @@
 __pycache__/
 simulation/
 test.py
-*.json
+*.pdf
+*.txt
+
 *.dat
+!polars.dat
+!info.dat
+!unsteady*.dat
+
+*.json
+*.mp4
