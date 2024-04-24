@@ -207,9 +207,8 @@ class ThreeDOFsAirfoil(SimulationResults):
                 self._aero_scheme_settings = {param: value for param, value in kwargs.items() if param in can_haves}
                 add_aero_sim_params = ["alpha_qs"]
             case "BL":
-                must_haves = ["A1", "A2", "b1", "b2"]
-                can_haves = ["a", "K_alpha", "T_p", "T_bl", "Cn_vortex_detach", "tau_vortex_pure_decay", "T_v",
-                             "pitching_around", "alpha_at"]
+                must_haves = ["A1", "A2", "b1", "b2", "pitching_around", "alpha_at"]
+                can_haves = ["a", "K_alpha", "T_p", "T_bl", "Cn_vortex_detach", "tau_vortex_pure_decay", "T_v"]
                 self._check_scheme_settings("BL", "set_aero_calc", must_haves, params_given)
                 self._aero_scheme_settings = {param: value for param, value in kwargs.items() if param in 
                                               must_haves+can_haves}
@@ -256,15 +255,20 @@ class ThreeDOFsAirfoil(SimulationResults):
         :type scheme: str, optional
         :raises NotImplementedError: If a scheme is wanted that is not implemented.
         """
+        params_given = kwargs.keys()
         match scheme:
             case "eE":
                 self._time_integration_scheme_settings = {"dt": self.time[1]}
             case "RK4":
                 raise NotImplementedError
-            case "HHT_alpha":
-                # check if all necessary BL parameters are given in kwargs
-                raise NotImplementedError
-        self._time_integration = TimeIntegration().get_time_step_function(scheme)
+            case "HHT-alpha":
+                must_haves = ["alpha", "dt"]
+                self._check_scheme_settings("HHT-alpha", "set_time_integration", must_haves, params_given)
+                self._time_integration_scheme_settings = {param: value for param, value in kwargs.items() if param in 
+                                                          must_haves}
+        TI = TimeIntegration()
+        self._time_integration = TI.get_time_step_function(scheme)
+        self._init_time_integration = TI.get_init_function(scheme)
 
     def simuluate(
         self, 
@@ -291,9 +295,15 @@ class ThreeDOFsAirfoil(SimulationResults):
         self._check_simulation_readiness(_aero_force=self._aero_force, 
                                          _struct_force=self._struct_force,
                                          _time_integration=self._time_integration)
-
         self.pos[0, :] = init_position
         self.vel[0, :] = init_velocity
+
+        init_funcs = [self._init_aero_force, self._init_struct_force, self._init_time_integration]
+        scheme_settings = [self._aero_scheme_settings, self._struct_scheme_settings, 
+                           self._time_integration_scheme_settings]
+        for init_func, scheme_setting in zip(init_funcs, scheme_settings):
+            if init_func is not None:
+                init_func(self, **scheme_setting)
         for i in range(self.time.size-1):
             # get aerodynamic forces
             self.aero[i, :] = self._aero_force(self, i, **self._aero_scheme_settings)
@@ -302,10 +312,10 @@ class ThreeDOFsAirfoil(SimulationResults):
             # performe time integration
             self.pos[i+1, :], self.vel[i+1, :], self.accel[i+1, :] = self._time_integration(self, i,
                                                                             **self._time_integration_scheme_settings)
-        i = self.time.size-1
-        # for the last time step, only the forces are calculated because there is no next time step for the positions
-        self.aero[i, :] = self._aero_force(self, i, **self._aero_scheme_settings)
-        self.damp[i, :], self.stiff[i, :] = self._struct_force(self, i, **self._struct_scheme_settings)
+        # i = self.time.size-1
+        # # for the last time step, only the forces are calculated because there is no next time step for the positions
+        # self.aero[i, :] = self._aero_force(self, i, **self._aero_scheme_settings)
+        # self.damp[i, :], self.stiff[i, :] = self._struct_force(self, i, **self._struct_scheme_settings)
 
     def _check_simulation_readiness(self, **kwargs):
         """Utility function checking whether all settings given in kwargs have been set.
@@ -686,8 +696,8 @@ class AeroForce(Rotations):
         return dynamic_pressure*sim_res.chord*rot@coefficients
     
     @staticmethod
-    def _init_quasi_steady():
-        raise NotImplemented
+    def _init_quasi_steady(sim_res:ThreeDOFsAirfoil, **kwargs):
+        pass
 
     def _BL(self, 
             sim_res: ThreeDOFsAirfoil,
@@ -762,27 +772,26 @@ class AeroForce(Rotations):
         # --------- Combining everything
         # C_t and C_d point in opposite directions!
         # todo update C_m!!!
-        coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], 1])
-        # rot = self.passive_3D_planar(sim_res.pos[i, 2])  # for [f_x, f_y, mom]
-        rot = self.passive_3D_planar(sim_res.pos[i, 2]+sim_res.inflow_angle[i])  # for [-C_d, C_l, C_m]
+        coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], -self.C_m(sim_res.alpha_qs[i])])
+        rot = self.passive_3D_planar(sim_res.pos[i, 2])  # for [-f_x, f_y, mom]
+        # rot = self.passive_3D_planar(sim_res.pos[i, 2]+sim_res.inflow_angle[i])  # for [-C_d, C_l, C_m]
         rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
                             (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
         dynamic_pressure = sim_res.density/2*rel_speed
-        # return dynamic_pressure*sim_res.chord*rot@coefficients  # for [-f_x, f_y, mom]
-        return rot@coefficients  # for [-C_d, C_l, C_m]
+        forces = dynamic_pressure*sim_res.chord*rot@coefficients  # for [-f_x, f_y, mom]
+        forces[0] *= -1
+        return forces
+        # return rot@coefficients  # for [-C_d, C_l, C_m]
     
     def _init_BL(
             self,
             sim_res: ThreeDOFsAirfoil,
-            init_pos: np.ndarray,
-            init_vel: np.ndarray, 
-            init_inflow: np.ndarray,
             **kwargs
             ):
-        sim_res.alpha_steady[0] = -init_pos[2]+np.arctan(init_inflow[1]/init_inflow[0])
-        qs_flow_angle = self._quasi_steady_flow_angle(init_vel, init_pos, init_inflow, sim_res.chord,
-                                                      kwargs["pitching_around"], kwargs["alpha_at"])
-        sim_res.alpha_qs[0] = -init_pos[2]+qs_flow_angle
+        sim_res.alpha_steady[0] = -sim_res.pos[0, 2]+np.arctan(sim_res.inflow[0, 1]/sim_res.inflow[0, 0])
+        qs_flow_angle = self._quasi_steady_flow_angle(sim_res.vel[0, :], sim_res.pos[0, :], sim_res.inflow[0, :], 
+                                                      sim_res.chord, kwargs["pitching_around"], kwargs["alpha_at"])
+        sim_res.alpha_qs[0] = -sim_res.pos[0, 2]+qs_flow_angle
     
     @staticmethod
     def _quasi_steady_flow_angle(
@@ -876,16 +885,27 @@ class StructForce(Rotations):
         damping = -rot.T@self.damp@rot@sim_res.vel[i, :]
         return damping, stiff
 
- 
+
 class TimeIntegration:
     """Class implementing differnt ways to calculate the position, velocity, and acceleration of the system at the
      next time step.
     """
     
-    _implemented_schemes = ["eE", "HHT_alpha", "RK4"]    
+    _implemented_schemes = ["eE", "HHT-alpha", "RK4"]    
     # eE: explicit Euler
     # HHT_alpha: algorithm as given in #todo add paper
     # RK4: Runge-Kutta 4th order    
+
+    def __init__(self) -> None:
+        self._M_current = None
+        self._M_last = None
+        self._C_last = None
+        self._K_last = None
+        self._current_external = None
+        self._last_external = None
+        self._beta = None
+        self._gamma = None
+        self._dt = None
 
     def get_time_step_function(self, scheme: str) -> Callable:
         """ Returns a function object that receives a ThreeDOFsAirfoil instance and returns a numpy array with
@@ -904,7 +924,18 @@ class TimeIntegration:
         scheme_map = {
             "eE": self._eE,
             "RK4": self._RK4,
-            "HHT-alhpa": self._HHT_alpha
+            "HHT-alpha": self._HHT_alpha
+        }
+        return scheme_map[scheme]
+    
+    def get_init_function(self, scheme: str) -> Callable:
+        if scheme not in self._implemented_schemes:
+            raise NotImplementedError(f"Scheme '{scheme}' is not implemented. Implemented schemes are "
+                                      f"{self._implemented_schemes}.")
+        scheme_map = {
+            "eE": None,
+            "RK4": None,
+            "HHT-alpha": self._init_HHT_alpha
         }
         return scheme_map[scheme]
     
@@ -935,10 +966,43 @@ class TimeIntegration:
     def _RK4():
         pass
 
-    @staticmethod
-    def _HHT_alpha():
-        # print(solve(A, b, assume_a="sym"))
-        pass
+    def _HHT_alpha(
+            self,
+            sim_res: ThreeDOFsAirfoil, 
+            i: int,
+            dt: float,
+            **kwargs):  # the kwargs are needed because of the call in simulate():
+        rhs = -self._M_last@sim_res.accel[i-1, :]-self._C_last@sim_res.vel[i-1, :]-self._K_last@sim_res.pos[i-1, :]
+        rhs += self._current_external*sim_res.aero[i, :]+self._last_external*sim_res.aero[i-1, :]
+        accel = solve(self._M_current, rhs, assume_a="sym")
+        vel = sim_res.vel[i, :]+dt*((1-self._gamma)*sim_res.accel[i, :]+self._gamma*accel)
+        pos = sim_res.pos[i, :]+dt*sim_res.vel[i, :]+dt**2*((0.5-self._beta)*sim_res.accel[i, :]+self._beta*accel)
+        return pos, vel, accel
+
+    def _init_HHT_alpha(
+            self,
+            sim_res: ThreeDOFsAirfoil,
+            alpha: float,
+            dt: float,
+            **kwargs
+            ):  #todo implies constant dt!!!
+        self._dt = dt
+        self._beta = (1+alpha)**2/4
+        self._gamma = 0.5+alpha
+        
+        M = np.diag([sim_res.mass, sim_res.mass, sim_res.mom_inertia])
+        C = np.diag([sim_res._struct_params["damping_edge"], sim_res._struct_params["damping_flap"],
+                     sim_res._struct_params["damping_tors"]])
+        K = np.diag([sim_res._struct_params["stiffness_edge"], sim_res._struct_params["stiffness_flap"],
+                     sim_res._struct_params["stiffness_tors"]])
+        
+        self._M_current = M+dt*(1-alpha)*self._gamma*C+dt**2*(1-alpha)*self._beta*K
+        self._M_last = dt*(1-alpha)*(1-self._gamma)*C+dt**2*(1-alpha)*(0.5-self._beta)*K
+        self._C_last = C+dt*(1-alpha)*K
+        self._K_last = K
+        self._current_external = 1-alpha
+        self._last_external = alpha
+        
     
     @staticmethod
     def get_accel(sim_res: ThreeDOFsAirfoil, i: int) -> np.ndarray:
