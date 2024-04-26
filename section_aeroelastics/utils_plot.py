@@ -6,7 +6,7 @@ from numpy.typing import ArrayLike
 from typing import Callable
 import matplotlib
 import matplotlib.pyplot as plt
-from copy import copy
+from copy import deepcopy, copy
 
 class MosaicHandler:
     _default = object()
@@ -31,6 +31,7 @@ class MosaicHandler:
             y_lims_from: tuple | dict=_default,
             legend: bool | dict[bool]=_default,
             aspect: str | float | dict[str] | dict[float] =_default,
+            equal_x_lim: tuple[str] = _default,
             equal_y_lim: tuple[str] = _default,
             scale_limits: float=1,
             ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]:
@@ -61,17 +62,23 @@ class MosaicHandler:
         largest y limits of the axes.
         :type: tuple[str]
         """
-        lcs = {k: v for k,v in locals().items() if k not in ["self", "scale_limits"]}
+        skip = ["skip", "self", "scale_limits", "x_lims_from", "y_lims_from", "equal_x_lim", "equal_y_lim"]
+        lcs = {k: v for k,v in locals().items() if k not in skip}
         
         self._check_input_exculsivity(x_lims, y_lims, x_lims_from, y_lims_from)
         if x_lims_from != self._default:
-            lcs["x_lims_from"] = self._get_limits(x_lims_from, scale_limits)
+            lcs["x_lims"] = self._get_limits_from(x_lims_from, scale_limits)
         if y_lims_from != self._default:
-            lcs["y_lims_from"] = self._get_limits(y_lims_from, scale_limits)
+            lcs["y_lims"] = self._get_limits_from(y_lims_from, scale_limits)
+        if equal_x_lim != self._default:
+            raise NotImplementedError
+        if equal_y_lim != self._default:
+            raise NotImplementedError
 
         # self._check_mosaic_options_completeness(self._ax_labels, **lcs)  # not used/wanted
         # filter for parameters that the user wants to update
-        is_set = {param: values for param, values in lcs.items() if values != self._default}
+        is_set = deepcopy({param: values for param, values in lcs.items() if values != self._default})
+        # deepcopy needed because of the mutable input parameters.
         is_set = self._treat_special_options(**is_set)
         filled = self._handle_mosaic_options(self._ax_labels, **is_set)
         map_params_to_axs_methods = {
@@ -79,8 +86,6 @@ class MosaicHandler:
             "y_labels": "set_ylabel",
             "x_lims": "set_xlim",
             "y_lims": "set_ylim",
-            "x_lims_from": "set_xlim",
-            "y_lims_from": "set_ylim",
             "legend": "legend",
             "aspect": "set_aspect"
         }
@@ -123,7 +128,7 @@ class MosaicHandler:
         for method, values in options_used.items():
             for ax_label, update_to in values.items():
                 update = getattr(self.axs[ax_label], method)
-                if update_to not in [self._empty_call, self._skip_call]:  # spsecial calls are found as strings
+                if update_to not in [self._empty_call, self._skip_call]:  # special calls are found as strings
                     update(*update_to)  # the ->*<-update_to is the reason for turning the values to tuples in 
                     # _fill_mosaic_options()
                 elif update_to == self._empty_call:
@@ -217,7 +222,7 @@ class MosaicHandler:
         return filled
     
     @staticmethod
-    def _get_limits(limits_from: tuple | dict[tuple], scale: float) -> tuple[float, float] | dict[tuple[float, float]]:
+    def _get_limits_from(limits_from: tuple | dict[tuple], scale: float) -> tuple[float, float] | dict[tuple[float, float]]:
         """Loops through all values and finds the overall max and min values. Returns those for each axis.
 
         :param limits_from: tuple containing iterables of values at each index or a dictionary with such a tuple for 
@@ -246,6 +251,10 @@ class MosaicHandler:
             limits[ax_label] = (lim_min*scale, lim_max*scale)
         return limits if "tmp" not in limits.keys() else (limits["tmp"][0], limits["tmp"][1])     
     
+    @staticmethod
+    def _get_equal_limits(*args):
+        pass
+
     @staticmethod
     def _check_mosaic_options_completeness(ax_labels: tuple[str], **kwargs):
         """Method that checks whether all axis have received a value for a certain setting. Loops over all available 
@@ -423,6 +432,7 @@ class PlotPreparation:
         dfs_aoas = dfs_aoas.apply(np.rad2deg)
         return aoas, dfs_aoas
     
+
 class AnimationPreparation(PlotPreparation, DefaultsPlots):
     def __init__(self) -> None:
         PlotPreparation.__init__(self)
