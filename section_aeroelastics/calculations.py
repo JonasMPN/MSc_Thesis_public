@@ -608,6 +608,7 @@ class AeroForce(Rotations):
                     self._alpha_0 = self._write_and_get_alpha0(alpha=self.df_polars["alpha"].to_numpy(),
                                                                C_l=self.df_polars["C_l"].to_numpy(),
                                                                save_as=f_alpha_0)
+                    self._alpha_0 = np.deg2rad(self._alpha_0)
                     df_sep = self._write_and_get_separation_points(alpha_0=self._alpha_0, save_as=f_sep)
                 else:
                     with open(f_alpha_0, "r") as f:
@@ -635,13 +636,13 @@ class AeroForce(Rotations):
         
         f_t = C_t/(self._Cl_slope*np.sin(alpha_interp-alpha_0)**2)
         f_t = f_t**2*np.sign(f_t)
-        # f_t[f_t>1] = 1
-        # f_t[f_t< -1] = -1
+        f_t[f_t>1] = 1
+        f_t[f_t< -1] = -1
 
         f_n = 2*np.sqrt(C_n/(self._Cl_slope*np.sin(alpha_interp-alpha_0)))-1
         f_n = f_n**2*np.sign(f_n)
-        # f_n[f_n>1] = 1
-        # f_n[f_n< -1] = -1
+        f_n[f_n>1] = 1
+        f_n[f_n< -1] = -1
 
         df = pd.DataFrame({"alpha": np.rad2deg(alpha_interp), "f_t": f_t, "f_n": f_n})
         df.to_csv(save_as, index=None)
@@ -729,6 +730,7 @@ class AeroForce(Rotations):
         tmp = -a*sim_res.dt[i]/(K_alpha*sim_res.chord)
         tmp_2 = sim_res.d_alpha_qs_dt[i]-sim_res.d_alpha_qs_dt[i-1]
         sim_res.D_i[i] = sim_res.D_i[i-1]*np.exp(tmp)+tmp_2*np.exp(0.5*tmp)
+        #todo change sim_res.d_alpha_qs_dt[i] to sim_res.pos[i, 2]/dt
         sim_res.C_ni[i] = 4*K_alpha*sim_res.chord/flow_vel*(sim_res.d_alpha_qs_dt[i]-sim_res.D_i[i])
 
         # add circulatory and impulsive
@@ -771,17 +773,17 @@ class AeroForce(Rotations):
 
         # --------- Combining everything
         # C_t and C_d point in opposite directions!
-        # todo update C_m!!!
+        # todo update C_m as C_m(alpha_eff)+pitch_rate_term from AEFLap paper
         coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], -self.C_m(sim_res.alpha_qs[i])])
-        rot = self.passive_3D_planar(sim_res.pos[i, 2])  # for [-f_x, f_y, mom]
-        # rot = self.passive_3D_planar(sim_res.pos[i, 2]+sim_res.inflow_angle[i])  # for [-C_d, C_l, C_m]
+        # rot = self.passive_3D_planar(sim_res.pos[i, 2])  # for [-f_x, f_y, mom]
+        rot = self.passive_3D_planar(sim_res.pos[i, 2]+sim_res.inflow_angle[i])  # for [-C_d, C_l, C_m]
         rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
                             (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
         dynamic_pressure = sim_res.density/2*rel_speed
         forces = dynamic_pressure*sim_res.chord*rot@coefficients  # for [-f_x, f_y, mom]
         forces[0] *= -1
-        return forces
-        # return rot@coefficients  # for [-C_d, C_l, C_m]
+        # return forces
+        return rot@coefficients  # for [-C_d, C_l, C_m]
     
     def _init_BL(
             self,
@@ -972,9 +974,10 @@ class TimeIntegration:
             i: int,
             dt: float,
             **kwargs):  # the kwargs are needed because of the call in simulate():
-        rhs = -self._M_last@sim_res.accel[i-1, :]-self._C_last@sim_res.vel[i-1, :]-self._K_last@sim_res.pos[i-1, :]
+        rhs = -self._M_last@sim_res.accel[i, :]-self._C_last@sim_res.vel[i, :]-self._K_last@sim_res.pos[i, :]
         rhs += self._current_external*sim_res.aero[i, :]+self._last_external*sim_res.aero[i-1, :]
-        accel = solve(self._M_current, rhs, assume_a="sym")
+        #todo the following lines are in the EFRot coordinate system!!! Rotate into XYRot
+        accel = solve(self._M_current, rhs, assume_a="sym") 
         vel = sim_res.vel[i, :]+dt*((1-self._gamma)*sim_res.accel[i, :]+self._gamma*accel)
         pos = sim_res.pos[i, :]+dt*sim_res.vel[i, :]+dt**2*((0.5-self._beta)*sim_res.accel[i, :]+self._beta*accel)
         return pos, vel, accel
@@ -1019,4 +1022,10 @@ class TimeIntegration:
         return (sim_res.aero[i, :]+sim_res.damp[i, :]+sim_res.stiff[i, :])/inertia
 
 
-
+class Oscillations:
+    def __init__(
+            self,
+            inertia: np.ndarray,
+            stiffness: np.ndarray,
+            damping: np.ndarray) -> None:
+        pass
