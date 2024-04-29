@@ -2,7 +2,6 @@ import numpy as np
 from scipy.linalg import solve
 import pandas as pd
 from os.path import join, isdir
-from copy import copy
 from typing import Callable
 import json
 from helper_functions import Helper
@@ -893,7 +892,7 @@ class TimeIntegration:
      next time step.
     """
     
-    _implemented_schemes = ["eE", "HHT-alpha", "RK4"]    
+    _implemented_schemes = ["eE", "HHT-alpha", "HHT-alpha-adapted", "RK4"]    
     # eE: explicit Euler
     # HHT_alpha: algorithm as given in #todo add paper
     # RK4: Runge-Kutta 4th order    
@@ -903,8 +902,8 @@ class TimeIntegration:
         self._M_last = None
         self._C_last = None
         self._K_last = None
-        self._current_external = None
-        self._last_external = None
+        self._external_current = None
+        self._external_last = None
         self._beta = None
         self._gamma = None
         self._dt = None
@@ -926,7 +925,8 @@ class TimeIntegration:
         scheme_map = {
             "eE": self._eE,
             "RK4": self._RK4,
-            "HHT-alpha": self._HHT_alpha
+            "HHT-alpha": self._HHT_alpha,
+            "HHT-alpha-adapted": self._HHT_alpha_adapated
         }
         return scheme_map[scheme]
     
@@ -937,7 +937,8 @@ class TimeIntegration:
         scheme_map = {
             "eE": None,
             "RK4": None,
-            "HHT-alpha": self._init_HHT_alpha
+            "HHT-alpha": self._init_HHT_alpha,
+            "HHT-alpha_adpated": self._init_HHT_alpha
         }
         return scheme_map[scheme]
     
@@ -975,13 +976,27 @@ class TimeIntegration:
             dt: float,
             **kwargs):  # the kwargs are needed because of the call in simulate():
         rhs = -self._M_last@sim_res.accel[i, :]-self._C_last@sim_res.vel[i, :]-self._K_last@sim_res.pos[i, :]
-        rhs += self._current_external*sim_res.aero[i, :]+self._last_external*sim_res.aero[i-1, :]
+        rhs += self._external_current*sim_res.aero[i+1, :]+self._external_last*sim_res.aero[i, :]
         #todo the following lines are in the EFRot coordinate system!!! Rotate into XYRot
         accel = solve(self._M_current, rhs, assume_a="sym") 
         vel = sim_res.vel[i, :]+dt*((1-self._gamma)*sim_res.accel[i, :]+self._gamma*accel)
         pos = sim_res.pos[i, :]+dt*sim_res.vel[i, :]+dt**2*((0.5-self._beta)*sim_res.accel[i, :]+self._beta*accel)
         return pos, vel, accel
 
+    def _HHT_alpha_adapated(
+            self,
+            sim_res: ThreeDOFsAirfoil, 
+            i: int,
+            dt: float,
+            **kwargs):  # the kwargs are needed because of the call in simulate():
+        rhs = -self._M_last@sim_res.accel[i, :]-self._C_last@sim_res.vel[i, :]-self._K_last@sim_res.pos[i, :]
+        rhs += self._external_current*sim_res.aero[i, :]+self._external_last*sim_res.aero[i-1, :]
+        #todo the following lines are in the EFRot coordinate system!!! Rotate into XYRot
+        accel = solve(self._M_current, rhs, assume_a="sym") 
+        vel = sim_res.vel[i, :]+dt*((1-self._gamma)*sim_res.accel[i, :]+self._gamma*accel)
+        pos = sim_res.pos[i, :]+dt*sim_res.vel[i, :]+dt**2*((0.5-self._beta)*sim_res.accel[i, :]+self._beta*accel)
+        return pos, vel, accel
+    
     def _init_HHT_alpha(
             self,
             sim_res: ThreeDOFsAirfoil,
@@ -1003,9 +1018,8 @@ class TimeIntegration:
         self._M_last = dt*(1-alpha)*(1-self._gamma)*C+dt**2*(1-alpha)*(0.5-self._beta)*K
         self._C_last = C+dt*(1-alpha)*K
         self._K_last = K
-        self._current_external = 1-alpha
-        self._last_external = alpha
-        
+        self._external_current = 1-alpha
+        self._external_last = alpha
     
     @staticmethod
     def get_accel(sim_res: ThreeDOFsAirfoil, i: int) -> np.ndarray:
@@ -1026,6 +1040,44 @@ class Oscillations:
     def __init__(
             self,
             inertia: np.ndarray,
-            stiffness: np.ndarray,
-            damping: np.ndarray) -> None:
-        pass
+            natural_frequency: np.ndarray,
+            damping_coefficient: np.ndarray,
+            ) -> None:
+        self._M = inertia 
+        self._K = natural_frequency**2*self._M
+        self._C = damping_coefficient*2*np.sqrt(self._M*self._K)
+
+        self._zeta = damping_coefficient
+        self._omega_n = natural_frequency
+        self._omega_d = self._omega_n*np.sqrt(1-self._zeta**2)
+
+    def undamped(self, t: np.ndarray, x_0: np.ndarray=1):
+        return x_0*np.cos(self._omega_n*t)
+    
+    def damped(self, t: np.ndarray, x_0: np.ndarray=1):
+        # Theory of Vibration with Applications 2.6-16
+        delta = self._zeta*self._omega_n
+        return x_0*np.exp(-delta*t)*(delta/self._omega_d*np.sin(self._omega_d*t)+np.cos(self._omega_d*t))
+    
+    def forced(self, t: np.ndarray, amplitude: np.ndarray, frequency: np.ndarray, x_0: np.ndarray, v_0: np.ndarray):
+        # Theory of Vibration with Applications 3.1-2 - 3.1-4
+        if amplitude.size != frequency.size:
+            raise ValueError("The same number of amplitudes and frequencies for the external excitations have to be "
+                            "given.")
+        delta = self._zeta*self._omega_n
+        ampl_steady = amplitude/np.sqrt((self._K-frequency**2*self._M)**2+(frequency*self._C)**2)
+        phase_shift = np.arctan2(frequency*self._C, self._K-frequency**2*self._M)
+        A = x_0-(ampl_steady*np.sin(-phase_shift)).sum()
+        B = v_0+(delta*A-(ampl_steady*frequency*np.cos(-phase_shift)).sum())/self._omega_d
+        x_p = np.exp(-delta*t)*(A*np.cos(self._omega_d*t)+B*np.sin(self._omega_d*t))
+        t = t[:, np.newaxis]
+        return x_p+(ampl_steady*np.sin(frequency*t-phase_shift)).sum(axis=1)
+    
+    def step(self, t: np.ndarray, amplitude: np.ndarray):
+        # Theory of Vibration with Applications 4.2-3
+        phase_shift = np.arctan(self._zeta/np.sqrt(1-self._zeta**2))
+        transient_ampl = np.exp(-self._zeta*self._omega_n*t)/np.sqrt(1-self._zeta**2)
+        transient_shape = np.cos(np.sqrt(1-self._zeta**2)*self._omega_n*t-phase_shift)
+        return amplitude/self._K*(1-transient_ampl*transient_shape)
+
+
