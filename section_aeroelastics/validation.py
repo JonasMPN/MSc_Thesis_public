@@ -51,6 +51,7 @@ def run_BeddoesLeishman(
     df = pd.read_csv(f_f_aero)
     df["C_d"] = -coeffs[:, 0]  # because C_t and C_d are defined in opposite directions
     df["C_l"] = coeffs[:, 1]
+    df["C_m"] = coeffs[:, 2]
     df.to_csv(f_f_aero, index=None)
     
 
@@ -394,8 +395,8 @@ class HHTalphaValidator(DefaultsPlots, DefaultStructure):
   
 if __name__ == "__main__":
     do = {
-        "run_simulation": False,
-        "plot_results": False,
+        "BL": True,
+        "plot_BL_results": True,
         "calc_HHT_alpha_response": False,
         "plot_HHT_alpha_response": False,
         "HHT_alpha_undamped": False,
@@ -403,22 +404,22 @@ if __name__ == "__main__":
         "HHT_alpha_forced": False,
         "HHT_alpha_forced_composite": False,
         "HHT_alpha_step": False,
-        "HHT_alpha_rotation": True
+        "HHT_alpha_rotation": False
     }
     dir_airfoil = "data/FFA_WA3_221"
     dir_HHT_alpha_validation = "data/HHT_alpha_validation"
     HHT_alpha_case = "test"
     period_res = 100
 
-    if do["run_simulation"]:
+    if do["BL"]:
         df_cases = pd.read_csv(join(dir_airfoil, "unsteady", "info.dat"))
         for i, row in df_cases.iterrows():
             run_BeddoesLeishman(dir_airfoil, index_unsteady_data=i,
                                 k=row["k"], inflow_speed=row["inflow_speed"], chord=row["chord"], 
                                 amplitude=row["amplitude"], mean=row["mean"], period_res=period_res)
 
-    if do["plot_results"]:
-        plotter = HHTalphaPlotter()
+    if do["plot_BL_results"]:
+        plotter = BLValidationPlotter()
         plotter.plot_preparation(join(dir_airfoil,"Beddoes_Leishman_preparation"), join(dir_airfoil, "polars.dat"))
         dir_validations = join(dir_airfoil, "Beddoes_Leishman_validation")
         df_cases = pd.read_csv(join(dir_airfoil, "unsteady", "info.dat"))
