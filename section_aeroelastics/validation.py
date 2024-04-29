@@ -134,7 +134,6 @@ class HHTalphaValidator(DefaultsPlots, DefaultStructure):
         post_calc.kinetic_energy()
         post_calc.potential_energy()
 
-
     def simulate_undamped(
             self,
             n_steps_per_oscillation: list|np.ndarray,
@@ -148,7 +147,8 @@ class HHTalphaValidator(DefaultsPlots, DefaultStructure):
             for omega_n in nat_frequency:
                 t = np.linspace(0, n_oscillations*2*np.pi/omega_n, n_dt*n_oscillations+1)
                 self.set_structure(1, 1, stiffness_edge=omega_n**2)
-                results = self._simulate(t, np.zeros((t.size, 3)), x_0, 0, -x_0*omega_n**2, scheme)
+                results = self._simulate(time=t, f_external=np.zeros((t.size, 3)), init_pos=[x_0, 0, 0], 
+                                         init_vel=0, init_accel=[-x_0*omega_n**2, 0 ,0], scheme=scheme)
 
                 dir_save = helper.create_dir(join(self.dir_root_results, scheme, f"{counter}"))[0]
                 results._save(dir_save)
@@ -166,7 +166,8 @@ class HHTalphaValidator(DefaultsPlots, DefaultStructure):
             damping_coefficients: list|np.ndarray,
             n_steps_per_oscillation: list|np.ndarray,
             n_oscillations: float,
-            x_0: float = 1,
+            x_0: float=1,
+            v_0: float=1,
             scheme: str="HHT-alpha"
             ):
         M = 1
@@ -176,9 +177,13 @@ class HHTalphaValidator(DefaultsPlots, DefaultStructure):
                 for damping_coeff in damping_coefficients:
                     K = omega_n**2*M
                     C = damping_coeff*2*np.sqrt(M*K)
-                    t = np.linspace(0, n_oscillations*2*np.pi/omega_n, n_dt*n_oscillations+1)
+                    omega_d = omega_n*np.sqrt(1-damping_coeff**2)
+                    delta = damping_coeff*omega_n
+                    accel_0 = 2*delta*v_0-(delta**2+omega_d**2)*x_0
+                    t = np.linspace(0, n_oscillations*2*np.pi/omega_d, n_dt*n_oscillations+1)
                     self.set_structure(1, mass=M, stiffness_edge=K, damping_edge=C)
-                    results = self._simulate(t, np.zeros((t.size, 3)), x_0, 0, -x_0*omega_n**2, scheme)
+                    results = self._simulate(time=t, f_external=np.zeros((t.size, 3)), init_pos=[x_0, 0, 0], 
+                                             init_vel=[v_0, 0, 0], init_accel=[accel_0, 0 ,0], scheme=scheme)
 
                     dir_save = helper.create_dir(join(self.dir_root_results, scheme, f"{counter}"))[0]
                     results._save(dir_save)
@@ -186,7 +191,7 @@ class HHTalphaValidator(DefaultsPlots, DefaultStructure):
                         json.dump({"omega_n": omega_n, "n_dt": n_dt, "damping_coeff": damping_coeff}, f)
 
                     osci = Oscillations(1, omega_n, damping_coeff)
-                    df_analytical = pd.DataFrame({"time": t, "solution": osci.damped(t, x_0)})
+                    df_analytical = pd.DataFrame({"time": t, "solution": osci.damped(t, x_0, v_0)})
                     df_analytical.to_csv(join(dir_save, "analytical_sol.dat"), index=None)
                     counter += 1
     
@@ -196,7 +201,8 @@ class HHTalphaValidator(DefaultsPlots, DefaultStructure):
             n_steps_per_oscillation: list|np.ndarray,
             force_frequencies:list|np.ndarray,
             n_oscillations: float,
-            x_0: float = 1,
+            x_0: float=1,
+            v_0: float=1,
             scheme: str="HHT-alpha"
             ):
         M = 1
@@ -210,8 +216,15 @@ class HHTalphaValidator(DefaultsPlots, DefaultStructure):
                 t = np.linspace(0, n_oscillations*2*np.pi/omega_d, n_dt*n_oscillations+1)
                 self.set_structure(1, mass=M, stiffness_edge=K, damping_edge=C)
                 for force_freq in force_frequencies:
+                    K = omega_n**2*M
+                    C = damping_coeff*2*np.sqrt(M*K)
+                    omega_d = omega_n*np.sqrt(1-damping_coeff**2)
+                    delta = damping_coeff*omega_n
+                    accel_0 = 2*delta*v_0-(delta**2+omega_d**2)*x_0
+                    t = np.linspace(0, n_oscillations*2*np.pi/omega_d, n_dt*n_oscillations+1)
                     f = np.c_[np.sin(force_freq*t), np.zeros((t.size, 2))]
-                    results = self._simulate(t, f, x_0, 0, -x_0*omega_n**2, scheme)
+                    results = self._simulate(time=t, f_external=f, init_pos=[x_0, 0, 0], init_vel=[v_0, 0, 0],
+                                              init_accel=[accel_0, 0 ,0], scheme=scheme)
 
                     dir_save = helper.create_dir(join(self.dir_root_results, scheme, f"{counter}"))[0]
                     results._save(dir_save)
@@ -220,7 +233,10 @@ class HHTalphaValidator(DefaultsPlots, DefaultStructure):
                                     "f_amplitude": 1, "f_freq": force_freq}, f)
 
                     osci = Oscillations(1, omega_n, damping_coeff)
-                    df_analytical = pd.DataFrame({"time": t, "solution": osci.forced(t, 1, force_freq, x_0)})
+                    force_freq = np.asarray([force_freq])
+                    force_ampl = np.ones(1)
+                    df_analytical = pd.DataFrame({"time": t, "solution": osci.forced(t, force_ampl, force_freq, x_0,
+                                                                                     v_0)})
                     df_analytical.to_csv(join(dir_save, "analytical_sol.dat"), index=None)
                     counter += 1
 
@@ -249,7 +265,8 @@ class HHTalphaValidator(DefaultsPlots, DefaultStructure):
             t = np.linspace(0, n_oscillations*2*np.pi/omega_d, n_dt*n_oscillations+1)[:, np.newaxis]
             f = np.c_[(force_amplitude*np.sin(force_frequencies*t)).sum(axis=1), np.zeros((t.size, 2))]
             t = t.squeeze()
-            results = self._simulate(t, f, x_0, v_0, -x_0*omega_n**2, scheme)
+            results = self._simulate(time=t, f_external=f, init_pos=[x_0, 0, 0], 
+                                        init_vel=[v_0, 0, 0], init_accel=[-x_0*omega_n**2, 0 ,0], scheme=scheme)
 
             dir_save = helper.create_dir(join(self.dir_root_results, scheme, f"{counter}"))[0]
             results._save(dir_save)
@@ -282,7 +299,8 @@ class HHTalphaValidator(DefaultsPlots, DefaultStructure):
                     self.set_structure(1, mass=M, stiffness_edge=K, damping_edge=C)
 
                     f = np.c_[np.ones_like(t), np.zeros((t.size, 2))]
-                    results = self._simulate(t, f, 0, 0, 0, scheme)
+                    results = self._simulate(time=t, f_external=f, init_pos=0, init_vel=0, 
+                                             init_accel=[1/M, 0 ,0], scheme=scheme)
 
                     dir_save = helper.create_dir(join(self.dir_root_results, scheme, f"{counter}"))[0]
                     results._save(dir_save)
@@ -294,6 +312,49 @@ class HHTalphaValidator(DefaultsPlots, DefaultStructure):
                         df_analytical = pd.DataFrame({"time": t, "solution": osci.step(t, 1)})
                         df_analytical.to_csv(join(dir_save, "analytical_sol.dat"), index=None)
                         counter += 1
+
+    def simulate_rotation(
+            self,
+            natural_frequencies: list[np.ndarray],
+            damping_coefficients: list[np.ndarray],
+            n_steps_per_oscillation: list|np.ndarray,
+            n_oscillations: float,
+            inertia: np.ndarray=np.ones(3),
+            scheme: str="HHT-alpha"
+            ):
+        counter = 0
+        x_0 = [1, 0, -np.pi/2]
+        v_0 = [0, 0, 0]
+        a_0 = [0, 0, 0]
+        for n_dt in n_steps_per_oscillation:
+            for omega_n in natural_frequencies:
+                for damping_coeff in damping_coefficients:
+                    K = omega_n**2*inertia
+                    C = damping_coeff*2*np.sqrt(inertia*K)
+                    omega_d = omega_n*np.sqrt(1-damping_coeff**2)
+                    t = np.linspace(0, n_oscillations*2*np.pi/omega_d.min(), n_dt*n_oscillations+1)
+                    self.set_structure(1, mass=inertia[0], mom_inertia=inertia[2], 
+                                       stiffness_edge=K[0], stiffness_flap=K[1], stiffness_tors=K[2],
+                                       damping_edge=C[0], damping_flap=C[1], damping_tors=C[2])
+
+                    f = np.c_[np.ones_like(t), np.zeros((t.size, 2))]
+                    results = self._simulate(time=t, f_external=f, init_pos=x_0, init_vel=v_0, init_accel=a_0,
+                                             scheme=scheme)
+
+                    dir_save = helper.create_dir(join(self.dir_root_results, scheme, f"{counter}"))[0]
+                    results._save(dir_save)
+                    # with open(join(dir_save, "info.json"), "w") as f:
+                    #     json.dump({"omega_n": omega_n, "n_dt": n_dt, "damping_coeff": damping_coeff, 
+                    #                "step_amplitude": 1}, f)
+
+                    osci = Oscillations(1, omega_n, damping_coeff)
+                    force = [1, 0, 0]
+                    t_sim, pos, _, _ = osci.rotation(t[-1], 0.01, force, x_0, v_0, a_0)
+                    df_analytical = pd.DataFrame({"time": t_sim, "solution_x": pos[:, 0], "solution_y": pos[:, 1],
+                                                   "solution_tors": pos[:, 2]})
+                    df_analytical.to_csv(join(dir_save, "analytical_sol.dat"), index=None)
+                    counter += 1
+
     def _simulate(
         self,
         time: np.ndarray,
@@ -340,8 +401,9 @@ if __name__ == "__main__":
         "HHT_alpha_undamped": False,
         "HHT_alpha_damped": False,
         "HHT_alpha_forced": False,
-        "HHT_alpha_forced_composite": True,
+        "HHT_alpha_forced_composite": False,
         "HHT_alpha_step": False,
+        "HHT_alpha_rotation": True
     }
     dir_airfoil = "data/FFA_WA3_221"
     dir_HHT_alpha_validation = "data/HHT_alpha_validation"
@@ -356,7 +418,7 @@ if __name__ == "__main__":
                                 amplitude=row["amplitude"], mean=row["mean"], period_res=period_res)
 
     if do["plot_results"]:
-        plotter = ValidationPlotter()
+        plotter = HHTalphaPlotter()
         plotter.plot_preparation(join(dir_airfoil,"Beddoes_Leishman_preparation"), join(dir_airfoil, "polars.dat"))
         dir_validations = join(dir_airfoil, "Beddoes_Leishman_validation")
         df_cases = pd.read_csv(join(dir_airfoil, "unsteady", "info.dat"))
@@ -441,7 +503,7 @@ if __name__ == "__main__":
         HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
     
     if do["HHT_alpha_forced_composite"]:
-        n_oscillations = 40
+        n_oscillations = 4
         n_t_per_oscillation = [12, 24, 64]  # should be a multiple of 4 to get the analytical peaks right
         force_freq = np.asarray([0.6, 0.8, 1, 1.2, 1.4])  # natural frequency is 1
         force_ampl = np.asarray([1, 1, 1, 1, 1])
@@ -459,6 +521,7 @@ if __name__ == "__main__":
         HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
 
     if do["HHT_alpha_step"]:
+
         n_oscillations = 10
         n_t_per_oscillation = [12]  # should be a multiple of 4 to get the analytical peaks right
         omega_n = [1, 2, 3, 4]
@@ -468,3 +531,13 @@ if __name__ == "__main__":
         validator.simulate_step(omega_n, damping_coeffs, n_t_per_oscillation, n_oscillations, scheme="HHT-alpha")
         PostHHT_alpha().amplitude_and_period(root_dir)
         HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
+
+    if do["HHT_alpha_rotation"]:
+        n_oscillations = 10
+        n_t_per_oscillation = [128]  # should be a multiple of 4 to get the analytical peaks right
+        omega_n = [np.asarray([np.sqrt(2), 1, 1])]
+        damping_coeffs = [0.2*np.ones(3)]
+        root_dir = join(dir_HHT_alpha_validation, "rotation")
+        validator = HHTalphaValidator(dir_airfoil, root_dir)
+        validator.simulate_rotation(omega_n, damping_coeffs, n_t_per_oscillation, n_oscillations, scheme="HHT-alpha")
+        HHTalphaPlotter().rotation(root_dir)
