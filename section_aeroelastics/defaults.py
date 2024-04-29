@@ -57,7 +57,8 @@ class DefaultsPlots:
         "C_d_rec_section",
 
         "C_l_meas",
-        "C_d_meas"
+        "C_d_meas",
+        "C_m_meas"
     ]
 
     _plot_params_copy =  {  # default mapping from additional parameters (keys) that have the same settings as 
@@ -99,6 +100,7 @@ class DefaultsPlots:
         "C_d_rec_section": "orangered",
         "C_l_meas": "black",
         "C_d_meas": "black",
+        "C_m_meas": "black",
     }
 
     _labels = {  # line label
@@ -128,6 +130,7 @@ class DefaultsPlots:
         "C_d_rec_section": r"section reconstructed $C_d$", 
         "C_l_meas": "HAWC2",
         "C_d_meas": "HAWC2",
+        "C_m_meas": "HAWC2",
     }
 
     _markers = {  # line marker
@@ -157,6 +160,7 @@ class DefaultsPlots:
         "C_d_rec_section": None,
         "C_l_meas": "x",
         "C_d_meas": "x",
+        "C_m_meas": "x",
     }
 
     _linestyles = {  # line style
@@ -186,6 +190,7 @@ class DefaultsPlots:
         "C_d_rec_section": "--",
         "C_l_meas": "",
         "C_d_meas": "",
+        "C_m_meas": "",
     }
 
     _linewidths = {  # line width
@@ -219,6 +224,7 @@ class DefaultsPlots:
         "C_d_rec_section": None,
         "C_l_meas": 3,
         "C_d_meas": 3,
+        "C_m_meas": 3,
     }
 
     _arr_width = {
