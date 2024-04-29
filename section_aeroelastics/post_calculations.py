@@ -296,7 +296,10 @@ class PostHHT_alpha:
                 rel_err_freq = err_freq/freq_sol
 
                 err_ampl = ampl_sol-ampl_sim
-                rel_err_ampl = err_ampl/ampl_sol
+                i_start = 0 if ampl_sim[0] != 0 else 1  # if the solution starts at zero doge a division by zero
+                rel_err_ampl = err_ampl[i_start:]/ampl_sol[i_start:]
+                if i_start == 1:
+                    rel_err_ampl = np.r_[0, rel_err_ampl]
 
                 res = {
                     "err_freq": np.r_[err_freq, np.nan],
