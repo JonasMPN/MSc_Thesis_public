@@ -554,7 +554,6 @@ class HHTalphaPlotter(DefaultStructure):
         return legend
     
 
-
 class BLValidationPlotter(DefaultsPlots):
     def __init__(self) -> None:
         DefaultsPlots.__init__(self)
@@ -565,13 +564,16 @@ class BLValidationPlotter(DefaultsPlots):
             file_polar: str
             ):
         dir_plots = helper.create_dir(join(dir_preparation, "plots"))[0]
+        
         df_section = pd.read_csv(join(dir_preparation, "sep_points.dat"))
         # df_aerohor = pd.read_csv(join(dir_preparation, "f_lookup_1.dat"))
         df_polar = pd.read_csv(file_polar, delim_whitespace=True)
         # alpha_0_aerohor = pd.read_csv(join(dir_preparation, "alpha_0.dat"))["alpha_0"].to_numpy()
         # alpha_0_aerohor = np.deg2rad(alpha_0_aerohor)
         with open(join(dir_preparation, "alpha_0.json"), "r") as f:
-            alpha_0_section = np.deg2rad(json.load(f)["alpha_0"])
+            zero_lift_data = json.load(f)
+            alpha_0_section = np.deg2rad(zero_lift_data["alpha_0"])
+            dC_l_dalpha = np.rad2deg(zero_lift_data["dC_l_dalpha"])
             
         for f_type in ["f_t", "f_n"]:
             fig, ax = plt.subplots()
@@ -587,8 +589,8 @@ class BLValidationPlotter(DefaultsPlots):
         #                        self._get_C_n(alpha_0_aerohor, df_aerohor["alpha_n"], df_aerohor["f_n"])]
         # rot_coeffs_aerohor = rot.rotate_2D(coeffs_aerohor, np.deg2rad(df_aerohor["alpha_n"].to_numpy()))
         
-        coesffs_section = np.c_[self._get_C_t(alpha_0_section, df_section["alpha"], df_section["f_t"]),
-                                self._get_C_n(alpha_0_section, df_section["alpha"], df_section["f_n"])]
+        coesffs_section = np.c_[self._get_C_t(alpha_0_section, df_section["alpha"], df_section["f_t"], dC_l_dalpha),
+                                self._get_C_n(alpha_0_section, df_section["alpha"], df_section["f_n"], dC_l_dalpha)]
         rot_coeffs_section = rot.rotate_2D(coesffs_section, np.deg2rad(df_section["alpha"].to_numpy()))
 
         for i, coeff_type in enumerate(["C_d", "C_l"]):
@@ -596,7 +598,7 @@ class BLValidationPlotter(DefaultsPlots):
             fig, ax = plt.subplots()
             ax.plot(df_polar["alpha"], df_polar[coeff_type], **self.plot_settings[f"{coeff_type}_meas"])
             # ax.plot(df_aerohor["alpha_n"], sign*rot_coeffs_aerohor[:, i], 
-            #         **self.plot_settings[f"{coeff_type}_rec_aerohor"])
+                    # **self.plot_settings[f"{coeff_type}_rec_aerohor"])
             ax.plot(df_section["alpha"], sign*rot_coeffs_section[:, i], 
                     **self.plot_settings[f"{coeff_type}_rec_section"])
             handler = MosaicHandler(fig, ax)
@@ -666,8 +668,9 @@ class BLValidationPlotter(DefaultsPlots):
         df_meas = pd.read_csv(file_unsteady_data, delim_whitespace=True)
         # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
         df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
+        
         # map_measurement = {"C_d": " Cdp", "C_l": " Cl"}
-        map_measurement = {"alpha": "AOA", "C_l": "CL", "C_d": "CD"}
+        map_measurement = {"alpha": "AOA", "C_l": "CL", "C_d": "CD", "C_m": "CM"}
         dir_save = helper.create_dir(join(dir_results, "plots", "meas_comp"))[0]
         line_width = 1
         plt_settings = {
@@ -678,23 +681,23 @@ class BLValidationPlotter(DefaultsPlots):
                 "color": "orangered", "lw": line_width, "label": "section"
             }
         }
-        for coef in ["C_d", "C_l"]:
+        for coef in ["C_d", "C_l", "C_m"]:
             fig, ax = plt.subplots()
             handler = MosaicHandler(fig, ax)
             ax.plot(df_meas[map_measurement["alpha"]], df_meas[map_measurement[coef]], 
                     **self.plot_settings[coef+"_meas"])
             # ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
-            #         **plt_settings["section"])
+            #         **plt_settings["aerohor"])
             ax.plot(np.rad2deg(df_section["alpha_steady"][-period_res-1:]), df_section[coef][-period_res-1:], 
-                    **plt_settings["aerohor"])
+                    **plt_settings["section"])
             handler.update(x_labels=r"$\alpha_{\text{steady}}$ (°)", y_labels=rf"${{{coef[0]}}}_{{{coef[2]}}}$ (-)",
                            legend=True)
             handler.save(join(dir_save, f"{coef}.pdf"))
 
     @staticmethod
-    def _get_C_t(alpha_0: float, alpha: np.ndarray, f_t: np.ndarray, C_l_slope: float=2*np.pi):
+    def _get_C_t(alpha_0: float, alpha: np.ndarray, f_t: np.ndarray, C_l_slope: float):
         return C_l_slope*np.sin(np.deg2rad(alpha)-alpha_0)**2*np.sqrt(np.abs(f_t))*np.sign(f_t)
 
     @staticmethod
-    def _get_C_n(alpha_0: float, alpha: np.ndarray, f_n: np.ndarray, C_l_slope: float=2*np.pi):
+    def _get_C_n(alpha_0: float, alpha: np.ndarray, f_n: np.ndarray, C_l_slope: float):
         return C_l_slope*np.sin(np.deg2rad(alpha)-alpha_0)*((1+np.sqrt(np.abs(f_n))*np.sign(f_n))/2)**2
