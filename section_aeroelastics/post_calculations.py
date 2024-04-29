@@ -2,10 +2,13 @@ import numpy as np
 from calculations import Rotations
 import pandas as pd
 from os.path import join
+from os import listdir
+from scipy.signal import find_peaks
 import json
 from helper_functions import Helper
 from defaults import DefaultsSimulation
 helper = Helper()
+
 
 class WorkAndEnergy(Rotations):
     def __init__(
@@ -254,3 +257,52 @@ class PostCaluculations(Rotations, DefaultsSimulation):
             df[category] = values
         df.to_csv(join(self.dir_in, self._dfl_filenames["e_pot"]), index=None)
         
+class PostHHT_alpha:
+    @staticmethod
+    def amplitude_and_period(root_dir: str, first_peak_at=0):
+        for dir_scheme in listdir(root_dir):
+            if dir_scheme == "plots":
+                continue
+            for directory in listdir(join(root_dir, dir_scheme)):
+                current_dir = join(root_dir, dir_scheme, directory)
+                df_sol = pd.read_csv(join(current_dir, "analytical_sol.dat"))
+                df_sim = pd.read_csv(join(current_dir, "general.dat"))
+                sol = df_sol["solution"].to_numpy()
+                sim = df_sim["pos_x"].to_numpy()
+                time_sol = df_sol["time"].to_numpy()
+                time_sim = df_sim["time"].to_numpy()
+                if np.any(time_sol-time_sim):
+                    raise ValueError("The same 'time' time series has to be used for both the analytical solution and "
+                                    "the simulation.")
+                
+                peaks_sim = np.r_[first_peak_at, find_peaks(sim)[0]]
+                peaks_sol = np.r_[first_peak_at, find_peaks(sol)[0]]
+                if peaks_sim[1]/peaks_sol[1] < 0.7:
+                    peaks_sim = peaks_sim[1:]
+                n_peaks = min(peaks_sim.size, peaks_sol.size)
+                peaks_sim = peaks_sim[:n_peaks-1]
+                peaks_sol = peaks_sol[:n_peaks-1]
+
+                period_sim = time_sim[peaks_sim][1:]-time_sim[peaks_sim][:-1]
+                freq_sim = 2*np.pi/period_sim
+                ampl_sim = sim[peaks_sim]
+
+                period_sol = time_sol[peaks_sol][1:]-time_sol[peaks_sol][:-1]
+                freq_sol = 2*np.pi/period_sol
+                ampl_sol = sol[peaks_sol]
+                
+                err_freq_per_period = freq_sol-freq_sim
+                err_freq = np.cumsum(err_freq_per_period)
+                rel_err_freq = err_freq/freq_sol
+
+                err_ampl = ampl_sol-ampl_sim
+                rel_err_ampl = err_ampl/ampl_sol
+
+                res = {
+                    "err_freq": np.r_[err_freq, np.nan],
+                    "rel_err_freq": np.r_[rel_err_freq, np.nan],
+                    "err_ampl": err_ampl,
+                    "rel_err_ampl": rel_err_ampl,
+                }
+                pd.DataFrame(res).to_csv(join(current_dir, "errors.dat"), index=None)
+
