@@ -260,7 +260,7 @@ class ThreeDOFsAirfoil(SimulationResults):
                 self._time_integration_scheme_settings = {"dt": self.time[1]}
             case "RK4":
                 raise NotImplementedError
-            case "HHT-alpha":
+            case "HHT-alpha" | "HHT-alpha-adapted":
                 must_haves = ["alpha", "dt"]
                 self._check_scheme_settings("HHT-alpha", "set_time_integration", must_haves, params_given)
                 self._time_integration_scheme_settings = {param: value for param, value in kwargs.items() if param in 
@@ -291,6 +291,7 @@ class ThreeDOFsAirfoil(SimulationResults):
         dt = self.time[1:]-self.time[:-1]
         self.set_param(inflow=inflow, inflow_angle=inflow_angle, density=density, dt=dt)
         # check whether all necessary settings have been set.
+        #todo sim readiness should include inits of sub modules
         self._check_simulation_readiness(_aero_force=self._aero_force, 
                                          _struct_force=self._struct_force,
                                          _time_integration=self._time_integration)
@@ -311,10 +312,10 @@ class ThreeDOFsAirfoil(SimulationResults):
             # performe time integration
             self.pos[i+1, :], self.vel[i+1, :], self.accel[i+1, :] = self._time_integration(self, i,
                                                                             **self._time_integration_scheme_settings)
-        # i = self.time.size-1
-        # # for the last time step, only the forces are calculated because there is no next time step for the positions
-        # self.aero[i, :] = self._aero_force(self, i, **self._aero_scheme_settings)
-        # self.damp[i, :], self.stiff[i, :] = self._struct_force(self, i, **self._struct_scheme_settings)
+        i = self.time.size-1
+        # for the last time step, only the forces are calculated because there is no next time step for the positions
+        self.aero[i, :] = self._aero_force(self, i, **self._aero_scheme_settings)
+        self.damp[i, :], self.stiff[i, :] = self._struct_force(self, i, **self._struct_scheme_settings)
 
     def _check_simulation_readiness(self, **kwargs):
         """Utility function checking whether all settings given in kwargs have been set.
@@ -887,7 +888,7 @@ class StructForce(Rotations):
         return damping, stiff
 
 
-class TimeIntegration:
+class TimeIntegration(Rotations):
     """Class implementing differnt ways to calculate the position, velocity, and acceleration of the system at the
      next time step.
     """
@@ -898,6 +899,7 @@ class TimeIntegration:
     # RK4: Runge-Kutta 4th order    
 
     def __init__(self) -> None:
+        Rotations.__init__(self)
         self._M_current = None
         self._M_last = None
         self._C_last = None
@@ -938,7 +940,7 @@ class TimeIntegration:
             "eE": None,
             "RK4": None,
             "HHT-alpha": self._init_HHT_alpha,
-            "HHT-alpha_adpated": self._init_HHT_alpha
+            "HHT-alpha-adapted": self._init_HHT_alpha
         }
         return scheme_map[scheme]
     
@@ -975,10 +977,21 @@ class TimeIntegration:
             i: int,
             dt: float,
             **kwargs):  # the kwargs are needed because of the call in simulate():
-        rhs = -self._M_last@sim_res.accel[i, :]-self._C_last@sim_res.vel[i, :]-self._K_last@sim_res.pos[i, :]
+        rot = self.passive_3D_planar(sim_res.pos[i, 2])
+        rot_t = rot.T
+        to_rotate = ["_M_last", "_C_last", "_K_last", "_M_current"]
+        rotated = {}
+        for rotate in to_rotate:
+            rotated[rotate] = rot_t@vars(self)[rotate]@rot
+        M_last = rotated["_M_last"]
+        C_last = rotated["_C_last"]
+        K_last = rotated["_K_last"]
+        M_current = rotated["_M_current"]
+
+        rhs = -M_last@sim_res.accel[i, :]-C_last@sim_res.vel[i, :]-K_last@sim_res.pos[i, :]
         rhs += self._external_current*sim_res.aero[i+1, :]+self._external_last*sim_res.aero[i, :]
-        #todo the following lines are in the EFRot coordinate system!!! Rotate into XYRot
-        accel = solve(self._M_current, rhs, assume_a="sym") 
+        
+        accel = solve(M_current, rhs, assume_a="sym") 
         vel = sim_res.vel[i, :]+dt*((1-self._gamma)*sim_res.accel[i, :]+self._gamma*accel)
         pos = sim_res.pos[i, :]+dt*sim_res.vel[i, :]+dt**2*((0.5-self._beta)*sim_res.accel[i, :]+self._beta*accel)
         return pos, vel, accel
@@ -989,10 +1002,21 @@ class TimeIntegration:
             i: int,
             dt: float,
             **kwargs):  # the kwargs are needed because of the call in simulate():
-        rhs = -self._M_last@sim_res.accel[i, :]-self._C_last@sim_res.vel[i, :]-self._K_last@sim_res.pos[i, :]
+        rot = self.passive_3D_planar(sim_res.pos[i, 2])
+        rot_t = rot.T
+        to_rotate = ["_M_last", "_C_last", "_K_last", "_M_current"]
+        rotated = {}
+        for rotate in to_rotate:
+            rotated[rotate] = rot_t@vars(self)[rotate]@rot
+        M_last = rotated["_M_last"]
+        C_last = rotated["_C_last"]
+        K_last = rotated["_K_last"]
+        M_current = rotated["_M_current"]
+
+        rhs = -M_last@sim_res.accel[i, :]-C_last@sim_res.vel[i, :]-K_last@sim_res.pos[i, :]
         rhs += self._external_current*sim_res.aero[i, :]+self._external_last*sim_res.aero[i-1, :]
-        #todo the following lines are in the EFRot coordinate system!!! Rotate into XYRot
-        accel = solve(self._M_current, rhs, assume_a="sym") 
+        
+        accel = solve(M_current, rhs, assume_a="sym") 
         vel = sim_res.vel[i, :]+dt*((1-self._gamma)*sim_res.accel[i, :]+self._gamma*accel)
         pos = sim_res.pos[i, :]+dt*sim_res.vel[i, :]+dt**2*((0.5-self._beta)*sim_res.accel[i, :]+self._beta*accel)
         return pos, vel, accel
@@ -1054,10 +1078,10 @@ class Oscillations:
     def undamped(self, t: np.ndarray, x_0: np.ndarray=1):
         return x_0*np.cos(self._omega_n*t)
     
-    def damped(self, t: np.ndarray, x_0: np.ndarray=1):
+    def damped(self, t: np.ndarray, x_0: np.ndarray=1, v_0: np.ndarray=0):
         # Theory of Vibration with Applications 2.6-16
         delta = self._zeta*self._omega_n
-        return x_0*np.exp(-delta*t)*(delta/self._omega_d*np.sin(self._omega_d*t)+np.cos(self._omega_d*t))
+        return np.exp(-delta*t)*(x_0*np.cos(self._omega_d*t)+(v_0+delta*x_0)/self._omega_d*np.sin(self._omega_d*t))
     
     def forced(self, t: np.ndarray, amplitude: np.ndarray, frequency: np.ndarray, x_0: np.ndarray, v_0: np.ndarray):
         # Theory of Vibration with Applications 3.1-2 - 3.1-4
@@ -1080,4 +1104,29 @@ class Oscillations:
         transient_shape = np.cos(np.sqrt(1-self._zeta**2)*self._omega_n*t-phase_shift)
         return amplitude/self._K*(1-transient_ampl*transient_shape)
 
+    def rotation(self, T:float, dt: float, force: np.ndarray, x_0: np.ndarray, v_0: np.ndarray, a_0: np.ndarray):
+        def param_matrix(angle, param_edge, param_flap, param_tors):
+            pe = param_edge
+            pf = param_flap
+            pt = param_tors
+            c = np.cos(angle)
+            s = np.sin(angle)
+            return np.asarray([[pe*c**2+pf*s**2, c*s*(pe-pf), 0],
+                               [c*s*(pe-pf), pe*s**2+pf*c**2, 0],
+                               [0, 0, pt]])
+        t_sim = np.linspace(0, T, int(T/dt))
+        pos = np.zeros((t_sim.size, 3))
+        vel = np.zeros((t_sim.size, 3))
+        accel = np.zeros((t_sim.size, 3))
+        force = np.repeat([force], repeats=int(T/dt), axis=0)
 
+        pos[0, :] = x_0
+        vel[0, :] = v_0
+        accel[0, :] = a_0
+        for i in range(int(t_sim.size-1)):
+            f_stiffness = param_matrix(pos[i, 2], *self._K)@pos[i, :]
+            f_damping = param_matrix(pos[i, 2], *self._C)@vel[i, :]
+            accel[i, :] = (force[i, :]-f_stiffness-f_damping)/self._M
+            vel[i+1, :] = vel[i, :]+accel[i, :]*dt
+            pos[i+1, :] = pos[i, :]+(vel[i, :]+vel[i+1, :])/2*dt
+        return t_sim, pos, vel, accel
