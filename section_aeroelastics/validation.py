@@ -1,13 +1,12 @@
-from calculations import AeroForce, Rotations
-import matplotlib.pyplot as plt
+from calculations import AeroForce, Oscillations
 import pandas as pd
 import numpy as np
 from os import listdir
 from os.path import join
 from calculations import ThreeDOFsAirfoil, AeroForce, TimeIntegration, StructForce
-from post_calculations import PostCaluculations
+from post_calculations import PostCaluculations, PostHHT_alpha
 import numpy as np
-from utils_plot import MosaicHandler
+from plotting import HHTalphaPlotter, BLValidationPlotter
 from defaults import DefaultsPlots, DefaultStructure
 from helper_functions import Helper
 import json
@@ -55,152 +54,7 @@ def run_BeddoesLeishman(
     df.to_csv(f_f_aero, index=None)
     
 
-class ValidationPlotter(DefaultsPlots):
-    def __init__(self) -> None:
-        DefaultsPlots.__init__(self)
-
-    def plot_preparation(
-            self,
-            dir_preparation: str,
-            file_polar: str
-            ):
-        dir_plots = helper.create_dir(join(dir_preparation, "plots"))[0]
-        df_section = pd.read_csv(join(dir_preparation, "sep_points.dat"))
-        # df_aerohor = pd.read_csv(join(dir_preparation, "f_lookup_1.dat"))
-        df_polar = pd.read_csv(file_polar, delim_whitespace=True)
-        # alpha_0_aerohor = pd.read_csv(join(dir_preparation, "alpha_0.dat"))["alpha_0"].to_numpy()
-        # alpha_0_aerohor = np.deg2rad(alpha_0_aerohor)
-        with open(join(dir_preparation, "alpha_0.json"), "r") as f:
-            alpha_0_section = np.deg2rad(json.load(f)["alpha_0"])
-            
-        for f_type in ["f_t", "f_n"]:
-            fig, ax = plt.subplots()
-            # ax.plot(df_aerohor["alpha_n"], df_aerohor[f"{f_type}"], **self.plot_settings[f"{f_type}_aerohor"])
-            ax.plot(df_section["alpha"], df_section[f"{f_type}"], 
-                    **self.plot_settings[f"{f_type}_section"])
-            handler = MosaicHandler(fig, ax)
-            handler.update(x_labels=r"$\alpha$ (°)", y_labels=rf"${{{f_type[0]}}}_{{{f_type[2]}}}$ (-)", legend=True)
-            handler.save(join(dir_plots, f"{f_type}_model_comp.pdf"))
-        
-        rot = Rotations()
-        # coeffs_aerohor = np.c_[self._get_C_t(alpha_0_aerohor, df_aerohor["alpha_t"], df_aerohor["f_t"]),
-        #                        self._get_C_n(alpha_0_aerohor, df_aerohor["alpha_n"], df_aerohor["f_n"])]
-        # rot_coeffs_aerohor = rot.rotate_2D(coeffs_aerohor, np.deg2rad(df_aerohor["alpha_n"].to_numpy()))
-        
-        coesffs_section = np.c_[self._get_C_t(alpha_0_section, df_section["alpha"], df_section["f_t"]),
-                                self._get_C_n(alpha_0_section, df_section["alpha"], df_section["f_n"])]
-        rot_coeffs_section = rot.rotate_2D(coesffs_section, np.deg2rad(df_section["alpha"].to_numpy()))
-
-        for i, coeff_type in enumerate(["C_d", "C_l"]):
-            sign = 1 if coeff_type == "C_l" else -1
-            fig, ax = plt.subplots()
-            ax.plot(df_polar["alpha"], df_polar[coeff_type], **self.plot_settings[f"{coeff_type}_meas"])
-            # ax.plot(df_aerohor["alpha_n"], sign*rot_coeffs_aerohor[:, i], 
-            #         **self.plot_settings[f"{coeff_type}_rec_aerohor"])
-            ax.plot(df_section["alpha"], sign*rot_coeffs_section[:, i], 
-                    **self.plot_settings[f"{coeff_type}_rec_section"])
-            handler = MosaicHandler(fig, ax)
-            handler.update(x_labels=r"$\alpha$ (°)", 
-                           y_labels=rf"${{{coeff_type[0]}}}_{{{coeff_type[2]}}}$ (-)", legend=True)
-            handler.save(join(dir_plots, f"{coeff_type}_model_comp.pdf"))
-
-    @staticmethod
-    def plot_model_comparison(dir_results: str):
-        dir_plots = helper.create_dir(join(dir_results, "plots", "model_comp"))[0]
-        # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
-        df_section_general = pd.read_csv(join(dir_results, "general.dat"))
-        df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
-
-        aoas = [col for col in df_section if "alpha" in col]
-        for aoa in aoas:
-            df_section[aoa] = np.rad2deg(df_section[aoa])
-
-        plot_model_compare_params = ["alpha_eff", "alpha_steady", "C_nc", "C_ni", "C_nsEq", "f_n", "f_t", "C_nf",
-                                     "C_tf", "C_nv", "C_l", "C_d"]
-        line_width = 1
-        plt_settings = {
-            "aerohor": {
-                "color": "forestgreen", "lw": line_width, "label": "aerohor"
-            },
-            "section": {
-                "color": "orangered", "lw": line_width, "label": "section"
-            }
-        }
-        y_labels = {
-            "alpha_eff": r"$\alpha_{\text{eff}}$ (°)",
-            "alpha_steady": r"$\alpha_{\text{steady}}$ (°)",
-            "C_nc": r"$C_{\text{nc}}$ (-)", 
-            "C_ni": r"$C_{\text{ni}}$ (-)", 
-            "C_nsEq": r"$C_{\text{nsEq}}$ (-)", 
-            "C_nf": r"$C_{\text{nf}}$ (-)", 
-            "C_tf": r"$C_{\text{tf}}$ (-)", 
-            "C_nv": r"$C_{\text{nv}}$ (-)", 
-            "C_d": r"$C_{\text{d}}$ (-)", 
-            "C_l": r"$C_{\text{l}}$ (-)", 
-            "f_n": r"$f_{\text{n}}$ (-)", 
-            "f_t": r"$f_{\text{t}}$ (-)", 
-        }
-        # t_aerohor = df_aerohor["t"]
-        t_section = df_section_general["time"]
-        for plot_param in plot_model_compare_params:
-            fig, ax = plt.subplots()
-            handler = MosaicHandler(fig, ax)
-            # ax.plot(t_aerohor, df_aerohor[plot_param], **plt_settings["aerohor"])
-            ax.plot(t_section, df_section[plot_param], **plt_settings["section"])
-            handler.update(x_labels="t (s)", y_labels=y_labels[plot_param], legend=True)
-            handler.save(join(dir_plots, f"model_comp_{plot_param}.pdf"))
-        
-        # fig, ax = plt.subplots()
-        # handler = MosaicHandler(fig, ax)
-        # ax.plot(t_section[:-1], df_section["alpha_qs"][:-1], label="qs")
-        # ax.plot(t_section[:-1], df_section["d_alpha_qs_dt"][:-1], label="dadt")
-        # handler.update(x_labels="t (s)", legend=True)
-        # handler.save(join(dir_plots, "extra_aoa.pdf"))
-
-    def plot_meas_comparison(
-        self,
-        file_unsteady_data: str,
-        dir_results: str,
-        period_res: int,
-        ):
-        df_meas = pd.read_csv(file_unsteady_data, delim_whitespace=True)
-        # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
-        df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
-        # map_measurement = {"C_d": " Cdp", "C_l": " Cl"}
-        map_measurement = {"alpha": "AOA", "C_l": "CL", "C_d": "CD"}
-        dir_save = helper.create_dir(join(dir_results, "plots", "meas_comp"))[0]
-        line_width = 1
-        plt_settings = {
-            "aerohor": {
-                "color": "forestgreen", "lw": line_width, "label": "aerohor"
-            },
-            "section": {
-                "color": "orangered", "lw": line_width, "label": "section"
-            }
-        }
-        for coef in ["C_d", "C_l"]:
-            fig, ax = plt.subplots()
-            handler = MosaicHandler(fig, ax)
-            ax.plot(df_meas[map_measurement["alpha"]], df_meas[map_measurement[coef]], 
-                    **self.plot_settings[coef+"_meas"])
-            # ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
-            #         **plt_settings["section"])
-            ax.plot(np.rad2deg(df_section["alpha_steady"][-period_res-1:]), df_section[coef][-period_res-1:], 
-                    **plt_settings["aerohor"])
-            handler.update(x_labels=r"$\alpha_{\text{steady}}$ (°)", y_labels=rf"${{{coef[0]}}}_{{{coef[2]}}}$ (-)",
-                           legend=True)
-            handler.save(join(dir_save, f"{coef}.pdf"))
-
-    @staticmethod
-    def _get_C_t(alpha_0: float, alpha: np.ndarray, f_t: np.ndarray, C_l_slope: float=2*np.pi):
-        return C_l_slope*np.sin(np.deg2rad(alpha)-alpha_0)**2*np.sqrt(np.abs(f_t))*np.sign(f_t)
-
-    @staticmethod
-    def _get_C_n(alpha_0: float, alpha: np.ndarray, f_n: np.ndarray, C_l_slope: float=2*np.pi):
-        return C_l_slope*np.sin(np.deg2rad(alpha)-alpha_0)*((1+np.sqrt(np.abs(f_n))*np.sign(f_n))/2)**2
-
-
-class HHT_alpha_validator(DefaultsPlots, DefaultStructure):
+class HHTalphaValidator(DefaultsPlots, DefaultStructure):
     def __init__(self, dir_polar: str, dir_root_results: str) -> None:
         DefaultsPlots.__init__(self)
         DefaultStructure.__init__(self)
@@ -226,7 +80,7 @@ class HHT_alpha_validator(DefaultsPlots, DefaultStructure):
         response_wanted = {i: [] for i in range(3)}
         for i, (param, val) in enumerate(struc_params.items()):
             if val == None:
-                struc_params[param] = 1
+                struc_params[param] = 0
                 response_wanted[i%3].append(False)
             else:
                 response_wanted[i%3].append(True)
@@ -241,25 +95,23 @@ class HHT_alpha_validator(DefaultsPlots, DefaultStructure):
                                            "mom_inertia": mom_inertia if mom_inertia is not None else 1}
         self._struct_force = StructForce(**struc_params)
 
-    def simulate(
+    def simulate_case(
             self,
             case_name: str,
-            alpha: float,
+            alpha_HHT: float,
             time: np.ndarray,
             init_pos: np.ndarray,
             init_vel: np.ndarray,
             init_accel: np.ndarray,
             f_edge: np.ndarray=None,
             f_flap: np.ndarray=None,
-            f_tors: np.ndarray=None
+            f_tors: np.ndarray=None,
+            scheme: str="HHT-alpha"
     ):
-        use = ["f_edge", "f_flap", "f_tors"]
-        force = {param: val for param, val in locals().items() if param in use}
         f_ext = np.zeros((time.size, 3))
         f_response_wanted = {i: True for i in range(3)}
-        for i, (param, val) in enumerate(force.items()):
+        for i, val in enumerate([f_edge, f_flap, f_tors]):
             if val is None:
-                force[param] = 1
                 f_response_wanted[i] = False
             else:
                 f_ext[:, i] = val
@@ -270,30 +122,8 @@ class HHT_alpha_validator(DefaultsPlots, DefaultStructure):
                 raise ValueError(f"{direction} structural parameter(s) is(are) missing.")
             
         dir_save = helper.create_dir(join(self.dir_root_results, case_name))[0]
-        airfoil = ThreeDOFsAirfoil(dir_polar=self.dir_polar, time=time, **self._struc_params)
-        airfoil.pos[0, :] = init_pos
-        airfoil.vel[0, :] = init_vel
-        airfoil.accel[0, :] = init_accel
-        
-        airfoil.aero = f_ext
-        time_integrator = TimeIntegration()
-        time_integrator._init_HHT_alpha(airfoil, alpha, t[1])
-        airfoil.damp = np.zeros((t.size, 3))
-        airfoil.stiff = np.zeros((t.size, 3))
-
-        for i in range(t.size-1):
-            pos, vel, accel = time_integrator._HHT_alpha(airfoil, i, t[1])
-            # print(airfoil.pos)
-            airfoil.pos[i+1, :] = pos
-            airfoil.vel[i+1, :] = vel
-            airfoil.accel[i+1, :] = accel
-
-            #todo check coordinate sytsem under rotation (also check for force)
-            airfoil.damp[i, :], airfoil.stiff[i, :] = self._struct_force._linear(airfoil, i)
-            
-        i = t.size-1
-        airfoil.damp[i, :], airfoil.stiff[i, :] = self._struct_force._linear(airfoil, i)
-        airfoil.inflow = np.zeros((time.size, 2))
+        airfoil = self._simulate(time=time, f_external=f_ext, init_pos=init_pos, init_vel=init_vel,
+                                 init_accel=init_accel, alpha_HHT=alpha_HHT, scheme=scheme)
         airfoil._save(dir_save)
         with open(join(dir_save, "section_data.json"), "w") as f:
             json.dump(self._struc_params, f, indent=4)
@@ -304,99 +134,214 @@ class HHT_alpha_validator(DefaultsPlots, DefaultStructure):
         post_calc.kinetic_energy()
         post_calc.potential_energy()
 
-    def plot(
-        self, 
-        case_name: str, 
-        solution: dict[str, np.ndarray], 
-        directions_wanted: list=["edge", "flap", "tors"],
-        error_type: str="absolute"):
-        dir_res = join(self.dir_root_results, case_name, "plots")
-        df_general = pd.read_csv(join(dir_res, self._dfl_filenames["general"])) 
-        time = df_general["time"]
-        df_f_aero = pd.read_csv(join(dir_res, self._dfl_filenames["f_aero"]))
-        df_f_struct = pd.read_csv(join(dir_res, self._dfl_filenames["f_structural"]))
-        df_work = pd.read_csv(join(dir_res, self._dfl_filenames["work"]))
-        df_e_kin = pd.read_csv(join(dir_res, self._dfl_filenames["e_kin"]))
-        df_e_pot = pd.read_csv(join(dir_res, self._dfl_filenames["e_pot"]))
 
-        axs_labels_pos = [["pos", "aero"],
-                          ["damp", "stiff"]] 
-        fig, axs = plt.subplot_mosaic(axs_labels_pos, tight_layout=True)
-        fig_err, axs_err = plt.subplot_mosaic(axs_labels_pos, tight_layout=True)
-        y_labels = {"pos": "position (m), (°)", "aero": r"$f_{\text{external}}$ (N), (Nm)",
-                    "damp": r"$f_{\text{damping}}$ (N), (Nm)", "stiff": r"$f_{\text{stiffness}}$ (N), (Nm)"}
-        y_labels_err = {ax: f"{error_type} error {label[:label.find("(")-1]}" for ax, label in y_labels.items()}
+    def simulate_undamped(
+            self,
+            n_steps_per_oscillation: list|np.ndarray,
+            nat_frequency: list|np.ndarray,
+            n_oscillations: float,
+            x_0: float = 1,
+            scheme: str="HHT-alpha"
+            ):
+        counter = 0
+        for n_dt in n_steps_per_oscillation:
+            for omega_n in nat_frequency:
+                t = np.linspace(0, n_oscillations*2*np.pi/omega_n, n_dt*n_oscillations+1)
+                self.set_structure(1, 1, stiffness_edge=omega_n**2)
+                results = self._simulate(t, np.zeros((t.size, 3)), x_0, 0, -x_0*omega_n**2, scheme)
 
-        dfs = {"pos": df_general, "aero": df_f_aero, "damp": df_f_struct, "stiff": df_f_struct}
-        legend = self._plot(axs, axs_err, dfs, time, directions_wanted, error_type)
-        handler = MosaicHandler(fig, axs)
-        handler.update(legend=legend, y_labels=y_labels, x_labels="time (s)")
-        handler.save(join(dir_res, "pos.pdf"))
+                dir_save = helper.create_dir(join(self.dir_root_results, scheme, f"{counter}"))[0]
+                results._save(dir_save)
+                with open(join(dir_save, "info.json"), "w") as f:
+                    json.dump({"omega_n": omega_n, "n_dt": n_dt}, f)
+
+                osci = Oscillations(1, omega_n, 0)
+                df_analytical = pd.DataFrame({"time": t, "solution": osci.undamped(t, x_0)})
+                df_analytical.to_csv(join(dir_save, "analytical_sol.dat"), index=None)
+                counter += 1
+
+    def simulate_damped(
+            self,
+            natural_frequencies: list|np.ndarray,
+            damping_coefficients: list|np.ndarray,
+            n_steps_per_oscillation: list|np.ndarray,
+            n_oscillations: float,
+            x_0: float = 1,
+            scheme: str="HHT-alpha"
+            ):
+        M = 1
+        counter = 0
+        for n_dt in n_steps_per_oscillation:
+            for omega_n in natural_frequencies:
+                for damping_coeff in damping_coefficients:
+                    K = omega_n**2*M
+                    C = damping_coeff*2*np.sqrt(M*K)
+                    t = np.linspace(0, n_oscillations*2*np.pi/omega_n, n_dt*n_oscillations+1)
+                    self.set_structure(1, mass=M, stiffness_edge=K, damping_edge=C)
+                    results = self._simulate(t, np.zeros((t.size, 3)), x_0, 0, -x_0*omega_n**2, scheme)
+
+                    dir_save = helper.create_dir(join(self.dir_root_results, scheme, f"{counter}"))[0]
+                    results._save(dir_save)
+                    with open(join(dir_save, "info.json"), "w") as f:
+                        json.dump({"omega_n": omega_n, "n_dt": n_dt, "damping_coeff": damping_coeff}, f)
+
+                    osci = Oscillations(1, omega_n, damping_coeff)
+                    df_analytical = pd.DataFrame({"time": t, "solution": osci.damped(t, x_0)})
+                    df_analytical.to_csv(join(dir_save, "analytical_sol.dat"), index=None)
+                    counter += 1
+    
+    def simulate_forced(
+            self,
+            damping_coefficients: list|np.ndarray,
+            n_steps_per_oscillation: list|np.ndarray,
+            force_frequencies:list|np.ndarray,
+            n_oscillations: float,
+            x_0: float = 1,
+            scheme: str="HHT-alpha"
+            ):
+        M = 1
+        counter = 0
+        omega_n = 1
+        for n_dt in n_steps_per_oscillation:
+            for damping_coeff in damping_coefficients:
+                K = omega_n**2*M
+                C = damping_coeff*2*np.sqrt(M*K)
+                omega_d = omega_n*np.sqrt(1-damping_coeff**2)
+                t = np.linspace(0, n_oscillations*2*np.pi/omega_d, n_dt*n_oscillations+1)
+                self.set_structure(1, mass=M, stiffness_edge=K, damping_edge=C)
+                for force_freq in force_frequencies:
+                    f = np.c_[np.sin(force_freq*t), np.zeros((t.size, 2))]
+                    results = self._simulate(t, f, x_0, 0, -x_0*omega_n**2, scheme)
+
+                    dir_save = helper.create_dir(join(self.dir_root_results, scheme, f"{counter}"))[0]
+                    results._save(dir_save)
+                    with open(join(dir_save, "info.json"), "w") as f:
+                        json.dump({"omega_n": omega_n, "n_dt": n_dt, "damping_coeff": damping_coeff, 
+                                    "f_amplitude": 1, "f_freq": force_freq}, f)
+
+                    osci = Oscillations(1, omega_n, damping_coeff)
+                    df_analytical = pd.DataFrame({"time": t, "solution": osci.forced(t, 1, force_freq, x_0)})
+                    df_analytical.to_csv(join(dir_save, "analytical_sol.dat"), index=None)
+                    counter += 1
+
+    def simulate_forced_composite(
+            self,
+            damping_coefficient: float,
+            n_steps_per_oscillation: list|np.ndarray,
+            force_frequencies: list|np.ndarray,
+            force_amplitude: list|np.ndarray,
+            n_oscillations: list|np.ndarray,
+            x_0: float = 1,
+            v_0: float = 1,
+            scheme: str="HHT-alpha"
+            ):
+        if force_amplitude.size != force_frequencies.size:
+            raise ValueError("The same number of amplitudes and frequencies for the external excitations have to be "
+                             "given.")
+        M = 1
+        counter = 0
+        omega_n = 1
+        K = omega_n**2*M
+        C = damping_coefficient*2*np.sqrt(M*K)
+        omega_d = omega_n*np.sqrt(1-damping_coefficient**2)
+        self.set_structure(1, mass=M, stiffness_edge=K, damping_edge=C)
+        for n_dt in n_steps_per_oscillation:
+            t = np.linspace(0, n_oscillations*2*np.pi/omega_d, n_dt*n_oscillations+1)[:, np.newaxis]
+            f = np.c_[(force_amplitude*np.sin(force_frequencies*t)).sum(axis=1), np.zeros((t.size, 2))]
+            t = t.squeeze()
+            results = self._simulate(t, f, x_0, v_0, -x_0*omega_n**2, scheme)
+
+            dir_save = helper.create_dir(join(self.dir_root_results, scheme, f"{counter}"))[0]
+            results._save(dir_save)
+            with open(join(dir_save, "info.json"), "w") as f:
+                json.dump({"omega_n": omega_n, "n_dt": n_dt, "damping_coeff": damping_coefficient, 
+                            "f_amplitude": force_amplitude.tolist(), "f_freq": force_frequencies.tolist()}, f)
+
+            osci = Oscillations(1, omega_n, damping_coeff)
+            df_analytical = pd.DataFrame({"time": t, "solution": osci.forced(t, force_amplitude, force_frequencies, 
+                                                                             x_0, v_0)})
+            df_analytical.to_csv(join(dir_save, "analytical_sol.dat"), index=None)
+            counter += 1
         
-        handler_err = MosaicHandler(fig_err, axs_err)
-        handler_err.update(legend=legend, y_labels=y_labels_err, x_labels="time (s)")
-        handler_err.save(join(dir_res, "error_pos.pdf"))
+    def simulate_step(
+            self,
+            natural_frequencies: list|np.ndarray,
+            damping_coefficients: list|np.ndarray,
+            n_steps_per_oscillation: list|np.ndarray,
+            n_oscillations: float,
+            scheme: str="HHT-alpha"
+            ):
+        M = 1
+        counter = 0
+        for n_dt in n_steps_per_oscillation:
+            for omega_n in natural_frequencies:
+                for damping_coeff in damping_coefficients:
+                    K = omega_n**2*M
+                    C = damping_coeff*2*np.sqrt(M*K)
+                    t = np.linspace(0, n_oscillations*2*np.pi/omega_n, n_dt*n_oscillations+1)
+                    self.set_structure(1, mass=M, stiffness_edge=K, damping_edge=C)
 
-        fig, axs = plt.subplot_mosaic([["total", "work"],
-                                       ["e_kin", "e_pot"]], tight_layout=True)
-        y_labels = {"total": "Energy (Nm)", "work": "Work (Nm)",
-                   "e_kin": f"Kinetic energy (Nm)", "e_pot": "Potential energy (Nm)"}
-        y_labels_err = {ax: f"{error_type} error {label[:label.find("(")-1]}" for ax, label in y_labels.items()}
-        df_total = pd.concat([df_e_kin.sum(axis=1), df_e_pot.sum(axis=1)], keys=["e_kin", "e_pot"], axis=1)
-        df_total["e_total"] = df_total.sum(axis=1)
-        dfs = {"total": df_total, "work": df_work, "e_kin": df_e_kin, "pot": df_e_pot}
-        directions_wanted += ["kin", "pot", "total"]
-        legend = self._plot(axs, axs_err, dfs, time, directions_wanted, error_type)
+                    f = np.c_[np.ones_like(t), np.zeros((t.size, 2))]
+                    results = self._simulate(t, f, 0, 0, 0, scheme)
 
-        handler = MosaicHandler(fig, axs)
-        handler.update(legend=legend, y_labels=y_labels, x_labels="time (s)")
-        handler.save(join(dir_res, "energy.pdf"))
+                    dir_save = helper.create_dir(join(self.dir_root_results, scheme, f"{counter}"))[0]
+                    results._save(dir_save)
+                    with open(join(dir_save, "info.json"), "w") as f:
+                        json.dump({"omega_n": omega_n, "n_dt": n_dt, "damping_coeff": damping_coeff, 
+                                   "step_amplitude": 1}, f)
 
-        handler_err = MosaicHandler(fig_err, axs_err)
-        handler_err.update(legend=legend, y_labels=y_labels_err, x_labels="time (s)")
-        handler_err.save(join(dir_res, "error_energy.pdf"))
-    
-    @staticmethod
-    def _plot(
-        axs: dict[str], 
-        axs_err: dict[str], 
-        dfs: dict[str, pd.DataFrame], 
+                        osci = Oscillations(1, omega_n, damping_coeff)
+                        df_analytical = pd.DataFrame({"time": t, "solution": osci.step(t, 1)})
+                        df_analytical.to_csv(join(dir_save, "analytical_sol.dat"), index=None)
+                        counter += 1
+    def _simulate(
+        self,
         time: np.ndarray,
-        directions_wanted: list[str],
-        error_type: str="absolute"):
-        legend = {}
-        for (param_type, ax), ax_err in zip(axs.items(), axs_err.values()):
-            df = dfs[param_type]
-            for col in df.columns:
-                correct_type = param_type in col
-                col_of_interest = np.count_nonzero(df[col])
-                correct_direction = any([direction in col for direction in directions_wanted])
-                if not all([correct_type, col_of_interest, correct_direction]):
-                    continue
-                try:
-                    solution[col]
-                except KeyError:
-                    raise KeyError(f"Solution missing for '{col}'. Add those to solution['{col}'].")
-                label = col[col.rfind("_")+1:]
-                ax.plot(time, df[col], label=label)
-                ax.plot(time, solution[col], "k", linestyle="--", label="sol")
-                match error_type:
-                    case "absolute":
-                            ax_err.plot(time, solution[col]-df[col], label=label)
-                    case "relative":
-                            ax_err.plot(time, (solution[col]-df[col])/solution[col], label=label)
-                    case _:
-                            raise ValueError(f"'error_type' can be 'absolute' or 'relative' but was {error_type}.")
-                legend[param_type] = True
-        return legend
-    
+        f_external: np.ndarray,
+        init_pos: np.ndarray,
+        init_vel: np.ndarray,
+        init_accel: np.ndarray,
+        scheme: str="HHT-alpha",
+        alpha_HHT: float=0.1,
+        ) -> ThreeDOFsAirfoil:
+        airfoil = ThreeDOFsAirfoil(dir_polar=self.dir_polar, time=time, **self._struc_params)
+        airfoil.pos[0, :] = init_pos
+        airfoil.vel[0, :] = init_vel
+        airfoil.accel[0, :] = init_accel
+        
+        airfoil.aero = f_external
+        time_integrator = TimeIntegration()
+        time_integrator._init_HHT_alpha(airfoil, alpha_HHT, time[1])
+        integration_func = time_integrator.get_time_step_function(scheme)
+        airfoil.damp = np.zeros((time.size, 3))
+        airfoil.stiff = np.zeros((time.size, 3))
 
+        for i in range(time.size-1):
+            pos, vel, accel = integration_func(airfoil, i, time[1])
+            airfoil.pos[i+1, :] = pos
+            airfoil.vel[i+1, :] = vel
+            airfoil.accel[i+1, :] = accel
+
+            #todo check coordinate sytsem under rotation (also check for force)
+            airfoil.damp[i, :], airfoil.stiff[i, :] = self._struct_force._linear(airfoil, i)
+            
+        i = time.size-1
+        airfoil.damp[i, :], airfoil.stiff[i, :] = self._struct_force._linear(airfoil, i)
+        airfoil.inflow = np.zeros((time.size, 2))
+        return airfoil
+    
+  
 if __name__ == "__main__":
     do = {
         "run_simulation": False,
         "plot_results": False,
-        "calc_HHT_alpha_response": True,
-        "plot_HHT_alpha_response": True
+        "calc_HHT_alpha_response": False,
+        "plot_HHT_alpha_response": False,
+        "HHT_alpha_undamped": False,
+        "HHT_alpha_damped": False,
+        "HHT_alpha_forced": False,
+        "HHT_alpha_forced_composite": True,
+        "HHT_alpha_step": False,
     }
     dir_airfoil = "data/FFA_WA3_221"
     dir_HHT_alpha_validation = "data/HHT_alpha_validation"
@@ -425,7 +370,7 @@ if __name__ == "__main__":
         T = 10
         dt = 0.1
         t = dt*np.arange(T/dt+1)
-        alpha = 0.1
+        alpha_HHT = 0.1
 
         init_pos = (1, 0, 0)
         init_vel = (0, 0, 0)
@@ -443,24 +388,83 @@ if __name__ == "__main__":
         stiffness_flap = None
         stiffness_tors = None
 
-        damping_edge = 0
+        damping_edge = 1
         damping_flap = None
         damping_tors = None
 
     if do["calc_HHT_alpha_response"]:
-        validator = HHT_alpha_validator(dir_airfoil, dir_HHT_alpha_validation)
+        validator = HHTalphaValidator(dir_airfoil, dir_HHT_alpha_validation)
         validator.set_structure(chord=chord,mass=mass,mom_inertia=mom_inertia,stiffness_edge=stiffness_edge,
                                 stiffness_flap=stiffness_flap,stiffness_tors=stiffness_tors,damping_edge=damping_edge,
                                 damping_flap=damping_flap,damping_tors=damping_tors)   
-        validator.simulate(case_name=HHT_alpha_case, time=t, alpha=alpha, init_pos=init_pos,init_vel=init_vel,
-                           init_accel=init_accel, f_edge=force_edge, f_flap=force_flap, f_tors=force_tors)
+        validator.simulate_case(case_name=HHT_alpha_case, time=t, alpha_HHT=alpha_HHT, init_pos=init_pos,
+                                init_vel=init_vel, init_accel=init_accel, f_edge=force_edge, f_flap=force_flap, 
+                                f_tors=force_tors)
         
     if do["plot_HHT_alpha_response"]:
-        validator = HHT_alpha_validator(dir_airfoil, dir_HHT_alpha_validation)
-        
-        solution = {
-            "pos_edge": np.cos(np.sqrt(stiffness_edge/mass)*t),
-            "stiff_edge": -np.cos(np.sqrt(stiffness_edge/mass)*t),
-            # "e_total": 
-        }
-        validator.plot(case_name=HHT_alpha_case, solution=solution)
+        plotter = HHTalphaPlotter()
+        plotter.plot_case(case_dir=join(dir_HHT_alpha_validation, HHT_alpha_case))
+
+    if do["HHT_alpha_undamped"]:
+        n_oscillations = 10
+        n_t_per_oscillation = [8]  # should be a multiple of 4 to get the analytical peaks right
+        omega_n = [1, 2, 3, 4]
+        root_dir = join(dir_HHT_alpha_validation, "undamped")
+        validator = HHTalphaValidator(dir_airfoil, root_dir)
+        validator.simulate_undamped(n_t_per_oscillation, omega_n, n_oscillations, scheme="HHT-alpha")
+        PostHHT_alpha().amplitude_and_period(root_dir)
+        HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
+
+    if do["HHT_alpha_damped"]:
+        n_oscillations = 10
+        n_t_per_oscillation = [32]  # should be a multiple of 4 to get the analytical peaks right
+        omega_n = [1, 2, 3, 4]
+        damping_coeffs = [0.1, 0.2, 0.3]
+        root_dir = join(dir_HHT_alpha_validation, "damped")
+        validator = HHTalphaValidator(dir_airfoil, root_dir)
+        validator.simulate_damped(omega_n, damping_coeffs, n_t_per_oscillation, n_oscillations, scheme="HHT-alpha")
+        PostHHT_alpha().amplitude_and_period(root_dir)
+        HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
+    
+    if do["HHT_alpha_forced"]:
+        n_oscillations = 20
+        n_t_per_oscillation = [12]  # should be a multiple of 4 to get the analytical peaks right
+        force_freq = [0.6, 0.8, 1, 1.2, 1.4]
+        damping_coeffs = [0.05, 0.1, 0.2]
+        root_dir = join(dir_HHT_alpha_validation, "forced")
+        # root_dir = join(dir_HHT_alpha_validation, "forced_force_term_adapted")
+        validator = HHTalphaValidator(dir_airfoil, root_dir)
+        validator.simulate_forced(damping_coeffs, n_t_per_oscillation, force_freq, n_oscillations, scheme="HHT-alpha")
+        validator.simulate_forced(damping_coeffs, n_t_per_oscillation, force_freq, n_oscillations,
+                                   scheme="HHT-alpha-adapted")
+        PostHHT_alpha().amplitude_and_period(root_dir)
+        HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
+    
+    if do["HHT_alpha_forced_composite"]:
+        n_oscillations = 40
+        n_t_per_oscillation = [12, 24, 64]  # should be a multiple of 4 to get the analytical peaks right
+        force_freq = np.asarray([0.6, 0.8, 1, 1.2, 1.4])  # natural frequency is 1
+        force_ampl = np.asarray([1, 1, 1, 1, 1])
+        damping_coeff = 0.1
+        x_0 = 1
+        v_0 = -4
+        root_dir = join(dir_HHT_alpha_validation, "forced_composite")
+        # root_dir = join(dir_HHT_alpha_validation, "forced_force_term_adapted")
+        validator = HHTalphaValidator(dir_airfoil, root_dir)
+        validator.simulate_forced_composite(damping_coeff, n_t_per_oscillation, force_freq, force_ampl,
+                                            n_oscillations, x_0, v_0, scheme="HHT-alpha")
+        validator.simulate_forced_composite(damping_coeff, n_t_per_oscillation, force_freq, force_ampl,
+                                            n_oscillations, x_0, v_0, scheme="HHT-alpha-adapted")
+        PostHHT_alpha().amplitude_and_period(root_dir)
+        HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
+
+    if do["HHT_alpha_step"]:
+        n_oscillations = 10
+        n_t_per_oscillation = [12]  # should be a multiple of 4 to get the analytical peaks right
+        omega_n = [1, 2, 3, 4]
+        damping_coeffs = [0.1, 0.2, 0.3]
+        root_dir = join(dir_HHT_alpha_validation, "step")
+        validator = HHTalphaValidator(dir_airfoil, root_dir)
+        validator.simulate_step(omega_n, damping_coeffs, n_t_per_oscillation, n_oscillations, scheme="HHT-alpha")
+        PostHHT_alpha().amplitude_and_period(root_dir)
+        HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
