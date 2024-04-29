@@ -1,12 +1,15 @@
-from utils_plot import Shapes, PlotPreparation, AnimationPreparation
+from utils_plot import Shapes, PlotPreparation, AnimationPreparation, MosaicHandler
 from calculations import Rotations
 from defaults import DefaultsPlots, DefaultStructure
 import pandas as pd
 import numpy as np
 import json
 import matplotlib.animation as animation
+import matplotlib.pyplot as plt
 import matplotlib
 from os.path import join
+from os import listdir
+from scipy.signal import find_peaks
 from helper_functions import Helper
 from typing import Callable
 helper = Helper()
@@ -344,7 +347,301 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
         ani.save(join(self.dir_plots, "animation_energy.mp4"), writer=writer)
         
 
+class HHTalphaPlotter(DefaultStructure):
+    def __init__(self) -> None:
+        DefaultStructure.__init__(self)
 
+    @staticmethod
+    def sol_and_sim(root_dir: str, parameters: list[str]):
+        dir_plot = helper.create_dir(join(root_dir, "plots"))[0]
+        schemes = listdir(root_dir)
+        schemes.pop(schemes.index("plots"))
+        case_numbers = []
+        for i, scheme in enumerate(schemes):
+            case_numbers.append(listdir(join(root_dir, scheme)))
+            if len(case_numbers) == 2:
+                if not case_numbers[0] == case_numbers[1]:
+                    raise ValueError(f"Scheme '{schemes[i-1]}' and '{scheme[i]}' do not have the same case numbers: \n"
+                                     f"Scheme '{schemes[i-1]}': {case_numbers[0]}\n"
+                                     f"Scheme '{schemes[i]}': {case_numbers[1]}\n")
+                case_numbers.pop(0)
+                
+        info = {}
+        map_scheme_to_label = {
+            "HHT-alpha": "o.g.",
+            "HHT-alpha-adapted": "adpt."
+        }
+        for case_number in case_numbers[0]:
+            fig, axs = plt.subplots(1, 2, figsize=(10, 5), tight_layout=True)
+            axs = {"response": axs[0], "rel_err": axs[1]}
+            for i, scheme in enumerate(schemes):
+                current_dir = join(root_dir, scheme, case_number)
+                df_sol = pd.read_csv(join(current_dir, "analytical_sol.dat"))
+                df_sim = pd.read_csv(join(current_dir, "general.dat"))
+                df_err = pd.read_csv(join(current_dir, "errors.dat"))
+                
+                peaks_sol = find_peaks(df_sol["solution"])[0]
+                peaks_sim = find_peaks(df_sim["pos_x"])[0]
+                if peaks_sim[1]/peaks_sol[1] < 0.7:
+                    peaks_sim = peaks_sim[1:]
+                n_peaks = min(peaks_sim.size, peaks_sol.size)
 
+                i_last_peak_sim = peaks_sim[:n_peaks-1][-1]+1
+                i_last_peak_sol = peaks_sol[:n_peaks-1][-1]+1
+                if i == 0:
+                    axs["response"].plot(df_sol["time"][:i_last_peak_sol], 
+                                         df_sol["solution"][:i_last_peak_sol], "k--", label="sol")
+                axs["response"].plot(df_sim["time"][:i_last_peak_sim], 
+                                     df_sim["pos_x"][:i_last_peak_sim], 
+                                     label=r"HHT-$\alpha$"+f" {map_scheme_to_label[scheme]}")
+                for param in parameters:
+                    axs["rel_err"].plot(df_err[f"rel_err_{param}"]*100, label=f"{param} {map_scheme_to_label[scheme]}")
 
+                with open(join(current_dir, "info.json"), "r") as f:
+                    tmp_info = json.load(f)|{"scheme": scheme}
+                
+                if info == {}:
+                    info = {param: [] for param in tmp_info.keys()}
+                else:
+                    for param, value in tmp_info.items():
+                        info[param].append(value)
+            handler = MosaicHandler(fig, axs)
+            x_labels = {"response": "time (s)", "rel_err": "oscillation number (-)"}
+            y_labels = {"response": "position (m)", "rel_err": "relative error (%)"}
+            handler.update(x_labels=x_labels, y_labels=y_labels, legend=True)
+            handler.save(join(dir_plot, f"{case_number}.pdf"))
+        pd.DataFrame(info).to_csv(join(dir_plot, "info.dat"), index=None)
+
+    def plot_case(
+        self, 
+        case_dir: str, 
+        solution: dict[str, np.ndarray], 
+        directions_wanted: list=["edge", "flap", "tors"],
+        error_type: str="absolute"):
+        dir_plots = join(case_dir, "plots")
+        df_general = pd.read_csv(join(case_dir, self._dfl_filenames["general"])) 
+        time = df_general["time"]
+        df_f_aero = pd.read_csv(join(case_dir, self._dfl_filenames["f_aero"]))
+        df_f_struct = pd.read_csv(join(case_dir, self._dfl_filenames["f_structural"]))
+        df_work = pd.read_csv(join(case_dir, self._dfl_filenames["work"]))
+        df_e_kin = pd.read_csv(join(case_dir, self._dfl_filenames["e_kin"]))
+        df_e_pot = pd.read_csv(join(case_dir, self._dfl_filenames["e_pot"]))
+
+        axs_labels_pos = [["pos", "aero"],
+                          ["damp", "stiff"]] 
+        fig, axs = plt.subplot_mosaic(axs_labels_pos, tight_layout=True)
+        fig_err, axs_err = plt.subplot_mosaic(axs_labels_pos, tight_layout=True)
+        y_labels = {"pos": "position (m), (°)", "aero": r"$f_{\text{external}}$ (N), (Nm)",
+                    "damp": r"$f_{\text{damping}}$ (N), (Nm)", "stiff": r"$f_{\text{stiffness}}$ (N), (Nm)"}
+        y_labels_err = {ax: f"{error_type} error {label[:label.find("(")-1]}" for ax, label in y_labels.items()}
+
+        helper.create_dir(dir_plots)
+        dfs = {"pos": df_general, "aero": df_f_aero, "damp": df_f_struct, "stiff": df_f_struct}
+        legend = self._plot(axs, axs_err, dfs, solution, time, directions_wanted, error_type)
+        handler = MosaicHandler(fig, axs)
+        handler.update(legend=legend, y_labels=y_labels, x_labels="time (s)")
+        handler.save(join(dir_plots, "pos.pdf"))
         
+        handler_err = MosaicHandler(fig_err, axs_err)
+        handler_err.update(legend=legend, y_labels=y_labels_err, x_labels="time (s)")
+        handler_err.save(join(dir_plots, "error_pos.pdf"))
+
+        fig, axs = plt.subplot_mosaic([["total", "work"],
+                                       ["e_kin", "e_pot"]], tight_layout=True)
+        y_labels = {"total": "Energy (Nm)", "work": "Work (Nm)",
+                   "e_kin": f"Kinetic energy (Nm)", "e_pot": "Potential energy (Nm)"}
+        y_labels_err = {ax: f"{error_type} error {label[:label.find("(")-1]}" for ax, label in y_labels.items()}
+        df_total = pd.concat([df_e_kin.sum(axis=1), df_e_pot.sum(axis=1)], keys=["e_kin", "e_pot"], axis=1)
+        df_total["e_total"] = df_total.sum(axis=1)
+        dfs = {"total": df_total, "work": df_work, "e_kin": df_e_kin, "pot": df_e_pot}
+        directions_wanted += ["kin", "pot", "total"]
+        legend = self._plot(axs, axs_err, dfs, solution, time, directions_wanted, error_type)
+
+        handler = MosaicHandler(fig, axs)
+        handler.update(legend=legend, y_labels=y_labels, x_labels="time (s)")
+        handler.save(join(dir_plots, "energy.pdf"))
+
+        handler_err = MosaicHandler(fig_err, axs_err)
+        handler_err.update(legend=legend, y_labels=y_labels_err, x_labels="time (s)")
+        handler_err.save(join(dir_plots, "error_energy.pdf"))
+        
+    @staticmethod
+    def _plot(
+        axs: dict[str], 
+        axs_err: dict[str], 
+        dfs: dict[str, pd.DataFrame], 
+        solution: dict[str, np.ndarray],
+        time: np.ndarray,
+        directions_wanted: list[str],
+        error_type: str="absolute"):
+        legend = {}
+        for (param_type, ax), ax_err in zip(axs.items(), axs_err.values()):
+            df = dfs[param_type]
+            for col in df.columns:
+                correct_type = param_type in col
+                col_of_interest = np.count_nonzero(df[col])
+                correct_direction = any([direction in col for direction in directions_wanted])
+                if not all([correct_type, col_of_interest, correct_direction]):
+                    continue
+                try:
+                    solution[col]
+                except KeyError:
+                    raise KeyError(f"Solution missing for '{col}'. Add those to solution['{col}'].")
+                label = col[col.rfind("_")+1:]
+                ax.plot(time, df[col], label=label)
+                ax.plot(time, solution[col], "k", linestyle="--", label="sol")
+                match error_type:
+                    case "absolute":
+                            ax_err.plot(time, solution[col]-df[col], label=label)
+                    case "relative":
+                            ax_err.plot(time, (solution[col]-df[col])/solution[col], label=label)
+                    case _:
+                            raise ValueError(f"'error_type' can be 'absolute' or 'relative' but was {error_type}.")
+                legend[param_type] = True
+        return legend
+    
+
+
+class BLValidationPlotter(DefaultsPlots):
+    def __init__(self) -> None:
+        DefaultsPlots.__init__(self)
+
+    def plot_preparation(
+            self,
+            dir_preparation: str,
+            file_polar: str
+            ):
+        dir_plots = helper.create_dir(join(dir_preparation, "plots"))[0]
+        df_section = pd.read_csv(join(dir_preparation, "sep_points.dat"))
+        # df_aerohor = pd.read_csv(join(dir_preparation, "f_lookup_1.dat"))
+        df_polar = pd.read_csv(file_polar, delim_whitespace=True)
+        # alpha_0_aerohor = pd.read_csv(join(dir_preparation, "alpha_0.dat"))["alpha_0"].to_numpy()
+        # alpha_0_aerohor = np.deg2rad(alpha_0_aerohor)
+        with open(join(dir_preparation, "alpha_0.json"), "r") as f:
+            alpha_0_section = np.deg2rad(json.load(f)["alpha_0"])
+            
+        for f_type in ["f_t", "f_n"]:
+            fig, ax = plt.subplots()
+            # ax.plot(df_aerohor["alpha_n"], df_aerohor[f"{f_type}"], **self.plot_settings[f"{f_type}_aerohor"])
+            ax.plot(df_section["alpha"], df_section[f"{f_type}"], 
+                    **self.plot_settings[f"{f_type}_section"])
+            handler = MosaicHandler(fig, ax)
+            handler.update(x_labels=r"$\alpha$ (°)", y_labels=rf"${{{f_type[0]}}}_{{{f_type[2]}}}$ (-)", legend=True)
+            handler.save(join(dir_plots, f"{f_type}_model_comp.pdf"))
+        
+        rot = Rotations()
+        # coeffs_aerohor = np.c_[self._get_C_t(alpha_0_aerohor, df_aerohor["alpha_t"], df_aerohor["f_t"]),
+        #                        self._get_C_n(alpha_0_aerohor, df_aerohor["alpha_n"], df_aerohor["f_n"])]
+        # rot_coeffs_aerohor = rot.rotate_2D(coeffs_aerohor, np.deg2rad(df_aerohor["alpha_n"].to_numpy()))
+        
+        coesffs_section = np.c_[self._get_C_t(alpha_0_section, df_section["alpha"], df_section["f_t"]),
+                                self._get_C_n(alpha_0_section, df_section["alpha"], df_section["f_n"])]
+        rot_coeffs_section = rot.rotate_2D(coesffs_section, np.deg2rad(df_section["alpha"].to_numpy()))
+
+        for i, coeff_type in enumerate(["C_d", "C_l"]):
+            sign = 1 if coeff_type == "C_l" else -1
+            fig, ax = plt.subplots()
+            ax.plot(df_polar["alpha"], df_polar[coeff_type], **self.plot_settings[f"{coeff_type}_meas"])
+            # ax.plot(df_aerohor["alpha_n"], sign*rot_coeffs_aerohor[:, i], 
+            #         **self.plot_settings[f"{coeff_type}_rec_aerohor"])
+            ax.plot(df_section["alpha"], sign*rot_coeffs_section[:, i], 
+                    **self.plot_settings[f"{coeff_type}_rec_section"])
+            handler = MosaicHandler(fig, ax)
+            handler.update(x_labels=r"$\alpha$ (°)", 
+                           y_labels=rf"${{{coeff_type[0]}}}_{{{coeff_type[2]}}}$ (-)", legend=True)
+            handler.save(join(dir_plots, f"{coeff_type}_model_comp.pdf"))
+
+    @staticmethod
+    def plot_model_comparison(dir_results: str):
+        dir_plots = helper.create_dir(join(dir_results, "plots", "model_comp"))[0]
+        # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
+        df_section_general = pd.read_csv(join(dir_results, "general.dat"))
+        df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
+
+        aoas = [col for col in df_section if "alpha" in col]
+        for aoa in aoas:
+            df_section[aoa] = np.rad2deg(df_section[aoa])
+
+        plot_model_compare_params = ["alpha_eff", "alpha_steady", "C_nc", "C_ni", "C_nsEq", "f_n", "f_t", "C_nf",
+                                     "C_tf", "C_nv", "C_l", "C_d"]
+        line_width = 1
+        plt_settings = {
+            "aerohor": {
+                "color": "forestgreen", "lw": line_width, "label": "aerohor"
+            },
+            "section": {
+                "color": "orangered", "lw": line_width, "label": "section"
+            }
+        }
+        y_labels = {
+            "alpha_eff": r"$\alpha_{\text{eff}}$ (°)",
+            "alpha_steady": r"$\alpha_{\text{steady}}$ (°)",
+            "C_nc": r"$C_{\text{nc}}$ (-)", 
+            "C_ni": r"$C_{\text{ni}}$ (-)", 
+            "C_nsEq": r"$C_{\text{nsEq}}$ (-)", 
+            "C_nf": r"$C_{\text{nf}}$ (-)", 
+            "C_tf": r"$C_{\text{tf}}$ (-)", 
+            "C_nv": r"$C_{\text{nv}}$ (-)", 
+            "C_d": r"$C_{\text{d}}$ (-)", 
+            "C_l": r"$C_{\text{l}}$ (-)", 
+            "f_n": r"$f_{\text{n}}$ (-)", 
+            "f_t": r"$f_{\text{t}}$ (-)", 
+        }
+        # t_aerohor = df_aerohor["t"]
+        t_section = df_section_general["time"]
+        for plot_param in plot_model_compare_params:
+            fig, ax = plt.subplots()
+            handler = MosaicHandler(fig, ax)
+            # ax.plot(t_aerohor, df_aerohor[plot_param], **plt_settings["aerohor"])
+            ax.plot(t_section, df_section[plot_param], **plt_settings["section"])
+            handler.update(x_labels="t (s)", y_labels=y_labels[plot_param], legend=True)
+            handler.save(join(dir_plots, f"model_comp_{plot_param}.pdf"))
+        
+        # fig, ax = plt.subplots()
+        # handler = MosaicHandler(fig, ax)
+        # ax.plot(t_section[:-1], df_section["alpha_qs"][:-1], label="qs")
+        # ax.plot(t_section[:-1], df_section["d_alpha_qs_dt"][:-1], label="dadt")
+        # handler.update(x_labels="t (s)", legend=True)
+        # handler.save(join(dir_plots, "extra_aoa.pdf"))
+
+    def plot_meas_comparison(
+        self,
+        file_unsteady_data: str,
+        dir_results: str,
+        period_res: int,
+        ):
+        df_meas = pd.read_csv(file_unsteady_data, delim_whitespace=True)
+        # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
+        df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
+        # map_measurement = {"C_d": " Cdp", "C_l": " Cl"}
+        map_measurement = {"alpha": "AOA", "C_l": "CL", "C_d": "CD"}
+        dir_save = helper.create_dir(join(dir_results, "plots", "meas_comp"))[0]
+        line_width = 1
+        plt_settings = {
+            "aerohor": {
+                "color": "forestgreen", "lw": line_width, "label": "aerohor"
+            },
+            "section": {
+                "color": "orangered", "lw": line_width, "label": "section"
+            }
+        }
+        for coef in ["C_d", "C_l"]:
+            fig, ax = plt.subplots()
+            handler = MosaicHandler(fig, ax)
+            ax.plot(df_meas[map_measurement["alpha"]], df_meas[map_measurement[coef]], 
+                    **self.plot_settings[coef+"_meas"])
+            # ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
+            #         **plt_settings["section"])
+            ax.plot(np.rad2deg(df_section["alpha_steady"][-period_res-1:]), df_section[coef][-period_res-1:], 
+                    **plt_settings["aerohor"])
+            handler.update(x_labels=r"$\alpha_{\text{steady}}$ (°)", y_labels=rf"${{{coef[0]}}}_{{{coef[2]}}}$ (-)",
+                           legend=True)
+            handler.save(join(dir_save, f"{coef}.pdf"))
+
+    @staticmethod
+    def _get_C_t(alpha_0: float, alpha: np.ndarray, f_t: np.ndarray, C_l_slope: float=2*np.pi):
+        return C_l_slope*np.sin(np.deg2rad(alpha)-alpha_0)**2*np.sqrt(np.abs(f_t))*np.sign(f_t)
+
+    @staticmethod
+    def _get_C_n(alpha_0: float, alpha: np.ndarray, f_n: np.ndarray, C_l_slope: float=2*np.pi):
+        return C_l_slope*np.sin(np.deg2rad(alpha)-alpha_0)*((1+np.sqrt(np.abs(f_n))*np.sign(f_n))/2)**2
