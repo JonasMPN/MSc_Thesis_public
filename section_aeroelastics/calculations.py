@@ -211,7 +211,7 @@ class ThreeDOFsAirfoil(SimulationResults):
                 self._check_scheme_settings("BL", "set_aero_calc", must_haves, params_given)
                 self._aero_scheme_settings = {param: value for param, value in kwargs.items() if param in 
                                               must_haves+can_haves}
-                add_aero_sim_params = ["s", "alpha_qs", "X_lag", "Y_lag", "alpha_eff", "C_nc", "d_alpha_qs_dt", "D_i", 
+                add_aero_sim_params = ["s", "alpha_qs", "X_lag", "Y_lag", "alpha_eff", "C_nc", "pitch_rate", "D_i", 
                                        "C_ni", "C_npot", "C_tpot", "D_p", "C_nsEq", "alpha_sEq", "f_t_Dp", "f_n_Dp", 
                                        "D_bl_t", "D_bl_n", "f_t", "f_n", "C_nf", "C_tf", "tau_vortex", "C_nv_instant",
                                        "C_nv"]
@@ -288,7 +288,7 @@ class ThreeDOFsAirfoil(SimulationResults):
         :type init_velocity: np.ndarray
         """
         inflow_angle = np.arctan(inflow[:, 1]/inflow[:, 0])
-        dt = self.time[1:]-self.time[:-1]
+        dt = np.r_[self.time[1:]-self.time[:-1], self.time[1]]  # todo hard coded additional dt at the end  
         self.set_param(inflow=inflow, inflow_angle=inflow_angle, density=density, dt=dt)
         # check whether all necessary settings have been set.
         #todo sim readiness should include inits of sub modules
@@ -554,12 +554,13 @@ class AeroForce(Rotations):
         super().__init__()
         self.dir_polar = dir_polar
         self.df_polars = pd.read_csv(join(dir_polar, file_polar), delim_whitespace=True)
+        self._C_d_0 = self.df_polars["C_d"].min()
         self.C_d = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["C_d"])
         self.C_l = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["C_l"])
         self.C_m = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["C_m"])
 
         self._alpha_0 = None
-        self._Cl_slope = 2*np.pi
+        self._C_l_slope = 2*np.pi
         self._f_n = None
         self._f_t = None
 
@@ -605,15 +606,20 @@ class AeroForce(Rotations):
                 f_sep = join(dir_BL_data, "sep_points.dat")
                 if not isdir(dir_BL_data):
                     helper.create_dir(dir_BL_data)
-                    self._alpha_0 = self._write_and_get_alpha0(alpha=self.df_polars["alpha"].to_numpy(),
-                                                               C_l=self.df_polars["C_l"].to_numpy(),
-                                                               save_as=f_alpha_0)
-                    self._alpha_0 = np.deg2rad(self._alpha_0)
+                    alpha_0, C_l_slope = self._write_and_get_zero_lift(alpha=self.df_polars["alpha"].to_numpy(),
+                                                                       C_l=self.df_polars["C_l"].to_numpy(),
+                                                                       save_as=f_alpha_0)
+                    self._alpha_0 = np.deg2rad(alpha_0)
+                    self._C_l_slope = np.rad2deg(C_l_slope)
                     df_sep = self._write_and_get_separation_points(alpha_0=self._alpha_0, save_as=f_sep)
                 else:
                     with open(f_alpha_0, "r") as f:
-                        self._alpha_0 = np.deg2rad(json.load(f)["alpha_0"])
+                        data = json.load(f)
+                        self._alpha_0 = np.deg2rad(data["alpha_0"])
+                        self._C_l_slope = np.rad2deg(data["dC_l_dalpha"])
                     df_sep = pd.read_csv(f_sep)
+                
+                df_sep = self._write_and_get_separation_points(alpha_0=self._alpha_0, save_as=f_sep)
                 self._f_n = interpolate.interp1d(df_sep["alpha"], df_sep["f_n"])
                 self._f_t = interpolate.interp1d(df_sep["alpha"], df_sep["f_t"])
 
@@ -625,24 +631,27 @@ class AeroForce(Rotations):
             ) -> pd.DataFrame:
         alpha_given = self.df_polars["alpha"]
         alpha_interp = np.linspace(alpha_given.min(), alpha_given.max(), res)
-        coefficients = np.c_[self.C_d(alpha_interp), self.C_l(alpha_interp)]
+        alpha_interp = alpha_given.to_numpy()
+        coefficients = np.c_[self.C_d(alpha_interp)-self._C_d_0, self.C_l(alpha_interp)]
         
         alpha_given = np.deg2rad(alpha_given)
         alpha_interp = np.deg2rad(alpha_interp)
-        alpha_0 = np.deg2rad(alpha_0)
 
         coeff_rot = self.project_2D(coefficients, -alpha_interp)
         C_t, C_n = -coeff_rot[:, 0], coeff_rot[:, 1]
         
-        f_t = C_t/(self._Cl_slope*np.sin(alpha_interp-alpha_0)**2)
+        f_t = C_t/(self._C_l_slope*np.sin(alpha_interp-alpha_0)**2)
         f_t = f_t**2*np.sign(f_t)
-        f_t[f_t>1] = 1
-        f_t[f_t< -1] = -1
+        # f_t[f_t>1] = 1
+        # f_t[f_t< -1] = -1
 
-        f_n = 2*np.sqrt(C_n/(self._Cl_slope*np.sin(alpha_interp-alpha_0)))-1
+        dalpha = np.rad2deg(alpha_interp-alpha_0)
+        a = np.rad2deg(alpha_interp)
+        # print(np.round(np.c_[np.rad2deg(alpha_interp), self.C_l(a),self.C_d(a)-self._C_d_0, C_n, C_t], 4))
+        f_n = 2*np.sqrt(C_n/(self._C_l_slope*np.sin(alpha_interp-alpha_0)))-1
         f_n = f_n**2*np.sign(f_n)
-        f_n[f_n>1] = 1
-        f_n[f_n< -1] = -1
+        # f_n[f_n>1] = 1
+        # f_n[f_n< -1] = -1
 
         df = pd.DataFrame({"alpha": np.rad2deg(alpha_interp), "f_t": f_t, "f_n": f_n})
         df.to_csv(save_as, index=None)
@@ -722,16 +731,17 @@ class AeroForce(Rotations):
         sim_res.X_lag[i] = sim_res.X_lag[i-1]*np.exp(-b1*ds)+d_alpha_qs*A1*np.exp(-0.5*b1*ds)
         sim_res.Y_lag[i] = sim_res.Y_lag[i-1]*np.exp(-b2*ds)+d_alpha_qs*A2*np.exp(-0.5*b2*ds)
         sim_res.alpha_eff[i] = sim_res.alpha_qs[i]-sim_res.X_lag[i]-sim_res.Y_lag[i]
-        sim_res.C_nc[i] = self._Cl_slope*np.sin(sim_res.alpha_eff[i]-self._alpha_0)  #todo check that this sin() is
+        sim_res.C_nc[i] = self._C_l_slope*np.sin(sim_res.alpha_eff[i]-self._alpha_0)  #todo check that this sin() is
         #todo also correct for high aoa in potential flow
 
         # impulsive (non-circulatory) normal force coefficient
-        sim_res.d_alpha_qs_dt[i] = d_alpha_qs/sim_res.dt[i-1]
+        #todo: related to below todo
+        sim_res.pitch_rate[i] = (sim_res.alpha_steady[i]-sim_res.alpha_steady[i-1])/sim_res.dt[i-1]
         tmp = -a*sim_res.dt[i]/(K_alpha*sim_res.chord)
-        tmp_2 = sim_res.d_alpha_qs_dt[i]-sim_res.d_alpha_qs_dt[i-1]
+        tmp_2 = sim_res.pitch_rate[i]-sim_res.pitch_rate[i-1]
         sim_res.D_i[i] = sim_res.D_i[i-1]*np.exp(tmp)+tmp_2*np.exp(0.5*tmp)
-        #todo change sim_res.d_alpha_qs_dt[i] to sim_res.pos[i, 2]/dt
-        sim_res.C_ni[i] = 4*K_alpha*sim_res.chord/flow_vel*(sim_res.d_alpha_qs_dt[i]-sim_res.D_i[i])
+        #todo: pitch_rate based on the geometric position or the steady angle of attack?
+        sim_res.C_ni[i] = 4*K_alpha*sim_res.chord/flow_vel*(sim_res.pitch_rate[i]-sim_res.D_i[i])
 
         # add circulatory and impulsive
         sim_res.C_npot[i] = sim_res.C_nc[i]+sim_res.C_ni[i]
@@ -741,7 +751,7 @@ class AeroForce(Rotations):
         #todo why does the impulsive part of the potential flow solution go into the lag term?
         sim_res.D_p[i] = sim_res.D_p[i-1]*np.exp(-ds/T_p)+(sim_res.C_npot[i]-sim_res.C_npot[i-1])*np.exp(-0.5*ds/T_p)
         sim_res.C_nsEq[i] = sim_res.C_npot[i]-sim_res.D_p[i]
-        sim_res.alpha_sEq[i] = sim_res.C_nsEq[i]/self._Cl_slope+self._alpha_0  #todo check alpha_0 rad or deg
+        sim_res.alpha_sEq[i] = sim_res.C_nsEq[i]/self._C_l_slope+self._alpha_0
         
         sim_res.f_t_Dp[i] = self._f_t(np.rad2deg(sim_res.alpha_sEq[i]))
         sim_res.f_n_Dp[i] = self._f_n(np.rad2deg(sim_res.alpha_sEq[i]))
@@ -755,7 +765,7 @@ class AeroForce(Rotations):
         sim_res.f_n[i] = sim_res.f_n_Dp[i]-sim_res.D_bl_n[i]
 
         sim_res.C_nf[i] = sim_res.C_nc[i]*((1+np.sign(sim_res.f_n[i])*np.sqrt(np.abs(sim_res.f_n[i])))/2)**2+sim_res.C_ni[i]
-        sim_res.C_tf[i] = self._Cl_slope*np.sin(sim_res.alpha_eff[i]-self._alpha_0)**2*\
+        sim_res.C_tf[i] = self._C_l_slope*np.sin(sim_res.alpha_eff[i]-self._alpha_0)**2*\
             np.sign(sim_res.f_t[i])*np.sqrt(np.abs(sim_res.f_t[i]))
         
         # --------- MODULE leading-edge vortex position
@@ -771,19 +781,23 @@ class AeroForce(Rotations):
             sim_res.C_nv[i] += (sim_res.C_nv_instant[i]-sim_res.C_nv_instant[i-1])*np.exp(-0.5*ds/T_v)
         
 
-        # --------- Combining everything
-        # C_t and C_d point in opposite directions!
-        # todo update C_m as C_m(alpha_eff)+pitch_rate_term from AEFLap paper
-        coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], -self.C_m(sim_res.alpha_qs[i])])
-        # rot = self.passive_3D_planar(sim_res.pos[i, 2])  # for [-f_x, f_y, mom]
-        rot = self.passive_3D_planar(sim_res.pos[i, 2]+sim_res.inflow_angle[i])  # for [-C_d, C_l, C_m]
+        # --------- MODULE moment coefficient
         rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
                             (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
+        C_m_steady = self.C_m(sim_res.alpha_eff[i])
+        C_mNc = -0.5*np.pi*sim_res.chord*(alpha_at-pitching_around)/rel_speed*sim_res.pitch_rate[i]
+        C_m = C_m_steady+C_mNc
+
+        # --------- Combining everything
+        # C_t and C_d point in opposite directions!
+        coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], -C_m])
+        rot = self.passive_3D_planar(-qs_flow_angle)  # for [-f_x, f_y, mom]
+        # rot = self.passive_3D_planar(sim_res.pos[i, 2]+sim_res.inflow_angle[i])  # for [-C_d, C_l, C_m]
         dynamic_pressure = sim_res.density/2*rel_speed
         forces = dynamic_pressure*sim_res.chord*rot@coefficients  # for [-f_x, f_y, mom]
         forces[0] *= -1
-        # return forces
-        return rot@coefficients  # for [-C_d, C_l, C_m]
+        return forces
+        # return rot@coefficients  # for [-C_d, C_l, C_m]
     
     def _init_BL(
             self,
@@ -813,7 +827,8 @@ class AeroForce(Rotations):
         return np.arctan(v_y/v_x)
     
     @staticmethod
-    def _write_and_get_alpha0(alpha: np.ndarray, C_l: np.ndarray, save_as: str, alpha0_in: tuple=(-10, 5)):
+    def _write_and_get_zero_lift(alpha: np.ndarray, C_l: np.ndarray, save_as: str, alpha0_in: tuple=(-10, 5)):
+        #todo calc d_Cn/d_alpha as dC_l_dalpha at every alpha
         ids_subset = np.logical_and(alpha>=alpha0_in[0], alpha<=alpha0_in[1])
         alpha_subset = alpha[ids_subset]
         Cl_subset = C_l[ids_subset]
@@ -826,8 +841,8 @@ class AeroForce(Rotations):
         d_alpha = alpha_subset[idx_greater_0]-alpha_subset[idx_greater_0-1]
         alpha_0 = alpha_subset[idx_greater_0]-Cl_subset[idx_greater_0]*d_alpha/d_Cn
         with open(save_as, "w") as f:
-            json.dump({"alpha_0": alpha_0}, f)
-        return alpha_0
+            json.dump({"alpha_0": alpha_0, "dC_l_dalpha": d_Cn/d_alpha}, f)
+        return alpha_0, d_Cn/d_alpha
 
          
 class StructForce(Rotations):
