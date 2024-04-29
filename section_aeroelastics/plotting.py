@@ -376,7 +376,7 @@ class HHTalphaPlotter(DefaultStructure):
             axs = {"response": axs[0], "rel_err": axs[1]}
             for i, scheme in enumerate(schemes):
                 current_dir = join(root_dir, scheme, case_number)
-                df_sol = pd.read_csv(join(current_dir, "analytical_sol.dat"))
+                df_sol = pd.read_csv(join(current_dir, "analytical_sol.dat"))   
                 df_sim = pd.read_csv(join(current_dir, "general.dat"))
                 df_err = pd.read_csv(join(current_dir, "errors.dat"))
                 
@@ -411,6 +411,59 @@ class HHTalphaPlotter(DefaultStructure):
             handler.update(x_labels=x_labels, y_labels=y_labels, legend=True)
             handler.save(join(dir_plot, f"{case_number}.pdf"))
         pd.DataFrame(info).to_csv(join(dir_plot, "info.dat"), index=None)
+
+    @staticmethod
+    def rotation(root_dir: str):
+        dir_plot = helper.create_dir(join(root_dir, "plots"))[0]
+        schemes = listdir(root_dir)
+        schemes.pop(schemes.index("plots"))
+        case_numbers = []
+        for i, scheme in enumerate(schemes):
+            case_numbers.append(listdir(join(root_dir, scheme)))
+            if len(case_numbers) == 2:
+                if not case_numbers[0] == case_numbers[1]:
+                    raise ValueError(f"Scheme '{schemes[i-1]}' and '{scheme[i]}' do not have the same case numbers: \n"
+                                     f"Scheme '{schemes[i-1]}': {case_numbers[0]}\n"
+                                     f"Scheme '{schemes[i]}': {case_numbers[1]}\n")
+                case_numbers.pop(0)
+                
+        info = {}
+        map_scheme_to_label = {
+            "HHT-alpha": "o.g.",
+            "HHT-alpha-adapted": "adpt."
+        }
+        for case_number in case_numbers[0]:
+            fig, axs = plt.subplots(1, 2, figsize=(10, 5), tight_layout=True)
+            axs = {"split": axs[0], "joined": axs[1]}
+            for i, scheme in enumerate(schemes):
+                current_dir = join(root_dir, scheme, case_number)
+                df_sol = pd.read_csv(join(current_dir, "analytical_sol.dat"))
+                df_sim = pd.read_csv(join(current_dir, "general.dat"))
+
+                for direction in ["x", "y", "tors"]:
+                    if i == 0:
+                        axs["split"].plot(df_sol["time"], df_sol[f"solution_{direction}"], "k")
+                    axs["split"].plot(df_sim["time"], df_sim[f"pos_{direction}"], "--", label=f"{direction} {scheme}")
+                
+                if i == 0:
+                    axs["joined"].plot(df_sol[f"solution_x"], df_sol[f"solution_y"], "ok", ms=0.5, label="eE")
+                axs["joined"].plot(df_sim["pos_x"], df_sim["pos_y"], "or", ms=0.5, label=f"{scheme}")
+
+                # with open(join(current_dir, "info.json"), "r") as f:
+                #     tmp_info = json.load(f)|{"scheme": scheme}
+                
+                # if info == {}:
+                #     info = {param: [] for param in tmp_info.keys()}
+                # else:
+                #     for param, value in tmp_info.items():
+                #         info[param].append(value)
+            
+            handler = MosaicHandler(fig, axs)
+            x_labels = {"split": "time (s)", "joined": "x (m)"}
+            y_labels = {"split": "position (m), (deg)", "joined": "x (m)"}
+            handler.update(x_labels=x_labels, y_labels=y_labels, legend=True)
+            handler.save(join(dir_plot, f"{case_number}.pdf"))
+        # pd.DataFrame(info).to_csv(join(dir_plot, "info.dat"), index=None)
 
     def plot_case(
         self, 
