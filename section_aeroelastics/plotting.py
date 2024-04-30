@@ -566,10 +566,10 @@ class BLValidationPlotter(DefaultsPlots):
         dir_plots = helper.create_dir(join(dir_preparation, "plots"))[0]
         
         df_section = pd.read_csv(join(dir_preparation, "sep_points.dat"))
-        # df_aerohor = pd.read_csv(join(dir_preparation, "f_lookup_1.dat"))
+        df_aerohor = pd.read_csv(join(dir_preparation, "f_lookup_1.dat"))
         df_polar = pd.read_csv(file_polar, delim_whitespace=True)
-        # alpha_0_aerohor = pd.read_csv(join(dir_preparation, "alpha_0.dat"))["alpha_0"].to_numpy()
-        # alpha_0_aerohor = np.deg2rad(alpha_0_aerohor)
+        alpha_0_aerohor = pd.read_csv(join(dir_preparation, "alpha_0.dat"))["alpha_0"].to_numpy()
+        alpha_0_aerohor = np.deg2rad(alpha_0_aerohor)
         with open(join(dir_preparation, "alpha_0.json"), "r") as f:
             zero_lift_data = json.load(f)
             alpha_0_section = np.deg2rad(zero_lift_data["alpha_0"])
@@ -577,7 +577,8 @@ class BLValidationPlotter(DefaultsPlots):
             
         for f_type in ["f_t", "f_n"]:
             fig, ax = plt.subplots()
-            # ax.plot(df_aerohor["alpha_n"], df_aerohor[f"{f_type}"], **self.plot_settings[f"{f_type}_aerohor"])
+            ax.plot(df_aerohor[f"alpha_{f_type.split("_")[-1]}"], df_aerohor[f"{f_type}"], 
+                    **self.plot_settings[f"{f_type}_aerohor"])
             ax.plot(df_section["alpha"], df_section[f"{f_type}"], 
                     **self.plot_settings[f"{f_type}_section"])
             handler = MosaicHandler(fig, ax)
@@ -585,9 +586,9 @@ class BLValidationPlotter(DefaultsPlots):
             handler.save(join(dir_plots, f"{f_type}_model_comp.pdf"))
         
         rot = Rotations()
-        # coeffs_aerohor = np.c_[self._get_C_t(alpha_0_aerohor, df_aerohor["alpha_t"], df_aerohor["f_t"]),
-        #                        self._get_C_n(alpha_0_aerohor, df_aerohor["alpha_n"], df_aerohor["f_n"])]
-        # rot_coeffs_aerohor = rot.rotate_2D(coeffs_aerohor, np.deg2rad(df_aerohor["alpha_n"].to_numpy()))
+        coeffs_aerohor = np.c_[self._get_C_t(alpha_0_aerohor, df_aerohor["alpha_t"], df_aerohor["f_t"], 2*np.pi),
+                               self._get_C_n(alpha_0_aerohor, df_aerohor["alpha_n"], df_aerohor["f_n"], 2*np.pi)]
+        rot_coeffs_aerohor = rot.rotate_2D(coeffs_aerohor, np.deg2rad(df_aerohor["alpha_n"].to_numpy()))
         
         coesffs_section = np.c_[self._get_C_t(alpha_0_section, df_section["alpha"], df_section["f_t"], dC_l_dalpha),
                                 self._get_C_n(alpha_0_section, df_section["alpha"], df_section["f_n"], dC_l_dalpha)]
@@ -597,8 +598,8 @@ class BLValidationPlotter(DefaultsPlots):
             sign = 1 if coeff_type == "C_l" else -1
             fig, ax = plt.subplots()
             ax.plot(df_polar["alpha"], df_polar[coeff_type], **self.plot_settings[f"{coeff_type}_meas"])
-            # ax.plot(df_aerohor["alpha_n"], sign*rot_coeffs_aerohor[:, i], 
-                    # **self.plot_settings[f"{coeff_type}_rec_aerohor"])
+            ax.plot(df_aerohor["alpha_n"], sign*rot_coeffs_aerohor[:, i], 
+                    **self.plot_settings[f"{coeff_type}_rec_aerohor"])
             ax.plot(df_section["alpha"], sign*rot_coeffs_section[:, i], 
                     **self.plot_settings[f"{coeff_type}_rec_section"])
             handler = MosaicHandler(fig, ax)
@@ -609,7 +610,7 @@ class BLValidationPlotter(DefaultsPlots):
     @staticmethod
     def plot_model_comparison(dir_results: str):
         dir_plots = helper.create_dir(join(dir_results, "plots", "model_comp"))[0]
-        # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
+        df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
         df_section_general = pd.read_csv(join(dir_results, "general.dat"))
         df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
 
@@ -642,12 +643,12 @@ class BLValidationPlotter(DefaultsPlots):
             "f_n": r"$f_{\text{n}}$ (-)", 
             "f_t": r"$f_{\text{t}}$ (-)", 
         }
-        # t_aerohor = df_aerohor["t"]
+        t_aerohor = df_aerohor["t"]
         t_section = df_section_general["time"]
         for plot_param in plot_model_compare_params:
             fig, ax = plt.subplots()
             handler = MosaicHandler(fig, ax)
-            # ax.plot(t_aerohor, df_aerohor[plot_param], **plt_settings["aerohor"])
+            ax.plot(t_aerohor, df_aerohor[plot_param], **plt_settings["aerohor"])
             ax.plot(t_section, df_section[plot_param], **plt_settings["section"])
             handler.update(x_labels="t (s)", y_labels=y_labels[plot_param], legend=True)
             handler.save(join(dir_plots, f"model_comp_{plot_param}.pdf"))
@@ -666,10 +667,10 @@ class BLValidationPlotter(DefaultsPlots):
         period_res: int,
         ):
         df_meas = pd.read_csv(file_unsteady_data, delim_whitespace=True)
-        # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
+        df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
         df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
         
-        # map_measurement = {"C_d": " Cdp", "C_l": " Cl"}
+        map_measurement = {"C_d": " Cdp", "C_l": " Cl"}
         map_measurement = {"alpha": "AOA", "C_l": "CL", "C_d": "CD", "C_m": "CM"}
         dir_save = helper.create_dir(join(dir_results, "plots", "meas_comp"))[0]
         line_width = 1
@@ -686,8 +687,9 @@ class BLValidationPlotter(DefaultsPlots):
             handler = MosaicHandler(fig, ax)
             ax.plot(df_meas[map_measurement["alpha"]], df_meas[map_measurement[coef]], 
                     **self.plot_settings[coef+"_meas"])
-            # ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
-            #         **plt_settings["aerohor"])
+            if coef != "C_m":
+                ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
+                        **plt_settings["aerohor"])
             ax.plot(np.rad2deg(df_section["alpha_steady"][-period_res-1:]), df_section[coef][-period_res-1:], 
                     **plt_settings["section"])
             handler.update(x_labels=r"$\alpha_{\text{steady}}$ (°)", y_labels=rf"${{{coef[0]}}}_{{{coef[2]}}}$ (-)",
