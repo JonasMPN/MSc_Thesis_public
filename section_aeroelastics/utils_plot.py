@@ -1,5 +1,5 @@
 import matplotlib.figure
-from defaults import DefaultsPlots
+from defaults import DefaultPlot
 import numpy as np
 import pandas as pd
 from numpy.typing import ArrayLike
@@ -389,23 +389,23 @@ class PlotPreparation:
         :return: A pyplot figure, axes and an instance of MosaicHandler for the same figure and axes
         :rtype: tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]
         """
-        fig, axs = plt.subplot_mosaic([["profile", "aoa", "C_combined"],
-                                       ["profile", "C_n", "C_t"]], figsize=(10, 5), tight_layout=True,
+        fig, axs = plt.subplot_mosaic([["profile", "aoa", "C_n"],
+                                       ["profile", "C_t", "C_m"]], figsize=(10, 5), tight_layout=True,
                                       dpi=300)
         handler = MosaicHandler(fig, axs)
         x_labels = {
             "profile": "normal (m)",
-            "total": "t (s)",
-            "work": "t (s)",
-            "kinetic": "t (s)",
-            "potential": "t (s)",
+            "aoa": "t (s)",
+            "C_n": "t (s)",
+            "C_t": "t (s)",
+            "C_m": "t (s)",
         }
         y_labels = {
             "profile": "tangential (m)",
-            "total": "energy (Nm)",
-            "work": "work (Nm)",
-            "kinetic": "kinetic energy (Nm)",
-            "potential": "potential energy (Nm)",
+            "aoa": "angle of attack (°)",
+            "C_n": r"contribution to $C_n$ (-)",
+            "C_t": r"contribution to $C_t$ (-)",
+            "C_m": r"contribution to $C_m$ (-)"
         }
         aspect = {
             "profile": "equal"
@@ -433,10 +433,10 @@ class PlotPreparation:
         return aoas, dfs_aoas
     
 
-class AnimationPreparation(PlotPreparation, DefaultsPlots):
+class AnimationPreparation(PlotPreparation, DefaultPlot):
     def __init__(self) -> None:
         PlotPreparation.__init__(self)
-        DefaultsPlots.__init__(self)
+        DefaultPlot.__init__(self)
     
     def _prepare_force_animation(self, dfs: pd.DataFrame, equal_y: tuple[str]=None):
         fig, axs, handler = self._prepare_force_plot(equal_y)
@@ -518,11 +518,11 @@ class AnimationPreparation(PlotPreparation, DefaultsPlots):
         for ax, cols in plot.items():
             for col in cols:
                 try: 
-                    self.plot_settings[map_column_to_settings(col)]
+                    self.plt_settings[map_column_to_settings(col)]
                 except KeyError:
                     raise NotImplementedError(f"Default plot styles for '{map_column_to_settings(col)}' are missing.")
                 if col in ["lift", "drag"]:
                     force_arrows[col] = axes[ax].arrow(0, 0, 0, 0, **self.arrow_settings[map_column_to_settings(col)])
                 else:
-                    lines[col] = axes[ax].plot(0, 0, **self.plot_settings[map_column_to_settings(col)])[0]
+                    lines[col] = axes[ax].plot(0, 0, **self.plt_settings[map_column_to_settings(col)])[0]
         return lines, force_arrows
