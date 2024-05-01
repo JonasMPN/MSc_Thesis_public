@@ -211,10 +211,10 @@ class ThreeDOFsAirfoil(SimulationResults):
                 self._check_scheme_settings("BL", "set_aero_calc", must_haves, params_given)
                 self._aero_scheme_settings = {param: value for param, value in kwargs.items() if param in 
                                               must_haves+can_haves}
-                add_aero_sim_params = ["s", "alpha_qs", "X_lag", "Y_lag", "alpha_eff", "C_nc", "pitch_rate", "D_i", 
+                add_aero_sim_params = ["s", "alpha_qs", "X_lag", "Y_lag", "alpha_eff", "C_nc", "D_i", 
                                        "C_ni", "C_npot", "C_tpot", "D_p", "C_nsEq", "alpha_sEq", "f_t_Dp", "f_n_Dp", 
                                        "D_bl_t", "D_bl_n", "f_t", "f_n", "C_nf", "C_tf", "tau_vortex", "C_nv_instant",
-                                       "C_nv"]
+                                       "C_nv", "C_mqs", "C_mnc"]
         # add parameters the AeroForce method needs to calculate the aero forces or that are parameters the method
         # calculates that are interesting to save.
         self._added_sim_params[self._dfl_filenames["f_aero"]] = add_aero_sim_params
@@ -452,7 +452,7 @@ class Rotations:
         """
         n_rot = angles.size
         array = array.reshape((n_rot, 2, 1))
-        rot_matrices = self.acitve_2D(angles)
+        rot_matrices = self.active_2D(angles)
         return (rot_matrices@array).reshape(n_rot, 2)
         
     @staticmethod
@@ -494,7 +494,7 @@ class Rotations:
 
     @staticmethod
     @_process_rotation
-    def acitve_2D(angle: float) -> np.ndarray:
+    def active_2D(angle: float) -> np.ndarray:
         """Active 2D rotation.
 
         :param angle: Rotation angle in rad
@@ -723,7 +723,7 @@ class AeroForce(Rotations):
                                                       sim_res.inflow[i, :], sim_res.chord, pitching_around, 
                                                       alpha_at)
         sim_res.alpha_qs[i] = -sim_res.pos[i, 2]+qs_flow_angle
-        d_alpha_qs = sim_res.alpha_qs[i]-sim_res.alpha_qs[i-1] if i != 0 else 0
+        d_alpha_qs = sim_res.alpha_qs[i]-sim_res.alpha_qs[i-1]
         sim_res.X_lag[i] = sim_res.X_lag[i-1]*np.exp(-b1*ds)+d_alpha_qs*A1*np.exp(-0.5*b1*ds)
         sim_res.Y_lag[i] = sim_res.Y_lag[i-1]*np.exp(-b2*ds)+d_alpha_qs*A2*np.exp(-0.5*b2*ds)
         sim_res.alpha_eff[i] = sim_res.alpha_qs[i]-sim_res.X_lag[i]-sim_res.Y_lag[i]
@@ -731,13 +731,10 @@ class AeroForce(Rotations):
         #todo also correct for high aoa in potential flow
 
         # impulsive (non-circulatory) normal force coefficient
-        #todo: related to below todo
-        sim_res.pitch_rate[i] = (sim_res.alpha_steady[i]-sim_res.alpha_steady[i-1])/sim_res.dt[i-1]
         tmp = -a*sim_res.dt[i]/(K_alpha*sim_res.chord)
-        tmp_2 = sim_res.pitch_rate[i]-sim_res.pitch_rate[i-1]
+        tmp_2 = -(sim_res.vel[i, 2]-sim_res.vel[i-1, 2])
         sim_res.D_i[i] = sim_res.D_i[i-1]*np.exp(tmp)+tmp_2*np.exp(0.5*tmp)
-        #todo: pitch_rate based on the geometric position or the steady angle of attack?
-        sim_res.C_ni[i] = 4*K_alpha*sim_res.chord/flow_vel*(sim_res.pitch_rate[i]-sim_res.D_i[i])
+        sim_res.C_ni[i] = 4*K_alpha*sim_res.chord/flow_vel*(-sim_res.vel[i, 2]-sim_res.D_i[i])
 
         # add circulatory and impulsive
         sim_res.C_npot[i] = sim_res.C_nc[i]+sim_res.C_ni[i]
@@ -749,7 +746,7 @@ class AeroForce(Rotations):
         if i == 0: 
             sim_res.D_p[i] = 0
         sim_res.C_nsEq[i] = sim_res.C_npot[i]-sim_res.D_p[i]
-        sim_res.alpha_sEq[i] = sim_res.C_nsEq[i]/self._C_l_slope+self._alpha_0
+        sim_res.alpha_sEq[i] = np.arcsin(sim_res.C_nsEq[i]/self._C_l_slope)+self._alpha_0  # introduce np.arcsin
         
         sim_res.f_t_Dp[i] = self._f_t(np.rad2deg(sim_res.alpha_sEq[i]))
         sim_res.f_n_Dp[i] = self._f_n(np.rad2deg(sim_res.alpha_sEq[i]))
@@ -788,25 +785,25 @@ class AeroForce(Rotations):
         # --------- MODULE moment coefficient
         rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
                             (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
-        C_m_steady = self.C_m(sim_res.alpha_eff[i])
-        C_mNc = -0.5*np.pi*sim_res.chord*(alpha_at-pitching_around)/rel_speed*sim_res.pitch_rate[i]
-        C_m = C_m_steady+C_mNc
+        sim_res.C_mqs[i] = self.C_m(sim_res.alpha_eff[i])
+        sim_res.C_mnc[i] = -0.5*np.pi*sim_res.chord*(alpha_at-pitching_around)/rel_speed*(-sim_res.vel[i, 2])
+        C_m = sim_res.C_mqs[i]+sim_res.C_mnc[i]
 
         # --------- Combining everything
 
         # for return of [-C_d, C_l, C_m]
-        coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], C_m])
-        rot = self.passive_3D_planar(sim_res.pos[i, 2]+sim_res.inflow_angle[i])
-        return rot@coefficients 
+        # coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], C_m])
+        # rot = self.passive_3D_planar(sim_res.pos[i, 2]+sim_res.inflow_angle[i])
+        # return rot@coefficients 
 
         # for return of [f_x, f_y, mom]
         # C_t and C_d point in opposite directions!
-        # coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], -C_m]) 
-        # rot = self.passive_3D_planar(-sim_res.pos[i, 2]) 
-        # dynamic_pressure = sim_res.density/2*rel_speed
-        # forces = dynamic_pressure*sim_res.chord*rot@coefficients  # for [-f_x, f_y, mom]
-        # forces[0] *= -1
-        # return forces  # for [f_x, f_y, mom]
+        coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], -C_m*sim_res.chord])
+        rot = self.passive_3D_planar(-sim_res.pos[i, 2]) 
+        dynamic_pressure = sim_res.density/2*rel_speed
+        forces = dynamic_pressure*sim_res.chord*rot@coefficients  # for [-f_x, f_y, mom]
+        forces[0] *= -1
+        return forces  # for [f_x, f_y, mom]
     
     def _init_BL(
             self,
@@ -821,7 +818,7 @@ class AeroForce(Rotations):
         # the values need to be set for the one before that. In numpy, this is the same as the value of the very last 
         # time step. Then, the simulation will calculate the difference of dparam = param[0]-param[-1] = 0.
         # Only if param[0] != 0 must param[-1] be initialised, since param[-1] = 0 already.
-        sim_res.alpha_steady[-1] = -sim_res.pos[0, 2]+np.arctan(sim_res.inflow[0, 1]/sim_res.inflow[0, 0])
+        sim_res.pos[-1, 2] = sim_res.pos[-1, 0]
         qs_flow_angle = self._quasi_steady_flow_angle(sim_res.vel[0, :], sim_res.pos[0, :], sim_res.inflow[0, :], 
                                                       sim_res.chord, kwargs["pitching_around"], kwargs["alpha_at"])
         sim_res.alpha_qs[-1] = -sim_res.pos[0, 2]+qs_flow_angle
@@ -841,7 +838,7 @@ class AeroForce(Rotations):
 
         v_x = flow[0]-velocity[0]-v_pitching_x
         v_y = flow[1]-velocity[1]-v_pitching_y
-        return np.arctan(v_y/v_x)
+        return np.arctan2(v_y, v_x)
     
     @staticmethod
     def _write_and_get_zero_lift(alpha: np.ndarray, C_l: np.ndarray, save_as: str, alpha0_in: tuple=(-10, 5)):
