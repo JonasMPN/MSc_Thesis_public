@@ -71,6 +71,8 @@ class _BaseDefaultPltSettings(ABC):
         >>> plt_settings = DefaultsPlots()
         >>> plt_settings.add_params(alpha_eff=alpha_eff_plot_settings)
         >>> pyplot.plot(time, alpha_eff, **plt_settings.plt_settings)
+        This should only be a convenience function of seldom use; these default classes are meant to have all plot 
+        parameters defined already.
         """
         for param, defined_settigns in kwargs.items():
             self.plt_settings[param] = defined_settigns
@@ -176,9 +178,7 @@ class _DefaultAngleOfAttack(_BaseDefaultPltSettings):
         _BaseDefaultPltSettings.__init__(self, "line")
 
 
-class _DefaultForce(_BaseDefaultPltSettings):
-    _copy_params = {}
-    
+class _DefaultForce(_BaseDefaultPltSettings):    
     _settings = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
         "_colours": "color",
         "_labels": "label",
@@ -194,7 +194,7 @@ class _DefaultForce(_BaseDefaultPltSettings):
         "tors",
     ]
 
-    _params_copy =  {  # default mapping from additional parameters (keys) that have the same settings as 
+    _copy_params =  {  # default mapping from additional parameters (keys) that have the same settings as 
         # a base default parameter of '_params' (value)
         "aero_drag": "drag",
         "aero_lift": "lift",
@@ -390,10 +390,8 @@ class _DefaultMeasurement(_BaseDefaultPltSettings):
     _copy_params = {}
 
     _settings = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
-        "_colours": "color",
         "_labels": "label",
         "_markers": "marker",
-        "_linestyles": "ls",
     }
 
     _params = [ 
@@ -405,18 +403,9 @@ class _DefaultMeasurement(_BaseDefaultPltSettings):
         "C_m_openFAST",
     ]
 
-    def _colours(params):
-        return {param: "black" for param in params}
-    _colours = _colours(_params)
-
     def _labels(params):
         return {param: param.split("_"[-1]) for param in params}
     _labels = _labels(_params)
-
-    def _linestyles(params):
-        return {param: None for param in params}
-    _linestyles = _linestyles(_params)
-
 
     _map_marker = {"HAWC2": "x", "openFAST": "o"}
     def _markers(map_marker, params):
@@ -445,7 +434,7 @@ class DefaultPlot:
         energy = _DefaultEnergy()
         BL = _DefaultBL()
         measurement = _DefaultMeasurement()
-        self = _CombineDefaults.__init__(self, (arrow, "arrow"), aoa, force, profile, energy, BL, measurement)
+        _CombineDefaults.__init__(self, (arrow, "arrow"), aoa, force, profile, energy, BL, measurement)
         
 
 class DefaultStructure:
