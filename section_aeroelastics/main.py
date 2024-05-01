@@ -12,7 +12,7 @@ do = {
 }
 
 root = "data/NACA_643_618"  # set which airfoil polars to use. Simulatenously defines to root for the simulation data
-case_dir = "HHT_alpha"
+case_dir = "BL_HHT"
 
 if do["simulate"]:
     density = 1  # density of the fluid
@@ -43,12 +43,12 @@ if do["simulate"]:
     init_vel = np.zeros(3)  # initial conditions for the velocity in [x, y, rotation in rad/s]
 
     # set the calculation scheme for the aerodynamic forces
-    NACA_643_618.set_aero_calc()
-    # NACA_643_618.set_aero_calc("BL", A1=0.3, A2=0.7, b1=0.14, b2=0.53, pitching_around=0.25, alpha_at=0.75)
+    # NACA_643_618.set_aero_calc()
+    NACA_643_618.set_aero_calc("BL", A1=0.3, A2=0.7, b1=0.14, b2=0.53, pitching_around=0.25, alpha_at=0.75)
     NACA_643_618.set_struct_calc()  # set the calculation scheme for the structural damping and stiffness forces
     # NACA_643_618.set_time_integration()  # set the time integration scheme
     NACA_643_618.set_time_integration("HHT-alpha-adapted", alpha=0.1, dt=t[1])  # set the time integration scheme
-    NACA_643_618.simuluate(inflow, density, init_pos, init_vel)  # perform simulation
+    NACA_643_618.simulate(inflow, density, init_pos, init_vel)  # perform simulation
     NACA_643_618.save(join(root, "simulation", case_dir))  # save simulation results
 
 if do["post_calc"]:
@@ -66,6 +66,8 @@ if do["plot_results"]:
     plotter = Plotter(file_profile, dir_sim, dir_plots) 
     plotter.force()  # plot various forces of the simulation
     plotter.energy()  # plot various energies and work done by forces of the simulation
+    if "BL" in case_dir:
+        plotter.Beddoes_Leishman()
 
 if do["animate_results"]:
     file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
