@@ -1,263 +1,65 @@
 import matplotlib.pyplot as plt
-
+from abc import ABC, abstractmethod
 plt.rcParams.update({"font.size": 10})
 
-class DefaultsPlots:
-    """C_lass to specify plot settings for parameters of this project. Example:
-    Assume time, lift given.
-    >>> dfl = DefaultsPlots()
-    >>> fig, ax = plt.subplots()
-    >>> dfl = DefaultsPlots()
-    >>> matplotlib.pyplot.plot(time, lift, **dfl.settings["lift"])
-    This will cause the plot to have all axes settings defined in this class to be set for the values connected 
-    to "lift.
-    """
-    _plot_settings_implemented = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
-        "_colours": "color",
-        "_labels": "label",
-        "_markers": "marker",
-        "_linestyles": "linestyle",
-        "_ms": "ms",
-        "_linewidths": "lw"
+
+class _BaseDefaultPltSettings(ABC):
+    line = {
+        "color": "black",
+        "lw": 1,
+        "ls": None,
+        "marker": None,
+        "ms": 1,
     }
 
-    _arrow_settings_implemented = {  # which axes.arrow() settings are implemented; maps class attributes to arrow()
-        # kwargs
-        "_arr_width": "width",
-        "_arr_colour": "color"
+    arrow = {
+        "width": 1,
+        "color": "black"
     }
 
-    _plot_params = [  # parameters that are supported by default
-        "alpha_steady",
-        "alpha_qs",
-        "alpha_eff",
-        "alpha_sEq",
-        "lift",
-        "drag",
-        "mom",
 
-        "edge",
-        "flap",
-        "tors",
+    def __init__(self, kind: str) -> None:
+        ABC.__init__(self)
+        self.kind = kind
 
-        "profile",
-        "qc_trail",
-
-        "e_kin",
-        "e_pot",
-        "e_total",
-
-        "f_n_aerohor",
-        "f_n_section",
-        "f_t_aerohor",
-        "f_t_section",
-        "C_l_rec_aerohor",
-        "C_l_rec_section",
-        "C_d_rec_aerohor",
-        "C_d_rec_section",
-
-        "C_l_meas",
-        "C_d_meas",
-        "C_m_meas"
-    ]
-
-    _plot_params_copy =  {  # default mapping from additional parameters (keys) that have the same settings as 
-        # a base default parameter of '_plot_params' (value)
-        "aero_drag": "drag",
-        "aero_lift": "lift",
-        "aero_mom": "mom",
-    } | {f"{spec}_{direction}": direction for direction in ["edge", "flap", "tors"] for spec in ["damp", "kin", "pot"]} 
-    
-    _arrow_params = [
-        "lift", 
-        "drag"
-    ]
-
-    _colours = {  # line colour
-        "_dfl": "black",
-        "alpha_steady": "black",
-        "alpha_qs": "darkgreen",
-        "alpha_eff": "orangered",
-        "alpha_sEq": "royalblue",
-        "lift": "orangered",
-        "drag": "darkgreen",
-        "mom": "mediumpurple",
-        "edge": "forestgreen",
-        "flap": "coral",
-        "tors": "royalblue",
-        "profile": "black",
-        "qc_trail": "gray",
-        "e_kin": "blue",
-        "e_pot": "green",
-        "e_total": "black",
-        "f_n_aerohor": "forestgreen",
-        "f_n_section": "orangered",
-        "f_t_aerohor": "forestgreen",
-        "f_t_section": "orangered",
-        "C_l_rec_aerohor": "forestgreen",
-        "C_l_rec_section": "orangered",
-        "C_d_rec_aerohor": "forestgreen",
-        "C_d_rec_section": "orangered",
-        "C_l_meas": "black",
-        "C_d_meas": "black",
-        "C_m_meas": "black",
-    }
-
-    _labels = {  # line label
-        "_dfl": None,
-        "alpha_steady": r"$\alpha_{\text{steady}}$",
-        "alpha_qs": r"$\alpha_{\text{qs}}$",
-        "alpha_eff": r"$\alpha_{\text{eff}}$",
-        "alpha_sEq": r"$\alpha_{\text{sEq}}$",
-        "lift": "lift",
-        "drag": "drag",
-        "mom": "mom",
-        "edge": "edge",
-        "flap": "flap",
-        "tors": "torsion",
-        "profile": "_",
-        "qc_trail": "qc",
-        "e_kin": r"$E_\text{kin}$",
-        "e_pot": r"$E_\text{pot}$",
-        "e_total": r"$E_\text{total}$",
-        "f_n_aerohor": r"aerohor $f_n$", 
-        "f_n_section": r"section $f_n$", 
-        "f_t_aerohor": r"aerohor $f_t$", 
-        "f_t_section": r"section $f_t$", 
-        "C_l_rec_aerohor": r"aerohor reconstructed $C_l$", 
-        "C_l_rec_section": r"section reconstructed $C_l$", 
-        "C_d_rec_aerohor": r"aerohor reconstructed $C_d$", 
-        "C_d_rec_section": r"section reconstructed $C_d$", 
-        "C_l_meas": "HAWC2",
-        "C_d_meas": "HAWC2",
-        "C_m_meas": "HAWC2",
-    }
-
-    _markers = {  # line marker
-        "_dfl": None,
-        "alpha_steady": None,
-        "alpha_qs": None,
-        "alpha_eff": None,
-        "alpha_sEq": None,
-        "lift": None,
-        "drag": None,
-        "mom": None,
-        "edge": None,
-        "flap": None,
-        "tors": None,
-        "profile": None,
-        "qc_trail": "x",
-        "e_kin": None,
-        "e_pot": None,
-        "e_total": None,
-        "f_n_aerohor": None,
-        "f_n_section": None,
-        "f_t_aerohor": None,
-        "f_t_section": None,
-        "C_l_rec_aerohor": None,
-        "C_l_rec_section": None,
-        "C_d_rec_aerohor": None,
-        "C_d_rec_section": None,
-        "C_l_meas": "x",
-        "C_d_meas": "x",
-        "C_m_meas": "x",
-    }
-
-    _linestyles = {  # line style
-        "_dfl": None,
-        "alpha_steady": None,
-        "alpha_qs": None,
-        "alpha_eff": None,
-        "alpha_sEq": None,
-        "lift": None,
-        "drag": None,
-        "mom": None,
-        "edge": None,
-        "flap": None,
-        "tors": None,
-        "profile": None,
-        "qc_trail": "",
-        "e_kin": None,
-        "e_pot": None,
-        "e_total": None,
-        "f_n_aerohor": None,
-        "f_n_section": "--",
-        "f_t_aerohor": None,
-        "f_t_section": "--",
-        "C_l_rec_aerohor": None,
-        "C_l_rec_section": "--",
-        "C_d_rec_aerohor": None,
-        "C_d_rec_section": "--",
-        "C_l_meas": "",
-        "C_d_meas": "",
-        "C_m_meas": "",
-    }
-
-    _linewidths = {  # line width
-        param: 1 for param in ["_dfl"]+_plot_params
-    }
-
-    _ms = {  # marker size
-        "_dfl": None,
-        "alpha_steady": None,
-        "alpha_qs": None,
-        "alpha_eff": None,
-        "alpha_sEq": None,
-        "lift": None,
-        "drag": None,
-        "mom": None,
-        "edge": None,
-        "flap": None,
-        "tors": None,
-        "profile": None,
-        "qc_trail": 1,
-        "e_kin": None,
-        "e_pot": None,
-        "e_total": None,
-        "f_n_aerohor": None,
-        "f_n_section": None,
-        "f_t_aerohor": None,
-        "f_t_section": None,
-        "C_l_rec_aerohor": None,
-        "C_l_rec_section": None,
-        "C_d_rec_aerohor": None,
-        "C_d_rec_section": None,
-        "C_l_meas": 3,
-        "C_d_meas": 3,
-        "C_m_meas": 3,
-    }
-
-    _arr_width = {
-        "lift": 0.01,
-        "drag": 0.01
-    }
-
-    _arr_colour = {
-        "lift": _colours["lift"],
-        "drag": _colours["drag"]
-    }
-
-    def __init__(self) -> None:
         # add copy parameters to class attributes so they can be accessed in the definition of self.plot_settings
-        for param, copy_from in self._plot_params_copy.items():
-            for setting in self._plot_settings_implemented.keys():
+        for param, copy_from in self._copy_params.items():
+            for setting in self._settings.keys():
                 getattr(self, setting)[param] = getattr(self, setting)[copy_from]
-        
-        # initialise the plot settings; now self.plot.settings[param] holds all settings for that param and using
-        # plt.plot()
-        self.plot_settings = {}
-        for param in self._plot_params+[*self._plot_params_copy.keys()]:
-            self.plot_settings[param] = {}
-            for setting, pyplot_setting in self._plot_settings_implemented.items():
-                self.plot_settings[param][pyplot_setting] = getattr(self, setting)[param]
 
-        # initialise the arrow settings; now self.arrow.settings[param] holds all settings for that param and using 
-        # plt.arrow()
-        self.arrow_settings = {}
-        for param in self._arrow_params:
-            self.arrow_settings[param] = {}
-            for setting, pyplot_setting in self._arrow_settings_implemented.items():
-                self.arrow_settings[param][pyplot_setting] = getattr(self, setting)[param]
+        settings_set = self._settings.values()
+        self.plt_settings = {}
+        for param in self._params+[*self._copy_params.keys()]:
+            self.plt_settings[param] = {}
+            for setting, pyplot_setting in self._settings.items():
+                try:
+                    self.plt_settings[param][pyplot_setting] = getattr(self, setting)[param]
+                except KeyError:
+                    self.plt_settings[param][pyplot_setting] = getattr(self, self.kind)[pyplot_setting]
+            
+            for setting, value in getattr(self, self.kind).items():
+                if setting not in settings_set:
+                    self.plt_settings[param][setting] = value
+
+    def copy_from(self, other: "_BaseDefaultPltSettings", parameters: dict[str, list]):
+        """Add full description later. 'copy()' does not overwrite settings that are already set.
+
+        :param other: An instance of a class that inherits from '_BaseDefaultPltSettings'
+        :type other: _BaseDefaultPltSettings
+        :param parameters: Dictionary of the form {"parameter": [setting1, setting2, setting3, ...]}. Specifies
+        which settings are copied for which parameters. Sets the settings for 'self' as defined in 'other'.
+        :type parameters: dict[str, list]
+        :raises KeyError: If 'other' does not specify a wanted parameter=setting combination.
+        """
+        for param, settings in parameters.items():
+            for setting in settings:
+                if setting in self.plt_settings[param].keys():
+                    continue
+                try:
+                    self.plt_settings[param][setting] = other[param][other._settings[setting]]
+                except KeyError:
+                    raise KeyError(f"Instance of class '{type(other).__name__}' does not have a parameter "
+                                   f"'{param}' or a setting '{setting}' for that parameter.")
                 
     def add_params(self, **kwargs: dict[dict]):
         """Add parameters to the settings. Each kwarg must be a dictionary. The kwarg's name should be the parameter
@@ -267,25 +69,384 @@ class DefaultsPlots:
         Example:
         >>> alpha_eff_plot_settings = {"label": r"$\alpha_{\text{eff}}$", "color"="red", lw=4}
         >>> plt_settings = DefaultsPlots()
-        >>> plt_settings.add_params(alpha_eff = alpha_eff_plot_settings)
+        >>> plt_settings.add_params(alpha_eff=alpha_eff_plot_settings)
         >>> pyplot.plot(time, alpha_eff, **plt_settings.plt_settings)
         """
-        map_plt_to_attr = {plt_name: attr for attr, plt_name in self._settings_implemented.items()}
-        for param, user_def_settings in kwargs.items():
-            self.plot_settings[param] = user_def_settings
-            skip_setting = user_def_settings.keys()
-            for setting in self._settings_implemented.values():
+        for param, defined_settigns in kwargs.items():
+            self.plt_settings[param] = defined_settigns
+            skip_setting = defined_settigns.keys()
+            for setting, value in getattr(self, self.kind).items():
                 if setting in skip_setting:
                     continue
-                self.plot_settings[param][setting] = getattr(self, map_plt_to_attr[setting])["_dfl"]
+                self.plt_settings[param][setting] = value
 
-    def _update_colours(self, _colours: dict):
-        self._update(_colours, "color")
+    @property
+    @abstractmethod
+    def _params():
+        pass
 
-    def _update(self, to_update: dict, setting: str):
-        for param, value_setting in to_update.items():
-            self.plot_settings[param][setting] = value_setting
+    @property
+    @abstractmethod
+    def _copy_params():
+        pass
 
+    @property
+    @abstractmethod
+    def _settings():
+        pass
+    
+    def __getitem__(self, key: str):
+        return self.plt_settings[key]
+
+
+class _CombineDefaults(_BaseDefaultPltSettings):
+    def __init__(self, *args: tuple[_BaseDefaultPltSettings]|tuple[_BaseDefaultPltSettings, str]) -> None:
+        self.plt_settings = {}
+        args = tuple([arg if isinstance(arg, tuple) else (arg, "") for arg in args ])
+        for part_of_settings, additional_name in args:
+            params_set = self.plt_settings.keys()
+            for param, settings in part_of_settings.plt_settings.items():
+                new_param = additional_name+param
+                if new_param in params_set:
+                    raise ValueError(f"Settings for the paramter '{new_param}' are tried to be set multiple times.")
+                self.plt_settings[new_param] = settings
+
+
+class _DefaultArrow(_BaseDefaultPltSettings):
+    _settings = {  # which axes.arrow() settings are implemented; maps class attributes to arrow()
+        # kwargs
+        "_width": "width",
+        "_colour": "color"
+    }
+
+    _params = [
+        "lift", 
+        "drag"
+    ]
+
+    _copy_params = {}
+
+    _width = {
+        "lift": 0.01,
+        "drag": 0.01
+    }
+
+    _colour = {
+        "lift": None,
+        "drag": None
+    }
+
+    def __init__(self) -> None:
+        _BaseDefaultPltSettings.__init__(self, "arrow")
+
+
+class _DefaultAngleOfAttack(_BaseDefaultPltSettings):
+    _copy_params = {}
+
+    _settings = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
+        "_colours": "color",
+        "_labels": "label"
+    }
+
+    _params = [  # parameters that are supported by default
+        "alpha_steady",
+        "alpha_qs",
+        "alpha_eff",
+        "alpha_sEq",
+    ]
+
+    copy_from = {}
+
+    _colours = {  # line colour
+        "alpha_steady": "black",
+        "alpha_qs": "darkgreen",
+        "alpha_eff": "orangered",
+        "alpha_sEq": "royalblue"
+    }
+
+    _labels = {  # line label
+        "_dfl": None,
+        "alpha_steady": r"$\alpha_{\text{steady}}$",
+        "alpha_qs": r"$\alpha_{\text{qs}}$",
+        "alpha_eff": r"$\alpha_{\text{eff}}$",
+        "alpha_sEq": r"$\alpha_{\text{sEq}}$"
+    }
+
+    def __init__(self) -> None:
+        _BaseDefaultPltSettings.__init__(self, "line")
+
+
+class _DefaultForce(_BaseDefaultPltSettings):
+    _copy_params = {}
+    
+    _settings = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
+        "_colours": "color",
+        "_labels": "label",
+    }
+
+    _params = [  # parameters that are supported by default
+        "lift",
+        "drag",
+        "mom",
+
+        "edge",
+        "flap",
+        "tors",
+    ]
+
+    _params_copy =  {  # default mapping from additional parameters (keys) that have the same settings as 
+        # a base default parameter of '_params' (value)
+        "aero_drag": "drag",
+        "aero_lift": "lift",
+        "aero_mom": "mom",
+    } | {f"{spec}_{direction}": direction for direction in ["edge", "flap", "tors"] for spec in ["damp", "kin", "pot"]} 
+
+    _colours = {  # line colour
+        "lift": "orangered",
+        "drag": "darkgreen",
+        "mom": "mediumpurple",
+
+        "edge": "forestgreen",
+        "flap": "coral",
+        "tors": "royalblue",
+    }
+
+    _labels = {  # line label
+        "lift": "lift",
+        "drag": "drag",
+        "mom": "moment",
+
+        "edge": "edge",
+        "flap": "flap",
+        "tors": "torsion"
+    }
+
+    def __init__(self) -> None:
+        _BaseDefaultPltSettings.__init__(self, "line")
+
+
+class _DefaultProfile(_BaseDefaultPltSettings):
+    _copy_params = {}
+    
+    _settings = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
+        "_colours": "color",
+        "_labels": "label",
+        "_markers": "marker",
+        "_linestyles": "ls",
+        "_marker_size": "ms"
+    }
+
+    _params = [  # parameters that are supported by default
+        "profile",
+        "qc_trail"
+    ]
+
+    _colours = {  # line colour
+        "profile": "black",
+        "qc_trail": "gray"
+    }
+
+    _labels = {  # line label
+        "profile": "_",
+        "qc_trail": "qc"
+    }
+
+    _markers = {  # line marker
+        "qc_trail": "x"
+    }
+
+    _linestyles = {  # line style
+        "qc_trail": "",
+    }
+
+    _marker_size = {  # marker size
+        "qc_trail": 1
+    }
+
+    def __init__(self) -> None:
+        _BaseDefaultPltSettings.__init__(self, "line")
+
+
+class _DefaultEnergy(_BaseDefaultPltSettings):
+    _copy_params = {}
+        
+    _settings = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
+        "_colours": "color",
+        "_labels": "label"
+    }
+
+    _params = [  # parameters that are supported by default
+        "e_kin",
+        "e_pot",
+        "e_total"
+    ]
+
+    _colours = {  # line colour
+        "e_kin": "blue",
+        "e_pot": "green",
+        "e_total": "black"
+    }
+
+    _labels = {  # line label
+        "e_kin": r"$E_\text{kin}$",
+        "e_pot": r"$E_\text{pot}$",
+        "e_total": r"$E_\text{total}$"
+    }
+
+    def __init__(self) -> None:
+        _BaseDefaultPltSettings.__init__(self, "line")
+
+    
+class _DefaultBL(_BaseDefaultPltSettings):
+    _copy_params =  {}
+
+    _settings = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
+        "_colours": "color",
+        "_labels": "label",
+        "_linestyles": "ls"
+    }
+
+    _prep_params = [  # parameters for the preparation validation
+        "f_n_aerohor",
+        "f_n_section",
+        "f_t_aerohor",
+        "f_t_section",
+        "C_l_rec_aerohor",
+        "C_l_rec_section",
+        "C_d_rec_aerohor",
+        "C_d_rec_section",
+    ]
+    _sim_params = [
+        "C_nc",
+        "C_ni",
+        "C_npot",
+        "C_tpot",
+        "C_nsEq",
+        "C_nf",
+        "C_tf",
+        "C_nv_instant",
+        "C_nv",
+        "C_mqs",
+        "C_mnc"
+    ]
+    _params = _prep_params + _sim_params
+
+    _c_models = {"aerohor": "forestgreen", "section": "orangered"}
+    def _prep_colours(params, colours):  # this is a bit narly; it replaces a dict comprehension that wouldn't work here
+        return {param: colours[param.split("_")[-1]] for param in params}
+    _prep_colours = _prep_colours(_prep_params, _c_models)
+    _c_rest = {
+        "C_nc": "blue",
+        "C_ni": "red",
+        "C_npot": "green",
+        "C_nsEq": "orange",
+        "C_nf": "blue",
+        "C_nv_instant": "red",
+        "C_nv": "green",
+        "C_tpot": "orange",
+        "C_tf": "green",
+        "C_mqs": "black",
+        "C_mnc": "orange"
+    }
+    _colours = _prep_colours|_c_rest
+
+    _labels = {  # line label
+        "f_n_aerohor": r"aerohor $f_n$", 
+        "f_n_section": r"section $f_n$", 
+        "f_t_aerohor": r"aerohor $f_t$", 
+        "f_t_section": r"section $f_t$", 
+        "C_l_rec_aerohor": r"aerohor reconstructed $C_l$", 
+        "C_l_rec_section": r"section reconstructed $C_l$", 
+        "C_d_rec_aerohor": r"aerohor reconstructed $C_d$", 
+        "C_d_rec_section": r"section reconstructed $C_d$",
+        "C_nc": r"$C_{n\text{,c}}$",
+        "C_ni": r"$C_{n\text{,i}}$",
+        "C_npot": r"$C_{n\text{,p}}$",
+        "C_tpot": r"$C_{t\text{,c}}$",
+        "C_nsEq": r"$C_{n\text{,seq}}$",
+        "C_nf": r"$C_{n\text{,f}}$",
+        "C_tf": r"$C_{t\text{,f}}$",
+        "C_nv_instant": r"$C_{n\text{,vi}}$",
+        "C_nv": r"$C_{n\text{,v}}$",
+        "C_mqs": r"$C_{m\text{,qs}}$",
+        "C_mnc": r"$C_{m\text{,nc}}$",
+    }
+
+    _linestyles = {  # line style
+        "f_n_section": "--",
+        "f_t_section": "--",
+        "C_l_rec_section": "--",
+        "C_d_rec_section": "--",
+        "C_nc": "--",
+        "C_ni": "--",
+        "C_npot": "--",
+    }
+
+    def __init__(self) -> None:
+        _BaseDefaultPltSettings.__init__(self, "line")
+
+
+class _DefaultMeasurement(_BaseDefaultPltSettings):
+    _copy_params = {}
+
+    _settings = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
+        "_colours": "color",
+        "_labels": "label",
+        "_markers": "marker",
+        "_linestyles": "ls",
+    }
+
+    _params = [ 
+        "C_l_HAWC2",
+        "C_d_HAWC2",
+        "C_m_HAWC2",
+        "C_l_openFAST",
+        "C_d_openFAST",
+        "C_m_openFAST",
+    ]
+
+    def _colours(params):
+        return {param: "black" for param in params}
+    _colours = _colours(_params)
+
+    def _labels(params):
+        return {param: param.split("_"[-1]) for param in params}
+    _labels = _labels(_params)
+
+    def _linestyles(params):
+        return {param: None for param in params}
+    _linestyles = _linestyles(_params)
+
+
+    _map_marker = {"HAWC2": "x", "openFAST": "o"}
+    def _markers(map_marker, params):
+        return {param: map_marker[param.split("_")[-1]] for param in params}
+    _markers = _markers(_map_marker, _params)
+
+    def __init__(self) -> None:
+        _BaseDefaultPltSettings.__init__(self, "line")
+        
+
+class DefaultPlot:
+    """C_lass to specify plot settings for parameters of this project. Example:
+    Assume time, lift given.
+    >>> dfl = DefaultsPlots()
+    >>> fig, ax = plt.subplots()
+    >>> dfl = DefaultsPlots()
+    >>> matplotlib.pyplot.plot(time, lift, **dfl.settings["lift"])
+    This will cause the plot to have all axes settings defined in this class to be set for the values connected 
+    to "lift.
+    """
+    def __init__(self) -> None:
+        arrow = _DefaultArrow()
+        aoa = _DefaultAngleOfAttack()
+        force = _DefaultForce()
+        profile = _DefaultProfile()
+        energy = _DefaultEnergy()
+        BL = _DefaultBL()
+        measurement = _DefaultMeasurement()
+        self = _CombineDefaults.__init__(self, (arrow, "arrow"), aoa, force, profile, energy, BL, measurement)
+        
 
 class DefaultStructure:
     """C_lass that maps parameters of a certain kind to the filename they should be saved into. The keys must not
