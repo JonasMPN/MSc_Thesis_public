@@ -1,6 +1,6 @@
 from utils_plot import Shapes, PlotPreparation, AnimationPreparation, MosaicHandler
 from calculations import Rotations
-from defaults import DefaultsPlots, DefaultStructure
+from defaults import DefaultPlot, DefaultStructure
 import pandas as pd
 import numpy as np
 import json
@@ -15,7 +15,7 @@ from typing import Callable
 helper = Helper()
 
 
-class Plotter(DefaultStructure, DefaultsPlots, PlotPreparation):
+class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
     """Utility class that plots results. Requires a directory to have a certain text files holding data about a 
     simulation. The name of these files is given in the parent class DefaultStructure.
     """
@@ -32,7 +32,7 @@ class Plotter(DefaultStructure, DefaultsPlots, PlotPreparation):
         :type dir_plots: str
         """
         DefaultStructure.__init__(self)
-        DefaultsPlots.__init__(self)
+        DefaultPlot.__init__(self)
         PlotPreparation.__init__(self)
         
         self.profile = pd.read_csv(file_profile, delim_whitespace=True).to_numpy()
@@ -64,11 +64,11 @@ class Plotter(DefaultStructure, DefaultsPlots, PlotPreparation):
         
         # get final position of the profile. Displace it such that the qc is at (0, 0) at t=0.
         pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
-        rot = self._rot.passive_2D(pos[-1, 2])
+        rot = self._rot.active_2D(pos[-1, 2])
         rot_profile = rot@(self.profile[:, :2]-np.asarray([self.section_data["chord"]/4, 0])).T
         rot_profile += np.asarray([[pos[-1, 0]], [pos[-1, 1]]])
-        axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plot_settings["profile"])
-        axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plot_settings["qc_trail"])
+        axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plt_settings["profile"])
+        axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plt_settings["qc_trail"])
         
         # grab all angles of attack from the data
         aoas, df_aoas = self._get_aoas(self.df_f_aero)
@@ -102,11 +102,11 @@ class Plotter(DefaultStructure, DefaultsPlots, PlotPreparation):
         
         # get final position of the profile. Displace it such that the qc is at (0, 0) at t=0.
         pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
-        rot = self._rot.passive_2D(pos[-1, 2])
+        rot = self._rot.active_2D(pos[-1, 2])
         rot_profile = rot@(self.profile[:, :2]-np.asarray([self.section_data["chord"]/4, 0])).T
         rot_profile += np.asarray([[pos[-1, 0]], [pos[-1, 1]]])
-        axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plot_settings["profile"])
-        axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plot_settings["qc_trail"])
+        axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plt_settings["profile"])
+        axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plt_settings["qc_trail"])
         
         df_total = pd.concat([self.df_e_kin.sum(axis=1), self.df_e_pot.sum(axis=1)], keys=["e_kin", "e_pot"], axis=1)
         df_total["e_total"] = df_total.sum(axis=1)
@@ -139,28 +139,29 @@ class Plotter(DefaultStructure, DefaultsPlots, PlotPreparation):
         
         # get final position of the profile. Displace it such that the qc is at (0, 0) at t=0.
         pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
-        rot = self._rot.passive_2D(pos[-1, 2])
+        rot = self._rot.active_2D(pos[-1, 2])
         rot_profile = rot@(self.profile[:, :2]-np.asarray([self.section_data["chord"]/4, 0])).T
         rot_profile += np.asarray([[pos[-1, 0]], [pos[-1, 1]]])
-        axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plot_settings["profile"])
-        axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plot_settings["qc_trail"])
+        axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plt_settings["profile"])
+        axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plt_settings["qc_trail"])
         
-        df_total = pd.concat([self.df_e_kin.sum(axis=1), self.df_e_pot.sum(axis=1)], keys=["e_kin", "e_pot"], axis=1)
-        df_total["e_total"] = df_total.sum(axis=1)
-        dfs = {"total": df_total, "work": self.df_work, "kinetic": self.df_e_kin, 
-               "potential": self.df_e_pot}
+        # grab all angles of attack from the data
+        aoas, df_aoas = self._get_aoas(self.df_f_aero)
+        # prepare dictionary of dataframes to plot
+        dfs = {ax_label: self.df_f_aero for ax_label in axs.keys() if ax_label not in ["profile", "aoa"]}
+        dfs["aoa"] = df_aoas
         
         plot = {
-            "total": ["e_total", "e_kin", "e_pot"],
-            "work": ["aero_drag", "aero_lift", "aero_mom", "damp_edge", "damp_flap", "damp_tors"],
-            "kinetic": ["edge", "flap", "tors"],
-            "potential": ["edge", "flap", "tors"]
+            "aoa": aoas,
+            "C_n": ["C_nc", "C_ni", "C_npot", "C_nsEq", "C_nf", "C_nv_instant", "C_nv"],
+            "C_t": ["C_tpot", "C_tf"],
+            "C_m": ["C_mqs", "C_mnc"]
         }        
         def param_name(param: str):
-            return param if "damp" not in param and "stiff" not in param else param[param.rfind("_")+1:]
+            return param
         axs = self._plot_to_mosaic(axs, plot, dfs, param_name)
         handler.update(legend=True)
-        fig.savefig(join(self.dir_plots, "energy.pdf"))
+        fig.savefig(join(self.dir_plots, "BL.pdf"))
 
     def _plot_to_mosaic(
             self,
@@ -168,15 +169,14 @@ class Plotter(DefaultStructure, DefaultsPlots, PlotPreparation):
             plot: dict[str, list[str]],
             data: dict[str, pd.DataFrame],
             map_column_to_settings: Callable) -> dict[str, matplotlib.axes.Axes]:
-
         for ax, cols in plot.items():
             time = self.time if ax != "work" else self.time[:-1]
             for col in cols:
                 try: 
-                    self.plot_settings[map_column_to_settings(col)]
+                    self.plt_settings[map_column_to_settings(col)]
                 except KeyError:
                     raise NotImplementedError(f"Default plot styles for '{col}' are missing.")
-                axes[ax].plot(time, data[ax][col].to_numpy(), **self.plot_settings[map_column_to_settings(col)])
+                axes[ax].plot(time, data[ax][col].to_numpy(), **self.plt_settings[map_column_to_settings(col)])
         return axes
 
 
@@ -197,7 +197,7 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
         :type dir_plots: str
         """
         DefaultStructure.__init__(self)
-        DefaultsPlots.__init__(self)
+        DefaultPlot.__init__(self)
         Shapes.__init__(self)
         AnimationPreparation.__init__(self)
         
@@ -554,9 +554,9 @@ class HHTalphaPlotter(DefaultStructure):
         return legend
     
 
-class BLValidationPlotter(DefaultsPlots):
+class BLValidationPlotter(DefaultPlot):
     def __init__(self) -> None:
-        DefaultsPlots.__init__(self)
+        DefaultPlot.__init__(self)
 
     def plot_preparation(
             self,
@@ -578,9 +578,9 @@ class BLValidationPlotter(DefaultsPlots):
         for f_type in ["f_t", "f_n"]:
             fig, ax = plt.subplots()
             ax.plot(df_aerohor[f"alpha_{f_type.split("_")[-1]}"], df_aerohor[f"{f_type}"], 
-                    **self.plot_settings[f"{f_type}_aerohor"])
+                    **self.plt_settings[f"{f_type}_aerohor"])
             ax.plot(df_section["alpha"], df_section[f"{f_type}"], 
-                    **self.plot_settings[f"{f_type}_section"])
+                    **self.plt_settings[f"{f_type}_section"])
             handler = MosaicHandler(fig, ax)
             handler.update(x_labels=r"$\alpha$ (°)", y_labels=rf"${{{f_type[0]}}}_{{{f_type[2]}}}$ (-)", legend=True)
             handler.save(join(dir_plots, f"{f_type}_model_comp.pdf"))
@@ -597,11 +597,11 @@ class BLValidationPlotter(DefaultsPlots):
         for i, coeff_type in enumerate(["C_d", "C_l"]):
             sign = 1 if coeff_type == "C_l" else -1
             fig, ax = plt.subplots()
-            ax.plot(df_polar["alpha"], df_polar[coeff_type], **self.plot_settings[f"{coeff_type}_meas"])
+            ax.plot(df_polar["alpha"], df_polar[coeff_type], **self.plt_settings[f"{coeff_type}_meas"])
             ax.plot(df_aerohor["alpha_n"], sign*rot_coeffs_aerohor[:, i], 
-                    **self.plot_settings[f"{coeff_type}_rec_aerohor"])
+                    **self.plt_settings[f"{coeff_type}_rec_aerohor"])
             ax.plot(df_section["alpha"], sign*rot_coeffs_section[:, i], 
-                    **self.plot_settings[f"{coeff_type}_rec_section"])
+                    **self.plt_settings[f"{coeff_type}_rec_section"])
             handler = MosaicHandler(fig, ax)
             handler.update(x_labels=r"$\alpha$ (°)", 
                            y_labels=rf"${{{coeff_type[0]}}}_{{{coeff_type[2]}}}$ (-)", legend=True)
@@ -670,7 +670,6 @@ class BLValidationPlotter(DefaultsPlots):
         df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
         df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
         
-        map_measurement = {"C_d": " Cdp", "C_l": " Cl"}
         map_measurement = {"alpha": "AOA", "C_l": "CL", "C_d": "CD", "C_m": "CM"}
         dir_save = helper.create_dir(join(dir_results, "plots", "meas_comp"))[0]
         line_width = 1
@@ -682,11 +681,19 @@ class BLValidationPlotter(DefaultsPlots):
                 "color": "orangered", "lw": line_width, "label": "section"
             }
         }
+        if "unsteady_10_20_k1.dat" in file_unsteady_data:
+            df_cl = pd.read_csv("data/FFA_WA3_221/unsteady/openFAST_1.dat")
+            df_cd = pd.read_csv("data/FFA_WA3_221/unsteady/openFAST_2.dat")
+            dfs = {"C_l": df_cl, "C_d": df_cd}
         for coef in ["C_d", "C_l", "C_m"]:
             fig, ax = plt.subplots()
             handler = MosaicHandler(fig, ax)
             ax.plot(df_meas[map_measurement["alpha"]], df_meas[map_measurement[coef]], 
-                    **self.plot_settings[coef+"_meas"])
+                    **self.plt_settings[coef+"_meas"])
+            if "unsteady_10_20_k1.dat" in file_unsteady_data:
+                if coef != "C_m":
+                    ax.plot(dfs[coef]["AOA"], dfs[coef][map_measurement[coef]], "ko", ms=2,
+                             label="openFAST")
             if coef != "C_m":
                 ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
                         **plt_settings["aerohor"])
