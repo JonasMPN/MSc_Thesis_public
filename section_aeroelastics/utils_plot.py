@@ -435,8 +435,8 @@ class PlotPreparation:
 
 class AnimationPreparation(PlotPreparation, DefaultPlot):
     def __init__(self) -> None:
-        PlotPreparation.__init__(self)
         DefaultPlot.__init__(self)
+        
     
     def _prepare_force_animation(self, dfs: pd.DataFrame, equal_y: tuple[str]=None):
         fig, axs, handler = self._prepare_force_plot(equal_y)
@@ -468,6 +468,8 @@ class AnimationPreparation(PlotPreparation, DefaultPlot):
         def map_cols_to_settings(column: str) -> str:
             if any([force_type in column for force_type in ["aero", "damp", "stiff"]]):
                 return column[column.find("_")+1:]
+            elif column in ["drag", "lift"]:
+                return f"arrow_{column}"
             else:
                 return column 
         fig, axs = handler.update(x_lims_from=x_lims_from, y_lims_from=y_lims_from, scale_limits=1.2)
@@ -522,7 +524,7 @@ class AnimationPreparation(PlotPreparation, DefaultPlot):
                 except KeyError:
                     raise NotImplementedError(f"Default plot styles for '{map_column_to_settings(col)}' are missing.")
                 if col in ["lift", "drag"]:
-                    force_arrows[col] = axes[ax].arrow(0, 0, 0, 0, **self.arrow_settings[map_column_to_settings(col)])
+                    force_arrows[col] = axes[ax].arrow(0, 0, 0, 0, **self.plt_settings[map_column_to_settings(col)])
                 else:
                     lines[col] = axes[ax].plot(0, 0, **self.plt_settings[map_column_to_settings(col)])[0]
         return lines, force_arrows
