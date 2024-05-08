@@ -197,27 +197,28 @@ class AeroForce(SimulationSubRoutine, Rotations):
     """Class implementing differnt ways to calculate the lift, drag, and moment depending on the
     state of the system.
     """
-    _implemented_schemes = ["quasi_steady", "BL", "BL_openFAST"]
+    _implemented_schemes = ["quasi_steady", "BL", "BL_openFAST_Cl", "BL_openFAST_Cn"]
 
     _scheme_settings_must = {
         "quasi_steady": [],
-        "BL": ["A1", "A2", "b1", "b2"],
-        "BL_openFAST": ["A1", "A2", "b1", "b2"]
+        "BL": ["A1", "A2", "b1", "b2"]
     }
 
     _scheme_settings_can = {
         "quasi_steady": ["density", "chord", "pitching_around", "alpha_at"],
         "BL": ["density", "chord", "a", "K_alpha", "T_p", "T_bl", "Cn_vortex_detach", "tau_vortex_pure_decay", "T_v", 
-               "pitching_around", "alpha_at"],
-        "BL_openFAST": ["density", "chord"]
+               "pitching_around", "alpha_at"]
     }
 
     _sim_params_required = {
         "quasi_steady": ["alpha_qs"],
         "BL": ["s", "alpha_qs", "X_lag", "Y_lag", "alpha_eff", "C_nc", "D_i", "C_ni", "C_npot", "C_tpot", "D_p", 
                "C_nsEq", "alpha_sEq", "f_t_Dp", "f_n_Dp", "D_bl_t", "D_bl_n", "f_t", "f_n", "C_nf", "C_tf",
-               "tau_vortex", "C_nv_instant", "C_nv", "C_mqs", "C_mnc"],
-        "BL_openFAST": []
+               "tau_vortex", "C_nv_instant", "C_nv", "C_mqs", "C_mnc"]
+    }
+
+    _copy_scheme = {
+        "BL_openFAST_Cl": ["BL_openFAST_Cn"]
     }
     
     def __init__(self, dir_polar: str, file_polar: str="polars.dat", verbose: bool=True) -> None:
@@ -264,7 +265,14 @@ class AeroForce(SimulationSubRoutine, Rotations):
         }
         return scheme_methods[scheme]
 
-    def _pre_calculations(self, scheme: str, resolution: int=100, sep_points_scheme: int=0):
+    def _pre_calculations(self, scheme: str, resolution: int=100, sep_points_scheme: int=None):
+        map_sep_point_scheme = {
+            "BL": 3,
+            "BL_openFAST_Cl": 4,
+            "BL_openFAST_Cd": 5,
+        }
+        if sep_points_scheme is None:
+            sep_points_scheme = map_sep_point_scheme[sep_points_scheme]
         match scheme:
             case "BL"|"BL_openFAST":
                 prep_dir = "Beddoes_Leishman_preparation"
@@ -280,7 +288,8 @@ class AeroForce(SimulationSubRoutine, Rotations):
                     coefficients = np.c_[self.C_d(alpha_interp)-self._C_d_0, self.C_l(alpha_interp)]
                     coeff_rot = self.project_2D(coefficients, -np.deg2rad(alpha_interp))
                     coeffs = {"C_l": coefficients[:, 1], "C_n": coeff_rot[:, 1]}
-                    zero_data = self._zero_forces(alpha=alpha_interp, coeffs=coeffs, save_as=f_zero_data)
+                    add = {"alpha_0_d": self._alpha_0D}
+                    zero_data = self._zero_forces(alpha=alpha_interp, coeffs=coeffs, save_as=f_zero_data, add=add)
                 else:
                     with open(f_zero_data, "r") as f:
                         zero_data = json.load(f)
@@ -290,8 +299,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
                 self._C_l_slope = np.rad2deg(zero_data["C_l_slope"])
                 self._C_n_slope = np.rad2deg(zero_data["C_n_slope"])
                 
-                # if not isfile(f_sep):
-                if True:
+                if not isfile(f_sep):
                     df_sep = self._write_and_get_separation_points(save_as=f_sep, scheme=sep_points_scheme,
                                                                    res=resolution)
                 else:
@@ -309,7 +317,8 @@ class AeroForce(SimulationSubRoutine, Rotations):
             save_as: str,
             res: int=100,
             scheme: int=0,
-            limits: tuple=(None, None)
+            adjust_attached: bool=True,
+            adjust_separated: bool=True
             ) -> pd.DataFrame:
         """_summary_
 
@@ -340,118 +349,109 @@ class AeroForce(SimulationSubRoutine, Rotations):
         
         match scheme:
             case 1:
-                coeff_rot = self.project_2D(coefficients, -alpha_interp)
-                C_t, C_n = -coeff_rot[:, 0], coeff_rot[:, 1]
+                def sqrt_of_f_t(alpha):
+                    raoa = np.deg2rad(alpha)
+                    C_t = self.C_l(alpha)*np.sin(raoa)-(self.C_d(alpha)-self._C_d_0)*np.cos(raoa)
+                    return C_t/(self._C_n_slope*np.sin(alpha_interp-self._alpha_0N)**2)
+                
+                def sqrt_of_f_n(alpha):
+                    raoa = np.deg2rad(alpha)
+                    C_n = self.C_l(alpha)*np.cos(raoa)+(self.C_d(alpha)-self._C_d_0)*np.sin(raoa)
+                    return 2*np.sqrt(C_n/(self._C_n_slope*np.sin(alpha_interp-self._alpha_0N)))-1
 
-                f_t = C_t/(self._C_n_slope*np.sin(alpha_interp-self._alpha_0N)**2)
-                f_t = f_t**2*np.sign(f_t)
-
-                f_n = (2*np.sqrt(C_n/(self._C_n_slope*np.sin(alpha_interp-self._alpha_0N)))-1)**2
-
-                data["f_t"] = f_t
-                data["f_n"] = f_n
+                data["f_t"] = self._adjust_f(alpha_interp, sqrt_of_f_t, adjust_attached, adjust_separated)
+                data["f_n"] = self._adjust_f(alpha_interp, sqrt_of_f_n, adjust_attached, adjust_separated)
             case 2:
-                coeff_rot = self.project_2D(coefficients, -alpha_interp)
-                C_n = coeff_rot[:, 1]
-
-                f_n = (2*np.sqrt(C_n/(self._C_n_slope*(alpha_interp-self._alpha_0N)))-1)**2
-                data["f_n"] = f_n
+                def sqrt_of_f_n(alpha):
+                    raoa = np.deg2rad(alpha)
+                    C_n = self.C_l(alpha)*np.cos(raoa)+(self.C_d(alpha)-self._C_d_0)*np.sin(raoa)
+                    return 2*np.sqrt(C_n/(self._C_n_slope*(alpha_interp-self._alpha_0N)))-1
+                
+                data["f_n"] = self._adjust_f(alpha_interp, sqrt_of_f_n, adjust_attached, adjust_separated)
             case 3:
-                coeff_rot = self.project_2D(coefficients, -alpha_interp)
-                C_t, C_n = -coeff_rot[:, 0], coeff_rot[:, 1]
-
-                f_t = C_t/(self._C_n_slope*np.sin(alpha_interp-self._alpha_0N)*np.tan(alpha_interp))
-                f_t = f_t**2*np.sign(f_t)
-
-                f_n = 2*np.sqrt(C_n/(self._C_n_slope*(alpha_interp-self._alpha_0N)))-1
-                f_n = f_n**2*np.sign(f_n)
-
-                data["f_t"] = f_t
-                data["f_n"] = f_n
+                def sqrt_of_f_t(alpha):
+                    raoa = np.deg2rad(alpha)
+                    C_t = self.C_l(alpha)*np.sin(raoa)-(self.C_d(alpha)-self._C_d_0)*np.cos(raoa)
+                    return C_t/(self._C_n_slope*np.sin(alpha_interp-self._alpha_0N)*np.tan(alpha_interp))
+                
+                def sqrt_of_f_n(alpha):
+                    raoa = np.deg2rad(alpha)
+                    C_n = self.C_l(alpha)*np.cos(raoa)+(self.C_d(alpha)-self._C_d_0)*np.sin(raoa)
+                    return 2*np.sqrt(C_n/(self._C_n_slope*(alpha_interp-self._alpha_0N)))-1
             case 4:
-                data["alpha"], data["f_l"] = self._write_fn_openFAST("C_l", res)
+                def sqrt_of_f(alpha):
+                    raoa = np.deg2rad(alpha)
+                    return 2*np.sqrt(self.C_l(alpha)/(self._C_l_slope*np.sin(raoa-self._alpha_0L)))-1
+                data["alpha"], data["f_l"] = self._adjust_f(alpha_interp, sqrt_of_f)
             case 5:
-                data["alpha"], data["f_n"] = self._write_fn_openFAST("C_n", res)
-
-        for f_kind in ["f_n", "f_t", "f_l"]:
-            if data[f_kind] is None:
-                data.pop(f_kind)
-                continue
-            f = data[f_kind]
-            if limits[0] is not None:
-                f[f<=limits[0]] = limits[0]
-            
-            if limits[1] is not None:
-                f[f>=limits[1]] = limits[1]
+                def sqrt_of_f(alpha):
+                    raoa = np.deg2rad(alpha)
+                    C_n = self.C_l(alpha)*np.cos(raoa)+(self.C_d(alpha)-self._C_d_0)*np.sin(raoa)
+                    return 2*np.sqrt(C_n/(self._C_l_slope*np.sin(raoa-self._alpha_0L)))-1
+                data["alpha"], data["f_n"] = self._adjust_f(alpha_interp, sqrt_of_f)
         
         df = pd.DataFrame(data)
         df.to_csv(save_as, index=None)
         return df
     
-    def _write_fn_openFAST(
+    def _adjust_f(
             self,
-            coeff_direction: str,
-            res: int=100
+            alpha: np.ndarray,
+            sqrt_of_f: Callable,
+            attached_region: tuple=(-60, 60),
+            adjust_attached: bool=True,
+            adjust_separated: bool=True,
+            keep_sign: bool=True
     ) -> pd.DataFrame:
-        # currently expects the begin of the attachement in [alpha_0-60, alpha_0-0.1]
-        # the begin of the fully attache region in [begin_attachement, alpha_0-3]
-        # the end of the fully attached region in [alpha_0+3, alpha_0+20]
-        # the begin of the fully separated region in [end_fully_attached, alpha_0+70]
-        alpha_given = self.df_polars["alpha"].to_numpy()
-        alpha_sub = alpha_given[np.logical_and(alpha_given>=-80, alpha_given<=80)]
+        def resiude_separated(alpha):
+            return sqrt_of_f(alpha)
+
+        def residue_attached(alpha):
+            return resiude_separated(alpha)-1
         
-        def res_separated(alpha):
-            # the return value squared equals f_n
-            raoa = np.deg2rad(alpha)
-            if coeff_direction == "C_n":
-                coeff = self.C_l(alpha)*np.cos(raoa)+(self.C_d(alpha)-self._C_d_0)*np.sin(raoa)
-                return 2*np.sqrt(coeff/(self._C_n_slope*np.sin(raoa-self._alpha_0N)))-1
-            elif coeff_direction == "C_l":
-                coeff = self.C_l(alpha)
-                return 2*np.sqrt(coeff/(self._C_l_slope*np.sin(raoa-self._alpha_0L)))-1
+        def handle_sign(sqrt_f: np.ndarray):
+            return sqrt_f**2*np.sign(sqrt_f) if keep_sign else sqrt_f**2
         
-        def res_attached(alpha):
-            return res_separated(alpha)-1
-        
-        # import matplotlib.pyplot as plt
-        # alpha = np.linspace(-40, 50, 300)
-        # fig, ax = plt.subplots()
-        # # ax.plot(alpha, res_separated(alpha)**2, label="sep")
-        # ax.plot(alpha, res_attached(alpha), label="attached")
-        # ax.grid()
-        # ax.legend()
-        # ax.set_ylim((-0.3, 0.3))
-        # fig, ax = plt.subplots()
-        # alpha_sub = np.linspace(-40, 40, 300)
-        # ax.plot(alpha_sub, self.C_l(alpha_sub), label="polar")
-        # ax.plot(alpha_sub, np.deg2rad(self._C_l_slope)*(alpha_sub-np.rad2deg(self._alpha_0L)), label="linear")
-        # ax.plot(alpha_sub, self._C_l_slope*np.sin(np.deg2rad(alpha_sub)-self._alpha_0L), label="sin")
-        # ax.legend()
-        # ax.grid()
-        # ax.set_ylim((-2, 2))
-        # plt.show()
-        
-        res_sep = res_separated(alpha_sub)
+        alpha_sub = alpha[np.logical_and(alpha>=attached_region[0], alpha<=attached_region[1])]
+
+        res_sep = resiude_separated(alpha_sub)
         id_begin_attachement = (res_sep>0).argmax()
-        begin_attachement = brentq(res_separated, alpha_sub[id_begin_attachement-2], alpha_sub[id_begin_attachement])
+        begin_attachement = brentq(resiude_separated, alpha_sub[id_begin_attachement-2], 
+                                   alpha_sub[id_begin_attachement])
 
         res_att = res_sep-1
         id_fully_attached = (res_att>0).argmax()
-        begin_fully_attached = brentq(res_attached, alpha_sub[id_fully_attached-2], alpha_sub[id_fully_attached])
+        begin_fully_attached = brentq(residue_attached, alpha_sub[id_fully_attached-2], alpha_sub[id_fully_attached])
 
         id_end_fully_attached = res_att.size-(res_att[::-1]>0).argmax()-1
-        end_fully_attached = brentq(res_attached, alpha_sub[id_end_fully_attached], alpha_sub[id_end_fully_attached+2])
+        end_fully_attached = brentq(residue_attached, alpha_sub[id_end_fully_attached], 
+                                    alpha_sub[id_end_fully_attached+2])
 
         id_end_attched = res_att.size-(res_sep[::-1]>0).argmax()-1
-        end_attachement = brentq(res_separated, alpha_sub[id_end_attched], alpha_sub[id_end_attched+2])
+        end_attachement = brentq(resiude_separated, alpha_sub[id_end_attched], alpha_sub[id_end_attched+2])
 
-        alpha_begins_attaching = np.linspace(begin_attachement, begin_fully_attached, int(res/2))[:-1]
-        alpha_ends_attached = np.linspace(end_fully_attached, end_attachement, int(res/2))[1:]
-        f = np.r_[0, res_separated(alpha_begins_attaching)**2, 1, 1, res_separated(alpha_ends_attached)**2, 0]
-        alpha = np.r_[alpha_given.min(), alpha_begins_attaching, begin_fully_attached, end_fully_attached, 
-                    alpha_ends_attached, alpha_given.max()]
+        alpha_begins_attaching = alpha_sub[np.logical_and(alpha_sub>begin_attachement, alpha_sub<begin_fully_attached)]
+        alpha_ends_attached = alpha_sub[np.logical_and(alpha_sub>end_fully_attached, alpha_sub<end_attachement)]
+        
+
+        if adjust_separated and adjust_attached:
+            f = np.r_[0, handle_sign(resiude_separated(alpha_begins_attaching)), 1, 1, 
+                      handle_sign(resiude_separated(alpha_ends_attached)), 0]
+            alpha = np.r_[alpha.min(), alpha_begins_attaching, begin_fully_attached, end_fully_attached, 
+                          alpha_ends_attached, alpha.max()]
+        elif adjust_attached:
+            alpha_below_fully_attached = alpha[alpha<begin_fully_attached]
+            alpha_above_fully_attached = alpha[alpha>end_fully_attached]
+            f = np._r[handle_sign(resiude_separated(alpha_below_fully_attached)), 1, 1, 
+                      handle_sign(resiude_separated(alpha_above_fully_attached))]
+            alpha = np.r_[alpha_below_fully_attached, begin_fully_attached, end_fully_attached, 
+                          alpha_above_fully_attached]
+        elif adjust_separated:
+            raise NotImplementedError("'adjust_separated'=True and 'adjust_attached'=False not implemented.")
+        else:
+            f = handle_sign(resiude_separated(alpha))
         return alpha, f
-    
+        
     def C_l_fs(
             self,
             alpha_n: np.ndarray,
@@ -676,7 +676,8 @@ class AeroForce(SimulationSubRoutine, Rotations):
         v_y = flow[1]-velocity[1]-v_pitching_y
         return np.arctan2(v_y, v_x)
     
-    def _zero_forces(self, alpha: np.ndarray, coeffs: dict[str, np.ndarray], save_as: str, alpha0_in: tuple=(-10, 5)):
+    def _zero_forces(self, alpha: np.ndarray, coeffs: dict[str, np.ndarray], save_as: str, add: dict,
+                     alpha0_in: tuple=(-10, 5)):
         #todo calc d_Cn/d_alpha as dC_l_dalpha at every alpha
         ids_subset = np.logical_and(alpha>=alpha0_in[0], alpha<=alpha0_in[1])
         alpha_subset = alpha[ids_subset]
@@ -691,7 +692,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
             zero_data[f"alpha_0_{coeff_name.split("_")[-1]}"] = alpha_0
             zero_data[f"{coeff_name}_slope"] = slope
         with open(save_as, "w") as f:
-            json.dump(zero_data, f, indent=4)
+            json.dump(zero_data|add, f, indent=4)
         return zero_data
     
     @staticmethod
