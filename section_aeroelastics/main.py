@@ -1,6 +1,7 @@
 from calculations import ThreeDOFsAirfoil
 from post_calculations import PostCaluculations
 import numpy as np
+import json
 from plotting import Plotter, Animator
 from os.path import join
 
@@ -11,11 +12,11 @@ do = {
     "animate_results": False
 }
 
-root = "data/NACA_643_618"  # set which airfoil polars to use. Simulatenously defines to root for the simulation data
-case_dir = "BL_HHT"
+# root = "data/NACA_643_618"  # set which airfoil polars to use. Simulatenously defines to root for the simulation data
+root = "data/FFA_WA3_221"  # set which airfoil polars to use. Simulatenously defines to root for the simulation data
+case_dir = "test"
 
 if do["simulate"]:
-    density = 1  # density of the fluid
     struct_def = {  # definition of structural parameters
         "chord": 1,
         "mass": 1,
@@ -27,8 +28,11 @@ if do["simulate"]:
         "stiffness_flap": 1,
         "stiffness_tors": 1,
     }
+    with open(join(root, "section_data.json"), "w") as f:
+        json.dump(struct_def, f, indent=4)
+        
     t = np.linspace(0, 40, 1300)  # set the time array for the simulation
-    NACA_643_618 = ThreeDOFsAirfoil(root, t, **struct_def)
+    NACA_643_618 = ThreeDOFsAirfoil(root, t, verbose=True)
 
     # the following lines define the inflow at each time step
     inflow_speed = 1*np.ones((t.size, 1)) 
@@ -44,11 +48,14 @@ if do["simulate"]:
 
     # set the calculation scheme for the aerodynamic forces
     # NACA_643_618.set_aero_calc()
-    NACA_643_618.set_aero_calc("BL", A1=0.3, A2=0.7, b1=0.14, b2=0.53, pitching_around=0.25, alpha_at=0.75)
-    NACA_643_618.set_struct_calc()  # set the calculation scheme for the structural damping and stiffness forces
-    # NACA_643_618.set_time_integration()  # set the time integration scheme
-    NACA_643_618.set_time_integration("HHT-alpha-adapted", alpha=0.1, dt=t[1])  # set the time integration scheme
-    NACA_643_618.simulate(inflow, density, init_pos, init_vel)  # perform simulation
+    NACA_643_618.set_aero_calc("BL", A1=0.3, A2=0.7, b1=0.14, b2=0.53, pitching_around=0.25, alpha_at=0.75, 
+                               chord=struct_def["chord"])
+    # set the calculation scheme for the structural damping and stiffness forces
+    NACA_643_618.set_struct_calc("linear", **struct_def)
+    # set the time integration scheme
+    # NACA_643_618.set_time_integration()
+    NACA_643_618.set_time_integration("HHT-alpha-adapted", alpha=0.1, dt=t[1], **struct_def)
+    NACA_643_618.simulate(inflow, init_pos, init_vel)  # perform simulation
     NACA_643_618.save(join(root, "simulation", case_dir))  # save simulation results
 
 if do["post_calc"]:
@@ -61,6 +68,7 @@ if do["post_calc"]:
 
 if do["plot_results"]:
     file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
+    # dir_sim = join(root, "simulation", case_dir)  # define path to the root of the simulation results
     dir_sim = join(root, "simulation", case_dir)  # define path to the root of the simulation results
     dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
     plotter = Plotter(file_profile, dir_sim, dir_plots) 
@@ -68,6 +76,7 @@ if do["plot_results"]:
     plotter.energy()  # plot various energies and work done by forces of the simulation
     if "BL" in case_dir:
         plotter.Beddoes_Leishman()
+    plotter.Beddoes_Leishman()
 
 if do["animate_results"]:
     file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data

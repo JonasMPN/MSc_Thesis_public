@@ -39,6 +39,8 @@ class Helper():
         :return: _description_
         :rtype: Tuple[str, bool]
         """
+        if not isinstance(overwrite, bool):
+            raise ValueError("'overwrite' must be of type bool.")
         msg, keep_going = self._create_dir(path_dir, overwrite, add_missing_parent_dirs, raise_exception, verbose)
         if logger is not None:
             logger.info(msg)
