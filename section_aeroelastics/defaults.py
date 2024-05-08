@@ -392,9 +392,13 @@ class _DefaultMeasurement(_BaseDefaultPltSettings):
     _settings = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
         "_labels": "label",
         "_markers": "marker",
+        "_linestyles": "ls"
     }
 
     _params = [ 
+        "C_l",
+        "C_d",
+        "C_m",
         "C_l_HAWC2",
         "C_d_HAWC2",
         "C_m_HAWC2",
@@ -403,14 +407,33 @@ class _DefaultMeasurement(_BaseDefaultPltSettings):
         "C_m_openFAST",
     ]
 
-    def _labels(params):
-        return {param: param.split("_"[-1]) for param in params}
-    _labels = _labels(_params)
+    _labels = {
+        "C_l": "steady",
+        "C_d": "steady",
+        "C_m": "steady",
+        "C_l_HAWC2": "HAWC2",
+        "C_d_HAWC2": "HAWC2",
+        "C_m_HAWC2": "HAWC2",
+        "C_l_openFAST": "openFAST",
+        "C_d_openFAST": "openFAST",
+        "C_m_openFAST": "openFAST",
+    }
 
-    _map_marker = {"HAWC2": "x", "openFAST": "o"}
-    def _markers(map_marker, params):
-        return {param: map_marker[param.split("_")[-1]] for param in params}
-    _markers = _markers(_map_marker, _params)
+    _markers = {
+        "C_l": "x",
+        "C_d": "x",
+        "C_m": "x",
+        "C_l_HAWC2": "x",
+        "C_d_HAWC2": "x",
+        "C_m_HAWC2": "x",
+        "C_l_openFAST": "o",
+        "C_d_openFAST": "o",
+        "C_m_openFAST": "o",
+    }
+    
+    def _linestyles(params):
+        return {param: "" for param in params}
+    _linestyles = _linestyles(_params)
 
     def __init__(self) -> None:
         _BaseDefaultPltSettings.__init__(self, "line")
@@ -434,7 +457,7 @@ class DefaultPlot:
         energy = _DefaultEnergy()
         BL = _DefaultBL()
         measurement = _DefaultMeasurement()
-        _CombineDefaults.__init__(self, (arrow, "arrow"), aoa, force, profile, energy, BL, measurement)
+        _CombineDefaults.__init__(self, (arrow, "arrow_"), aoa, force, profile, energy, BL, measurement)
         
 
 class DefaultStructure:
