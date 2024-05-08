@@ -230,7 +230,7 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
         mom_arrow = np.zeros((self.time.size, mom_arrow_res+3, 2))
         prof = self.profile-np.c_[0.25*self.section_data["chord"], 0]
         for i, (angle, moment) in enumerate(zip(self.df_general["pos_tors"], norm_moments)):
-            rot_mat = self._rot.acitve_2D(angle)
+            rot_mat = self._rot.active_2D(angle)
             profile[i, :, :] = (rot_mat@prof.T).T+qc_pos[i, :]
 
             trailing_edge = (rot_mat@np.c_[(0.75-arrow_scale_moment)*self.section_data["chord"], 0].T).T+qc_pos[i, :]
@@ -292,7 +292,7 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
         mom_arrow = np.zeros((self.time.size, mom_arrow_res+3, 2))
         prof = self.profile-np.c_[0.25*self.section_data["chord"], 0]
         for i, (angle, moment) in enumerate(zip(self.df_general["pos_tors"], norm_moments)):
-            rot_mat = self._rot.acitve_2D(angle)
+            rot_mat = self._rot.active_2D(angle)
             profile[i, :, :] = (rot_mat@prof.T).T+qc_pos[i, :]
 
             trailing_edge = (rot_mat@np.c_[(0.75-arrow_scale_moment)*self.section_data["chord"], 0].T).T+qc_pos[i, :]
@@ -582,7 +582,9 @@ class BLValidationPlotter(DefaultPlot):
             ax.plot(df_section["alpha"], df_section[f"{f_type}"], 
                     **self.plt_settings[f"{f_type}_section"])
             handler = MosaicHandler(fig, ax)
-            handler.update(x_labels=r"$\alpha$ (°)", y_labels=rf"${{{f_type[0]}}}_{{{f_type[2]}}}$ (-)", legend=True)
+            handler.update(x_labels=r"$\alpha$ (°)", y_labels=rf"${{{f_type[0]}}}_{{{f_type[2]}}}$ (-)", legend=True,
+                           x_lims=[-40, 40], y_lims=[-1.2, 1.2])
+            ax.grid()
             handler.save(join(dir_plots, f"{f_type}_model_comp.pdf"))
         
         rot = Rotations()
@@ -593,18 +595,20 @@ class BLValidationPlotter(DefaultPlot):
         coesffs_section = np.c_[self._get_C_t(alpha_0_section, df_section["alpha"], df_section["f_t"], dC_l_dalpha),
                                 self._get_C_n(alpha_0_section, df_section["alpha"], df_section["f_n"], dC_l_dalpha)]
         rot_coeffs_section = rot.rotate_2D(coesffs_section, np.deg2rad(df_section["alpha"].to_numpy()))
+        rot_coeffs_section -= np.asarray([0.00663685061, 0])
 
         for i, coeff_type in enumerate(["C_d", "C_l"]):
             sign = 1 if coeff_type == "C_l" else -1
             fig, ax = plt.subplots()
-            ax.plot(df_polar["alpha"], df_polar[coeff_type], **self.plt_settings[f"{coeff_type}_meas"])
+            ax.plot(df_polar["alpha"], df_polar[coeff_type], **self.plt_settings[f"{coeff_type}_HAWC2"])
             ax.plot(df_aerohor["alpha_n"], sign*rot_coeffs_aerohor[:, i], 
                     **self.plt_settings[f"{coeff_type}_rec_aerohor"])
             ax.plot(df_section["alpha"], sign*rot_coeffs_section[:, i], 
                     **self.plt_settings[f"{coeff_type}_rec_section"])
             handler = MosaicHandler(fig, ax)
             handler.update(x_labels=r"$\alpha$ (°)", 
-                           y_labels=rf"${{{coeff_type[0]}}}_{{{coeff_type[2]}}}$ (-)", legend=True)
+                           y_labels=rf"${{{coeff_type[0]}}}_{{{coeff_type[2]}}}$ (-)", legend=True,
+                           x_lims=[-10, 10], y_lims=[-0.1, 0.2])
             handler.save(join(dir_plots, f"{coeff_type}_model_comp.pdf"))
 
     @staticmethod
@@ -652,13 +656,6 @@ class BLValidationPlotter(DefaultPlot):
             ax.plot(t_section, df_section[plot_param], **plt_settings["section"])
             handler.update(x_labels="t (s)", y_labels=y_labels[plot_param], legend=True)
             handler.save(join(dir_plots, f"model_comp_{plot_param}.pdf"))
-        
-        # fig, ax = plt.subplots()
-        # handler = MosaicHandler(fig, ax)
-        # ax.plot(t_section[:-1], df_section["alpha_qs"][:-1], label="qs")
-        # ax.plot(t_section[:-1], df_section["d_alpha_qs_dt"][:-1], label="dadt")
-        # handler.update(x_labels="t (s)", legend=True)
-        # handler.save(join(dir_plots, "extra_aoa.pdf"))
 
     def plot_meas_comparison(
         self,
@@ -689,7 +686,7 @@ class BLValidationPlotter(DefaultPlot):
             fig, ax = plt.subplots()
             handler = MosaicHandler(fig, ax)
             ax.plot(df_meas[map_measurement["alpha"]], df_meas[map_measurement[coef]], 
-                    **self.plt_settings[coef+"_meas"])
+                    **self.plt_settings[coef+"_HAWC2"])
             if "unsteady_10_20_k1.dat" in file_unsteady_data:
                 if coef != "C_m":
                     ax.plot(dfs[coef]["AOA"], dfs[coef][map_measurement[coef]], "ko", ms=2,
@@ -702,6 +699,49 @@ class BLValidationPlotter(DefaultPlot):
             handler.update(x_labels=r"$\alpha_{\text{steady}}$ (°)", y_labels=rf"${{{coef[0]}}}_{{{coef[2]}}}$ (-)",
                            legend=True)
             handler.save(join(dir_save, f"{coef}.pdf"))
+
+    def plot_over_polar(
+        self,
+        file_polar: str,
+        dir_results: str,
+        period_res: int,
+        case_data: pd.Series,
+        alpha_buffer: float=3,
+        ):
+        df_polar = pd.read_csv(file_polar, delim_whitespace=True)
+        # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
+        df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
+        
+        dir_save = helper.create_dir(join(dir_results, "plots", "polar_comp"))[0]
+        line_width = 1
+        plt_settings = {
+            "aerohor": {
+                "color": "forestgreen", "lw": line_width, "label": "aerohor"
+            },
+            "section": {
+                "color": "orangered", "lw": line_width, "label": "section"
+            }
+        }
+
+        alpha_min = case_data["mean"]-case_data["amplitude"]-alpha_buffer
+        alpha_max = case_data["mean"]+case_data["amplitude"]+alpha_buffer
+        ids_alpha = np.logical_and(df_polar["alpha"].to_numpy()>=alpha_min, df_polar["alpha"].to_numpy()<=alpha_max)
+        df_sliced = df_polar.loc[(df_polar["alpha"] >= alpha_min) & (df_polar["alpha"] <= alpha_max)]
+
+        for coef in ["C_d", "C_l", "C_m"]:
+            fig, ax = plt.subplots()
+            handler = MosaicHandler(fig, ax)
+            ax.plot(df_sliced["alpha"], df_sliced[coef], 
+                    **self.plt_settings[coef])
+            # if coef != "C_m":
+            #     ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
+            #             **plt_settings["aerohor"])
+            ax.plot(np.rad2deg(df_section["alpha_steady"][-period_res-1:]), df_section[coef][-period_res-1:], 
+                    **plt_settings["section"])
+            handler.update(x_labels=r"$\alpha_{\text{steady}}$ (°)", y_labels=rf"${{{coef[0]}}}_{{{coef[2]}}}$ (-)",
+                           legend=True)
+            handler.save(join(dir_save, f"{coef}.pdf"))
+
 
     @staticmethod
     def _get_C_t(alpha_0: float, alpha: np.ndarray, f_t: np.ndarray, C_l_slope: float):
