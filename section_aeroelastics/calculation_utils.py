@@ -3,6 +3,7 @@ from defaults import DefaultsSimulation
 import numpy as np
 import pandas as pd
 from os.path import join
+from copy import copy
 from typing import Callable
 
 
@@ -104,8 +105,20 @@ class SimulationSubRoutine(ABC):
             "_scheme_settings_can": self._scheme_settings_can.keys(),
             "_sim_params_required": self._sim_params_required.keys()
         }
+        if "_copy_scheme" in vars(self).keys():
+            copy_params = {new_scheme: from_scheme for from_scheme, copy_to in self._copy_schemes.items() 
+                           for new_scheme in copy_to }
+        else:
+            copy_params = {}
+        copied_params = copy_params.keys()
         for scheme in self._implemented_schemes:
-            for attribute, has_keys in defined.items():
+            for attribute, has_keys in copy(defined).items():
+                if scheme in copied_params:
+                    assert scheme not in has_keys, (f"Settings for scheme '{scheme}' is tried to be set directly and "
+                                                    f"by copying from scheme '{copy_params[scheme]}' simultaneously. "
+                                                    "Only one at a time is allowed.")
+                    defined[scheme] = vars(self, attribute)[copy_params[scheme]]
+                    continue
                 assert scheme in has_keys, (f"Attribute '{attribute}' of class '{type(self).__name__}' is/are missing "
                                             f"a key for scheme '{scheme}'. Implemented keys are {has_keys}.")
             for fnc in [self.get_scheme_method, self.get_scheme_init_method]:
