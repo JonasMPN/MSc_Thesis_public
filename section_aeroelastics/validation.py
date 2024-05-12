@@ -60,7 +60,7 @@ def run_BeddoesLeishman(
         coeffs[i, :] = airfoil._aero_force(airfoil, i, A1=A1, A2=A2, b1=b1, b2=b2)
     airfoil.vel = np.c_[np.zeros((overall_res, 2)), -alpha_speed]  # because it's changed in aero._init_BL()
 
-    dir_res = helper.create_dir(join(dir_profile, f"validation_{BL_scheme}", validation_against,
+    dir_res = helper.create_dir(join(dir_profile, "validation", BL_scheme, validation_against,
                                      str(index_unsteady_data)))[0]
     airfoil.save(dir_res)
     f_f_aero = join(dir_res, "f_aero.dat")
@@ -441,9 +441,9 @@ if __name__ == "__main__":
 
     if do["BL"]:
         validation_against = "measurement"
-        cases_defined_in = "info.dat"
+        cases_defined_in = "cases.dat"
         # validation_against = "polar"
-        # cases_defined_in = "info_polar.dat"
+        # cases_defined_in = "cases_polar.dat"
         df_cases = pd.read_csv(join(dir_airfoil, "unsteady", cases_defined_in))
         for i, row in df_cases.iterrows():
             run_BeddoesLeishman(dir_airfoil, BL_scheme, validation_against, index_unsteady_data=i,
@@ -452,20 +452,22 @@ if __name__ == "__main__":
 
     if do["plot_BL_results_meas"]:
         plotter = BLValidationPlotter()
-        # plotter.plot_preparation(join(dir_airfoil, f"preparation_{BL_scheme}"), join(dir_airfoil, "polars.dat"))
-        dir_validations = join(dir_airfoil, f"validation_{BL_scheme}", "measurement")
-        df_cases = pd.read_csv(join(dir_airfoil, "unsteady", "info.dat"))
-        for case_name in listdir(dir_validations):
-            dir_case = join(dir_validations, case_name)
+        plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), join(dir_airfoil, "polars.dat"))
+        dir_validations = join(dir_airfoil, "validation", BL_scheme, "measurement")
+        dir_unsteady = join(dir_airfoil, "unsteady")
+        df_cases = pd.read_csv(join(dir_unsteady, "cases.dat"))
+        df_meas_files = pd.read_csv(join(dir_unsteady, "cases_results.dat"))
+        for case_id, row in df_meas_files.iterrows():
+            dir_case = join(dir_validations, str(case_id))
             # plotter.plot_model_comparison(dir_case)
-            plotter.plot_meas_comparison(join(dir_airfoil, "unsteady", df_cases["filename"].iat[int(case_name)]),
-                                         dir_case, period_res=period_res)
+            plotter.plot_meas_comparison(join(dir_unsteady, "unsteady_data"), row.to_dict(), dir_case, 
+                                         period_res=period_res)
             
     if do["plot_BL_results_polar"]:
         file_polar = join(dir_airfoil, "polars.dat")
         plotter = BLValidationPlotter()
         # plotter.plot_preparation(join(dir_airfoil, f"preparation_{BL_scheme}"), join(dir_airfoil, "polars.dat"))
-        dir_validations = join(dir_airfoil, f"validation_{BL_scheme}", "polar")
+        dir_validations = join(dir_airfoil, "validation", BL_scheme, "polar")
         df_cases = pd.read_csv(join(dir_airfoil, "unsteady", "info_polar.dat"))
         for case_name in listdir(dir_validations):
             dir_case = join(dir_validations, case_name)
