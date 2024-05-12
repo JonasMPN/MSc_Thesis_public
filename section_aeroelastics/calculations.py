@@ -272,7 +272,13 @@ class AeroForce(SimulationSubRoutine, Rotations):
         }
         return scheme_methods[scheme]
 
-    def _pre_calculations(self, scheme: str, resolution: int=1000, sep_points_scheme: int=None):
+    def _pre_calculations(
+            self, 
+            scheme: str,
+            resolution: int=1000, 
+            sep_points_scheme: int=None,
+            adjust_attached: bool=True,
+            adjust_separated: bool=True):
         map_sep_point_scheme = {
             "BL_chinese": 3,
             "BL_openFAST_Cl_disc": 4,
@@ -282,7 +288,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
             sep_points_scheme = map_sep_point_scheme[scheme]
         match scheme:
             case "BL_chinese"|"BL_openFAST_Cl_disc":
-                dir_BL_data = helper.create_dir(join(self.dir_polar, "preparation_"+scheme))[0]
+                dir_BL_data = helper.create_dir(join(self.dir_polar, "preparation", scheme))[0]
                 f_zero_data = join(dir_BL_data, "zero_data.json")
                 f_sep = join(dir_BL_data, f"sep_points_{sep_points_scheme}.dat")
                 
@@ -304,12 +310,12 @@ class AeroForce(SimulationSubRoutine, Rotations):
                 self._C_n_slope = np.rad2deg(zero_data["C_n_slope"])
 
                 if not isfile(f_sep):
-                    sep_data = self._write_and_get_separation_points(save_as=f_sep, scheme=sep_points_scheme,
-                                                                     alpha_interp=alpha_interp)
+                    sep_data = self._write_and_get_separation_points(f_sep, alpha_interp, sep_points_scheme,
+                                                                     adjust_attached, adjust_separated)
                 else:
                     sep_data = pd.read_csv(f_sep)
-                sep_data = self._write_and_get_separation_points(save_as=f_sep, scheme=sep_points_scheme,
-                                                                 alpha_interp=alpha_interp)
+                sep_data = self._write_and_get_separation_points(f_sep, alpha_interp, sep_points_scheme,
+                                                                 adjust_attached, adjust_separated)
 
                 if "f_n" in sep_data:
                     self._f_n = interpolate.interp1d(sep_data["alpha_n"], sep_data["f_n"])
@@ -401,14 +407,15 @@ class AeroForce(SimulationSubRoutine, Rotations):
                 def sqrt_of_f_t(alpha):
                     raoa = np.deg2rad(alpha)
                     C_t = self.C_l(alpha)*np.sin(raoa)-(self.C_d(alpha)-self._C_d_0)*np.cos(raoa)
-                    return C_t/(self._C_n_slope*np.sin(raoa-self._alpha_0N)*np.tan(raoa))
+                    return C_t/(self._C_n_slope*(raoa-self._alpha_0N)*np.tan(raoa))
                 
                 def sqrt_of_f_n(alpha):
                     raoa = np.deg2rad(alpha)
                     C_n = self.C_l(alpha)*np.cos(raoa)+(self.C_d(alpha)-self._C_d_0)*np.sin(raoa)
-                    return 2*np.sqrt(C_n/(self._C_n_slope*np.sin(raoa-self._alpha_0N)))-1
+                    return 2*np.sqrt(C_n/(self._C_n_slope*(raoa-self._alpha_0N)))-1
                 
-                data["alpha_t"], data["f_t"] = self._adjust_f(alpha_interp, sqrt_of_f_t, adjust_attached, False)
+                data["alpha_t"], data["f_t"] = self._adjust_f(alpha_interp, sqrt_of_f_t, adjust_attached, 
+                                                              adjust_separated)
                 data["alpha_n"], data["f_n"] = self._adjust_f(alpha_interp, sqrt_of_f_n, adjust_attached, 
                                                               adjust_separated)
             case 4:
@@ -683,8 +690,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
 
         # --------- Combining everything
         # for return of [C_d, C_l, C_m]
-        # coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], C_m])
-        coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i], C_m])
+        coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], C_m])
         rot = self.passive_3D_planar(sim_res.pos[i, 2]+sim_res.inflow_angle[i])
         coeffs = rot@coefficients-np.asarray([self._C_d_0, 0, 0])
         coeffs[0] = -coeffs[0] 
