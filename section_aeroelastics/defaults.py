@@ -9,14 +9,13 @@ class _BaseDefaultPltSettings(ABC):
         "lw": 1,
         "ls": None,
         "marker": None,
-        "ms": 1,
+        "ms": 3,
     }
 
     arrow = {
         "width": 1,
         "color": "black"
     }
-
 
     def __init__(self, kind: str) -> None:
         ABC.__init__(self)
