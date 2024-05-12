@@ -561,24 +561,34 @@ class BLValidationPlotter(DefaultPlot):
     def plot_preparation(
             self,
             dir_preparation: str,
-            file_polar: str
+            file_polar: str,
             ):
         dir_plots = helper.create_dir(join(dir_preparation, "plots"))[0]
-        
-        df_section = pd.read_csv(join(dir_preparation, "sep_points.dat"))
-        df_aerohor = pd.read_csv(join(dir_preparation, "f_lookup_1.dat"))
+        dir_preparation = dir_preparation.replace("\\", "/")
+        tmp = dir_preparation.split("/")[-1]
+        tmp2 = tmp.split("_")
+        BL_scheme = tmp2[1]+f"_{tmp2[2]}"
+        no_scheme = {
+            "BL_chinese": 3,
+            "BL_openFAST_Cl_disc": 4,
+            "BL_openFAST_Cd": 5,
+        }[BL_scheme]
+
         df_polar = pd.read_csv(file_polar, delim_whitespace=True)
-        alpha_0_aerohor = pd.read_csv(join(dir_preparation, "alpha_0.dat"))["alpha_0"].to_numpy()
-        alpha_0_aerohor = np.deg2rad(alpha_0_aerohor)
-        with open(join(dir_preparation, "alpha_0.json"), "r") as f:
+        
+        df_section = pd.read_csv(join(dir_preparation, f"sep_points_{no_scheme}_f_l.dat"))
+        # df_aerohor = pd.read_csv(join(dir_preparation, "f_lookup_1.dat"))
+        # alpha_0_aerohor = pd.read_csv(join(dir_preparation, "alpha_0.dat"))["alpha_0"].to_numpy()
+        # alpha_0_aerohor = np.deg2rad(alpha_0_aerohor)
+        with open(join(dir_preparation, "zero_data.json"), "r") as f:
             zero_lift_data = json.load(f)
-            alpha_0_section = np.deg2rad(zero_lift_data["alpha_0"])
-            dC_l_dalpha = np.rad2deg(zero_lift_data["dC_l_dalpha"])
+            alpha_0_section = np.deg2rad(zero_lift_data["alpha_0_l"])
+            dC_l_dalpha = np.rad2deg(zero_lift_data["C_l_slope"])
             
         for f_type in ["f_t", "f_n"]:
             fig, ax = plt.subplots()
-            ax.plot(df_aerohor[f"alpha_{f_type.split("_")[-1]}"], df_aerohor[f"{f_type}"], 
-                    **self.plt_settings[f"{f_type}_aerohor"])
+            # ax.plot(df_aerohor[f"alpha_{f_type.split("_")[-1]}"], df_aerohor[f"{f_type}"], 
+            #         **self.plt_settings[f"{f_type}_aerohor"])
             ax.plot(df_section["alpha"], df_section[f"{f_type}"], 
                     **self.plt_settings[f"{f_type}_section"])
             handler = MosaicHandler(fig, ax)
@@ -588,9 +598,9 @@ class BLValidationPlotter(DefaultPlot):
             handler.save(join(dir_plots, f"{f_type}_model_comp.pdf"))
         
         rot = Rotations()
-        coeffs_aerohor = np.c_[self._get_C_t(alpha_0_aerohor, df_aerohor["alpha_t"], df_aerohor["f_t"], 2*np.pi),
-                               self._get_C_n(alpha_0_aerohor, df_aerohor["alpha_n"], df_aerohor["f_n"], 2*np.pi)]
-        rot_coeffs_aerohor = rot.rotate_2D(coeffs_aerohor, np.deg2rad(df_aerohor["alpha_n"].to_numpy()))
+        # coeffs_aerohor = np.c_[self._get_C_t(alpha_0_aerohor, df_aerohor["alpha_t"], df_aerohor["f_t"], 2*np.pi),
+        #                        self._get_C_n(alpha_0_aerohor, df_aerohor["alpha_n"], df_aerohor["f_n"], 2*np.pi)]
+        # rot_coeffs_aerohor = rot.rotate_2D(coeffs_aerohor, np.deg2rad(df_aerohor["alpha_n"].to_numpy()))
         
         coesffs_section = np.c_[self._get_C_t(alpha_0_section, df_section["alpha"], df_section["f_t"], dC_l_dalpha),
                                 self._get_C_n(alpha_0_section, df_section["alpha"], df_section["f_n"], dC_l_dalpha)]
@@ -601,8 +611,8 @@ class BLValidationPlotter(DefaultPlot):
             sign = 1 if coeff_type == "C_l" else -1
             fig, ax = plt.subplots()
             ax.plot(df_polar["alpha"], df_polar[coeff_type], **self.plt_settings[f"{coeff_type}_HAWC2"])
-            ax.plot(df_aerohor["alpha_n"], sign*rot_coeffs_aerohor[:, i], 
-                    **self.plt_settings[f"{coeff_type}_rec_aerohor"])
+            # ax.plot(df_aerohor["alpha_n"], sign*rot_coeffs_aerohor[:, i], 
+            #         **self.plt_settings[f"{coeff_type}_rec_aerohor"])
             ax.plot(df_section["alpha"], sign*rot_coeffs_section[:, i], 
                     **self.plt_settings[f"{coeff_type}_rec_section"])
             handler = MosaicHandler(fig, ax)
@@ -664,11 +674,11 @@ class BLValidationPlotter(DefaultPlot):
         period_res: int,
         ):
         df_meas = pd.read_csv(file_unsteady_data, delim_whitespace=True)
-        df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
+        # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
         df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
         
         map_measurement = {"alpha": "AOA", "C_l": "CL", "C_d": "CD", "C_m": "CM"}
-        dir_save = helper.create_dir(join(dir_results, "plots", "meas_comp"))[0]
+        dir_save = helper.create_dir(join(dir_results, "plots"))[0]
         line_width = 1
         plt_settings = {
             "aerohor": {
@@ -678,22 +688,22 @@ class BLValidationPlotter(DefaultPlot):
                 "color": "orangered", "lw": line_width, "label": "section"
             }
         }
-        if "unsteady_10_20_k1.dat" in file_unsteady_data:
-            df_cl = pd.read_csv("data/FFA_WA3_221/unsteady/openFAST_1.dat")
-            df_cd = pd.read_csv("data/FFA_WA3_221/unsteady/openFAST_2.dat")
-            dfs = {"C_l": df_cl, "C_d": df_cd}
+        # if "unsteady_10_20_k1.dat" in file_unsteady_data:
+        #     df_cl = pd.read_csv("data/FFA_WA3_221/unsteady/openFAST_1.dat")
+        #     df_cd = pd.read_csv("data/FFA_WA3_221/unsteady/openFAST_2.dat")
+        #     dfs = {"C_l": df_cl, "C_d": df_cd}
         for coef in ["C_d", "C_l", "C_m"]:
             fig, ax = plt.subplots()
             handler = MosaicHandler(fig, ax)
             ax.plot(df_meas[map_measurement["alpha"]], df_meas[map_measurement[coef]], 
                     **self.plt_settings[coef+"_HAWC2"])
-            if "unsteady_10_20_k1.dat" in file_unsteady_data:
-                if coef != "C_m":
-                    ax.plot(dfs[coef]["AOA"], dfs[coef][map_measurement[coef]], "ko", ms=2,
-                             label="openFAST")
-            if coef != "C_m":
-                ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
-                        **plt_settings["aerohor"])
+            # if "unsteady_10_20_k1.dat" in file_unsteady_data:
+            #     if coef != "C_m":
+            #         ax.plot(dfs[coef]["AOA"], dfs[coef][map_measurement[coef]], "ko", ms=2,
+            #                  label="openFAST")
+            # if coef != "C_m":
+                # ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
+                #         **plt_settings["aerohor"])
             ax.plot(np.rad2deg(df_section["alpha_steady"][-period_res-1:]), df_section[coef][-period_res-1:], 
                     **plt_settings["section"])
             handler.update(x_labels=r"$\alpha_{\text{steady}}$ (°)", y_labels=rf"${{{coef[0]}}}_{{{coef[2]}}}$ (-)",
@@ -712,7 +722,7 @@ class BLValidationPlotter(DefaultPlot):
         # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
         df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
         
-        dir_save = helper.create_dir(join(dir_results, "plots", "polar_comp"))[0]
+        dir_save = helper.create_dir(join(dir_results, "plots"))[0]
         line_width = 1
         plt_settings = {
             "aerohor": {
