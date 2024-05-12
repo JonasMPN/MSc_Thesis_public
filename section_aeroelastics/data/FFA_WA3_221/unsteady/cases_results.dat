@@ -1,0 +1,5 @@
+HAWC2,openFAST_Cl,openFAST_Cd,openFAST_Cm
+"unsteady_10_-5_k1.dat","Cl_k1_-5.dat","Cd_k1_-5.dat","Cm_k1_-5.dat"
+"unsteady_10_20_k1.dat","Cl_k1_20.dat","Cd_k1_20.dat","Cm_k1_20.dat"
+"unsteady_10_-5_k2.dat","Cl_k2_-5.dat","Cd_k2_-5.dat","Cm_k2_-5.dat"
+"unsteady_10_20_k2.dat","Cl_k2_20.dat","Cd_k2_20.dat","Cm_k2_20.dat"

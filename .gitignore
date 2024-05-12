@@ -6,9 +6,13 @@ test.py
 
 *.dat
 !polars.dat
-!info.dat
 !info_polar.dat
 !unsteady*.dat
+!Cd*.dat
+!Cl*.dat
+!Cm*.dat
+!cases*.dat
 
 *.json
 *.mp4
+*.tar
