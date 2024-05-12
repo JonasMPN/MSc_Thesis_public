@@ -554,7 +554,7 @@ class HHTalphaPlotter(DefaultStructure):
         return legend
     
 
-class BLValidationPlotter(DefaultPlot):
+class BLValidationPlotter(DefaultPlot, Rotations):
     def __init__(self) -> None:
         DefaultPlot.__init__(self)
 
@@ -563,63 +563,183 @@ class BLValidationPlotter(DefaultPlot):
             dir_preparation: str,
             file_polar: str,
             ):
-        dir_plots = helper.create_dir(join(dir_preparation, "plots"))[0]
         dir_preparation = dir_preparation.replace("\\", "/")
-        tmp = dir_preparation.split("/")[-1]
-        tmp2 = tmp.split("_")
-        BL_scheme = tmp2[1]+f"_{tmp2[2]}"
-        no_scheme = {
+        BL_scheme = dir_preparation.split("/")[-1]
+        scheme_id = {
             "BL_chinese": 3,
             "BL_openFAST_Cl_disc": 4,
             "BL_openFAST_Cd": 5,
         }[BL_scheme]
+        
+        if scheme_id in [3]:
+            self._BL_preparation(dir_preparation, file_polar, scheme_id)
+        elif scheme_id in [4]:
+            self._BL_openFAST_preparation(dir_preparation, file_polar, "data/FFA_WA3_221/general_openFAST")
 
+    def _BL_preparation(
+            self,
+            dir_preparation: str,
+            file_polar: str,
+            scheme_id: int
+            ):
+        f_data = {}
+        for file in listdir(dir_preparation):
+            if "sep_points" not in file:
+                continue
+            file_name = file.split(".")[0]
+            f_data[f"{file_name[-1]}"] = pd.read_csv(join(dir_preparation, file))
+        
+        dir_plots = helper.create_dir(join(dir_preparation, "plots"))[0]
+        
+        fig, ax = plt.subplots()
+        alpha = {}  # for plots of coeffs
+        f = {}
+        for direction, df in f_data.items():
+            ax.plot(df["alpha"], df[f"f_{direction}"])
+            alpha[direction] = np.deg2rad(df["alpha"].to_numpy()) # np needed for later project_2D().
+            f[direction] = df[f"f_{direction}"].to_numpy()
+        handler = MosaicHandler(fig, ax)
+        handler.update(x_labels=r"$\alpha$ (°)", y_labels="separation point (-)", legend=True, x_lims=[-50, 50], 
+                       y_lims=[-0.1, 1.1])
+        handler.save(join(dir_plots, "sep_points.pdf"))
+
+        with open(join(dir_preparation, "zero_data.json"), "r") as file:
+            zero_data = json.load(file)
+
+        coeffs = self._reconstruct_force_coeffs(scheme_id, np.deg2rad(zero_data["alpha_0_n"]),
+                                                np.rad2deg(zero_data["C_n_slope"]), alpha, f)
+        coeffs = np.c_[coeffs["C_t"], coeffs["C_n"]]
+        alpha = alpha["n"]
+        rot_coeffs = self.rotate_2D(coeffs, alpha)
         df_polar = pd.read_csv(file_polar, delim_whitespace=True)
-        
-        df_section = pd.read_csv(join(dir_preparation, f"sep_points_{no_scheme}_f_l.dat"))
-        # df_aerohor = pd.read_csv(join(dir_preparation, "f_lookup_1.dat"))
-        # alpha_0_aerohor = pd.read_csv(join(dir_preparation, "alpha_0.dat"))["alpha_0"].to_numpy()
-        # alpha_0_aerohor = np.deg2rad(alpha_0_aerohor)
-        with open(join(dir_preparation, "zero_data.json"), "r") as f:
-            zero_lift_data = json.load(f)
-            alpha_0_section = np.deg2rad(zero_lift_data["alpha_0_l"])
-            dC_l_dalpha = np.rad2deg(zero_lift_data["C_l_slope"])
-            
-        for f_type in ["f_t", "f_n"]:
-            fig, ax = plt.subplots()
-            # ax.plot(df_aerohor[f"alpha_{f_type.split("_")[-1]}"], df_aerohor[f"{f_type}"], 
-            #         **self.plt_settings[f"{f_type}_aerohor"])
-            ax.plot(df_section["alpha"], df_section[f"{f_type}"], 
-                    **self.plt_settings[f"{f_type}_section"])
-            handler = MosaicHandler(fig, ax)
-            handler.update(x_labels=r"$\alpha$ (°)", y_labels=rf"${{{f_type[0]}}}_{{{f_type[2]}}}$ (-)", legend=True,
-                           x_lims=[-40, 40], y_lims=[-1.2, 1.2])
-            ax.grid()
-            handler.save(join(dir_plots, f"{f_type}_model_comp.pdf"))
-        
-        rot = Rotations()
-        # coeffs_aerohor = np.c_[self._get_C_t(alpha_0_aerohor, df_aerohor["alpha_t"], df_aerohor["f_t"], 2*np.pi),
-        #                        self._get_C_n(alpha_0_aerohor, df_aerohor["alpha_n"], df_aerohor["f_n"], 2*np.pi)]
-        # rot_coeffs_aerohor = rot.rotate_2D(coeffs_aerohor, np.deg2rad(df_aerohor["alpha_n"].to_numpy()))
-        
-        coesffs_section = np.c_[self._get_C_t(alpha_0_section, df_section["alpha"], df_section["f_t"], dC_l_dalpha),
-                                self._get_C_n(alpha_0_section, df_section["alpha"], df_section["f_n"], dC_l_dalpha)]
-        rot_coeffs_section = rot.rotate_2D(coesffs_section, np.deg2rad(df_section["alpha"].to_numpy()))
-        rot_coeffs_section -= np.asarray([0.00663685061, 0])
 
-        for i, coeff_type in enumerate(["C_d", "C_l"]):
-            sign = 1 if coeff_type == "C_l" else -1
+        fig, ax = plt.subplots()
+        ax.plot(df_polar["alpha"], df_polar["C_d"])
+        ax.plot(df_polar["alpha"], df_polar["C_l"])
+        ax.plot(np.rad2deg(alpha), -rot_coeffs[:, 0]+df_polar["C_d"].min())
+        ax.plot(np.rad2deg(alpha), rot_coeffs[:, 1])
+        handler = MosaicHandler(fig, ax)
+        handler.update(x_labels=r"$\alpha$ (°)", y_labels="Force coefficient", x_lims=[-180, 180], y_lims=[-3, 3])
+        handler.save(join(dir_plots, "coeffs.pdf"))
+
+    def _BL_openFAST_preparation(
+            self,
+            dir_preparation: str,
+            file_polar: str,
+            dir_paper_data: str
+    ):
+        df_polar = pd.read_csv(file_polar, delim_whitespace=True)
+        df_C_fs_paper = pd.read_csv(join(dir_paper_data, "Cl_fs.dat"))
+        df_f_paper = pd.read_csv(join(dir_paper_data, "f_s.dat"))
+        for file in listdir(dir_preparation):
+            if "C_fs" in file:
+                df_C_fs = pd.read_csv(join(dir_preparation, file))
+            elif "sep_points" in file:
+                df_f = pd.read_csv(join(dir_preparation, file))
+
+        dir_plots = helper.create_dir(join(dir_preparation, "plots"))[0]
+
+        fig, ax = plt.subplots()
+        ax.plot(df_f["alpha"], df_f["f_l"])
+        ax.plot(df_f_paper["alpha"], df_f_paper["f_l"])
+        handler = MosaicHandler(fig, ax)
+        handler.update(x_labels=r"$\alpha$ (°)", y_labels=r"$f$ (-)", x_lims=[-50, 50], y_lims=[-0.1, 1.1])
+        handler.save(join(dir_plots, "sep_point.pdf"))
+
+        fig, ax = plt.subplots()
+        alpha_paper = df_C_fs_paper["alpha"].sort_values()
+        ax.plot(alpha_paper.values, df_C_fs_paper["C_lfs"].loc[alpha_paper.index])
+        ax.plot(df_polar["alpha"], df_polar["C_l"])
+        ax.plot(df_C_fs["alpha"], df_C_fs["C_fs"])
+        handler = MosaicHandler(fig, ax)
+        handler.update(x_labels=r"$\alpha$ (°)", y_labels=r"$C_{l\text{,fs}}$ (-)", x_lims=[-50, 50], 
+                       y_lims=[-1.5, 1.85])
+        handler.save(join(dir_plots, "C_fully_sep.pdf"))
+        
+    def plot_meas_comparison(
+        self,
+        root_unsteady_data: str,
+        files_unsteady_data: dict[str],
+        dir_results: str,
+        period_res: int,
+        ):
+        map_measurement = {"AOA": "alpha", "CL": "C_l", "CD": "C_d", "CM": "C_m"}
+        data_meas = {coeff: {} for coeff in ["C_d", "C_l", "C_m"]}
+        for param, file in files_unsteady_data.items():
+            param = param if len(param.split("_")) == 1 else param.split("_")[0]
+            delim_whitespace = False if param != "HAWC2" else True
+            df = pd.read_csv(join(root_unsteady_data, file), delim_whitespace=delim_whitespace)
+            for coeff in df.columns[1:]:
+                data_meas[map_measurement[coeff]][param] = [df["AOA"], df[coeff]]
+                
+        # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
+        df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
+        
+        dir_save = helper.create_dir(join(dir_results, "plots"))[0]
+        line_width = 1
+        plt_settings = {
+            "aerohor": {
+                "color": "forestgreen", "lw": line_width, "label": "aerohor"
+            },
+            "section": {
+                "color": "orangered", "lw": line_width, "label": "section"
+            }
+        }
+        for coeff in ["C_d", "C_l", "C_m"]:
             fig, ax = plt.subplots()
-            ax.plot(df_polar["alpha"], df_polar[coeff_type], **self.plt_settings[f"{coeff_type}_HAWC2"])
-            # ax.plot(df_aerohor["alpha_n"], sign*rot_coeffs_aerohor[:, i], 
-            #         **self.plt_settings[f"{coeff_type}_rec_aerohor"])
-            ax.plot(df_section["alpha"], sign*rot_coeffs_section[:, i], 
-                    **self.plt_settings[f"{coeff_type}_rec_section"])
             handler = MosaicHandler(fig, ax)
-            handler.update(x_labels=r"$\alpha$ (°)", 
-                           y_labels=rf"${{{coeff_type[0]}}}_{{{coeff_type[2]}}}$ (-)", legend=True,
-                           x_lims=[-10, 10], y_lims=[-0.1, 0.2])
-            handler.save(join(dir_plots, f"{coeff_type}_model_comp.pdf"))
+            for tool, data in data_meas[coeff].items():
+                ax.plot(data[0], data[1], **self.plt_settings[coeff+f"_{tool}"])
+            # if coef != "C_m":
+                # ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
+                #         **plt_settings["aerohor"])
+            ax.plot(np.rad2deg(df_section["alpha_steady"][-period_res-1:]), df_section[coeff][-period_res-1:], 
+                    **plt_settings["section"])
+            handler.update(x_labels=r"$\alpha_{\text{steady}}$ (°)", y_labels=rf"${{{coeff[0]}}}_{{{coeff[2]}}}$ (-)",
+                           legend=True)
+            handler.save(join(dir_save, f"{coeff}.pdf"))
+
+    def plot_over_polar(
+        self,
+        file_polar: str,
+        dir_results: str,
+        period_res: int,
+        case_data: pd.Series,
+        alpha_buffer: float=3,
+        ):
+        df_polar = pd.read_csv(file_polar, delim_whitespace=True)
+        # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
+        df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
+        
+        dir_save = helper.create_dir(join(dir_results, "plots"))[0]
+        line_width = 1
+        plt_settings = {
+            "aerohor": {
+                "color": "forestgreen", "lw": line_width, "label": "aerohor"
+            },
+            "section": {
+                "color": "orangered", "lw": line_width, "label": "section"
+            }
+        }
+
+        alpha_min = case_data["mean"]-case_data["amplitude"]-alpha_buffer
+        alpha_max = case_data["mean"]+case_data["amplitude"]+alpha_buffer
+        ids_alpha = np.logical_and(df_polar["alpha"].to_numpy()>=alpha_min, df_polar["alpha"].to_numpy()<=alpha_max)
+        df_sliced = df_polar.loc[(df_polar["alpha"] >= alpha_min) & (df_polar["alpha"] <= alpha_max)]
+
+        for coef in ["C_d", "C_l", "C_m"]:
+            fig, ax = plt.subplots()
+            handler = MosaicHandler(fig, ax)
+            ax.plot(df_sliced["alpha"], df_sliced[coef], 
+                    **self.plt_settings[coef])
+            # if coef != "C_m":
+            #     ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
+            #             **plt_settings["aerohor"])
+            ax.plot(np.rad2deg(df_section["alpha_steady"][-period_res-1:]), df_section[coef][-period_res-1:], 
+                    **plt_settings["section"])
+            handler.update(x_labels=r"$\alpha_{\text{steady}}$ (°)", y_labels=rf"${{{coef[0]}}}_{{{coef[2]}}}$ (-)",
+                           legend=True)
+            handler.save(join(dir_save, f"{coef}.pdf"))
 
     @staticmethod
     def plot_model_comparison(dir_results: str):
@@ -666,97 +786,33 @@ class BLValidationPlotter(DefaultPlot):
             ax.plot(t_section, df_section[plot_param], **plt_settings["section"])
             handler.update(x_labels="t (s)", y_labels=y_labels[plot_param], legend=True)
             handler.save(join(dir_plots, f"model_comp_{plot_param}.pdf"))
-
-    def plot_meas_comparison(
-        self,
-        file_unsteady_data: str,
-        dir_results: str,
-        period_res: int,
-        ):
-        df_meas = pd.read_csv(file_unsteady_data, delim_whitespace=True)
-        # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
-        df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
-        
-        map_measurement = {"alpha": "AOA", "C_l": "CL", "C_d": "CD", "C_m": "CM"}
-        dir_save = helper.create_dir(join(dir_results, "plots"))[0]
-        line_width = 1
-        plt_settings = {
-            "aerohor": {
-                "color": "forestgreen", "lw": line_width, "label": "aerohor"
-            },
-            "section": {
-                "color": "orangered", "lw": line_width, "label": "section"
-            }
-        }
-        # if "unsteady_10_20_k1.dat" in file_unsteady_data:
-        #     df_cl = pd.read_csv("data/FFA_WA3_221/unsteady/openFAST_1.dat")
-        #     df_cd = pd.read_csv("data/FFA_WA3_221/unsteady/openFAST_2.dat")
-        #     dfs = {"C_l": df_cl, "C_d": df_cd}
-        for coef in ["C_d", "C_l", "C_m"]:
-            fig, ax = plt.subplots()
-            handler = MosaicHandler(fig, ax)
-            ax.plot(df_meas[map_measurement["alpha"]], df_meas[map_measurement[coef]], 
-                    **self.plt_settings[coef+"_HAWC2"])
-            # if "unsteady_10_20_k1.dat" in file_unsteady_data:
-            #     if coef != "C_m":
-            #         ax.plot(dfs[coef]["AOA"], dfs[coef][map_measurement[coef]], "ko", ms=2,
-            #                  label="openFAST")
-            # if coef != "C_m":
-                # ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
-                #         **plt_settings["aerohor"])
-            ax.plot(np.rad2deg(df_section["alpha_steady"][-period_res-1:]), df_section[coef][-period_res-1:], 
-                    **plt_settings["section"])
-            handler.update(x_labels=r"$\alpha_{\text{steady}}$ (°)", y_labels=rf"${{{coef[0]}}}_{{{coef[2]}}}$ (-)",
-                           legend=True)
-            handler.save(join(dir_save, f"{coef}.pdf"))
-
-    def plot_over_polar(
-        self,
-        file_polar: str,
-        dir_results: str,
-        period_res: int,
-        case_data: pd.Series,
-        alpha_buffer: float=3,
-        ):
-        df_polar = pd.read_csv(file_polar, delim_whitespace=True)
-        # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
-        df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
-        
-        dir_save = helper.create_dir(join(dir_results, "plots"))[0]
-        line_width = 1
-        plt_settings = {
-            "aerohor": {
-                "color": "forestgreen", "lw": line_width, "label": "aerohor"
-            },
-            "section": {
-                "color": "orangered", "lw": line_width, "label": "section"
-            }
-        }
-
-        alpha_min = case_data["mean"]-case_data["amplitude"]-alpha_buffer
-        alpha_max = case_data["mean"]+case_data["amplitude"]+alpha_buffer
-        ids_alpha = np.logical_and(df_polar["alpha"].to_numpy()>=alpha_min, df_polar["alpha"].to_numpy()<=alpha_max)
-        df_sliced = df_polar.loc[(df_polar["alpha"] >= alpha_min) & (df_polar["alpha"] <= alpha_max)]
-
-        for coef in ["C_d", "C_l", "C_m"]:
-            fig, ax = plt.subplots()
-            handler = MosaicHandler(fig, ax)
-            ax.plot(df_sliced["alpha"], df_sliced[coef], 
-                    **self.plt_settings[coef])
-            # if coef != "C_m":
-            #     ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
-            #             **plt_settings["aerohor"])
-            ax.plot(np.rad2deg(df_section["alpha_steady"][-period_res-1:]), df_section[coef][-period_res-1:], 
-                    **plt_settings["section"])
-            handler.update(x_labels=r"$\alpha_{\text{steady}}$ (°)", y_labels=rf"${{{coef[0]}}}_{{{coef[2]}}}$ (-)",
-                           legend=True)
-            handler.save(join(dir_save, f"{coef}.pdf"))
-
-
+    
     @staticmethod
-    def _get_C_t(alpha_0: float, alpha: np.ndarray, f_t: np.ndarray, C_l_slope: float):
-        return C_l_slope*np.sin(np.deg2rad(alpha)-alpha_0)**2*np.sqrt(np.abs(f_t))*np.sign(f_t)
+    def _reconstruct_force_coeffs(
+        scheme_id: int, 
+        alpha_0: float, 
+        C_slope: float, 
+        alpha: dict[str, np.ndarray], 
+        f: dict[str, np.ndarray]):
+        coeffs = {f"C_{direction}": None for direction in ["n", "t"]}
+        if scheme_id==1 or scheme_id==3:
+            alpha_n = alpha["n"]
+            alpha_t = alpha["t"]
+            f_n = f["n"]
+            f_t = f["t"]
+        elif scheme_id==2:
+            alpha_n = alpha["n"]
+            f_n = f["n"]
 
-    @staticmethod
-    def _get_C_n(alpha_0: float, alpha: np.ndarray, f_n: np.ndarray, C_l_slope: float):
-        return C_l_slope*np.sin(np.deg2rad(alpha)-alpha_0)*((1+np.sqrt(np.abs(f_n))*np.sign(f_n))/2)**2
+        match scheme_id:
+            case 1:
+                coeffs["C_n"] = C_slope*np.sin(alpha_n-alpha_0)*((1+np.sqrt(np.abs(f_n))*np.sign(f_n))/2)**2
+                coeffs["C_t"] = C_slope*np.sin(alpha_t-alpha_0)**2*np.sqrt(np.abs(f_t))*np.sign(f_t)
+            case 2:
+                coeffs["C_n"] = C_slope*(alpha_n-alpha_0)*((1+np.sqrt(np.abs(f_n))*np.sign(f_n))/2)**2
+                coeffs["C_t"] = C_slope*alpha_n**2*np.sqrt(np.abs(f_n))*np.sign(f_n)
+            case 3:
+                coeffs["C_n"] = C_slope*(alpha_n-alpha_0)*((1+np.sqrt(np.abs(f_n))*np.sign(f_n))/2)**2
+                coeffs["C_t"] = C_slope*(alpha_t-alpha_0)*np.tan(alpha_t)*np.sqrt(np.abs(f_t))*np.sign(f_t)
+        return coeffs
+
