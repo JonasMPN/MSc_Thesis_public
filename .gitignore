@@ -7,6 +7,7 @@ test.py
 *.dat
 !polars.dat
 !info.dat
+!info_polar.dat
 !unsteady*.dat
 
 *.json
