@@ -10,14 +10,14 @@ from plotting import HHTalphaPlotter, BLValidationPlotter
 from defaults import DefaultPlot, DefaultStructure
 from helper_functions import Helper
 import json
+import matplotlib.pyplot as plt
 helper = Helper()
 
 
-def sep_point_calc(dir_profile: str, resolution: int=200):
+def sep_point_calc(dir_profile: str, BL_scheme: str, resolution: int=100):
     aero = AeroForce(dir_polar=dir_profile)
-    helper.create_dir((dir_airfoil, "Beddoes_Leishman_preparation"))
     for scheme in range(1, 6):
-        aero._pre_calculations("BL", resolution, sep_points_scheme=scheme)
+        aero._pre_calculations(BL_scheme, resolution, sep_points_scheme=scheme)
 
 def plot_sep_points(dir_sep_points: str):
     dir_plots = helper.create_dir(join(dir_sep_points, "plots"))[0]
@@ -27,15 +27,13 @@ def plot_sep_points(dir_sep_points: str):
         if not "sep_points" in file:
             continue
 
-
-
 def run_BeddoesLeishman(
-        dir_profile: str, validation_against: str, index_unsteady_data: int,
+        dir_profile: str, BL_scheme: str, validation_against: str, index_unsteady_data: int,
         k: float, inflow_speed: float, chord: float, amplitude: float, mean: float, 
-        period_res: int=100,
-        A1: float=0.3, A2: float=0.7, b1: float=0.14, b2: float=0.53
+        period_res: int=1000,
+        # A1: float=0.3, A2: float=0.7, b1: float=0.14, b2: float=0.53
+        A1: float=0.165, A2: float=0.335, b1: float=0.0445, b2: float=0.3
         ):
-
     n_periods = 8
     overall_res = n_periods*period_res
     omega = 2*k*inflow_speed/chord
@@ -54,18 +52,21 @@ def run_BeddoesLeishman(
     airfoil.dt = np.r_[t[1:]-t[:-1], t[1]]
     airfoil.density = 1
 
-    airfoil.set_aero_calc("BL", A1=A1, A2=A2, b1=b1, b2=b2, pitching_around=0.25, alpha_at=0.75)
+    # airfoil.set_aero_calc(BL_scheme, A1=A1, A2=A2, b1=b1, b2=b2, pitching_around=0.25, alpha_at=0.75)
+    airfoil.set_aero_calc(BL_scheme, A1=A1, A2=A2, b1=b1, b2=b2, pitching_around=0.5, alpha_at=0.75)
+    airfoil._init_aero_force(airfoil, pitching_around=0.5, A1=A1, A2=A2)
     coeffs = np.zeros((t.size, 3))
     for i in range(overall_res):
         coeffs[i, :] = airfoil._aero_force(airfoil, i, A1=A1, A2=A2, b1=b1, b2=b2)
     airfoil.vel = np.c_[np.zeros((overall_res, 2)), -alpha_speed]  # because it's changed in aero._init_BL()
 
-    dir_res = helper.create_dir(join(dir_profile, "Beddoes_Leishman_validation", validation_against,
+    dir_res = helper.create_dir(join(dir_profile, f"validation_{BL_scheme}", validation_against,
                                      str(index_unsteady_data)))[0]
     airfoil.save(dir_res)
     f_f_aero = join(dir_res, "f_aero.dat")
     df = pd.read_csv(f_f_aero)
-    df["C_d"] = -coeffs[:, 0]  # because C_t and C_d are defined in opposite directions
+    # df["C_d"] = -coeffs[:, 0]  # because C_t and C_d are defined in opposite directions ("BL")
+    df["C_d"] = coeffs[:, 0]  # "BL_openFAST"
     df["C_l"] = coeffs[:, 1]
     df["C_m"] = coeffs[:, 2]
     df.to_csv(f_f_aero, index=None)
@@ -411,10 +412,10 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure):
   
 if __name__ == "__main__":
     do = {
-        "separation_point_calculation": True,
+        "separation_point_calculation": False,
         "separation_point_plots": False,
-        "BL": False,
-        "plot_BL_results_meas": False,
+        "BL": True,
+        "plot_BL_results_meas": True,
         "plot_BL_results_polar": False,
         "calc_HHT_alpha_response": False,
         "plot_HHT_alpha_response": False,
@@ -427,8 +428,10 @@ if __name__ == "__main__":
     }
     dir_airfoil = "data/FFA_WA3_221"
     dir_HHT_alpha_validation = "data/HHT_alpha_validation"
+    BL_scheme = "BL_openFAST_Cl_disc"
+    # BL_scheme = "BL_chinese"
     HHT_alpha_case = "test"
-    period_res = 100
+    period_res = 500
 
     if do["separation_point_calculation"]:
         sep_point_calc(dir_airfoil)
@@ -443,30 +446,30 @@ if __name__ == "__main__":
         # cases_defined_in = "info_polar.dat"
         df_cases = pd.read_csv(join(dir_airfoil, "unsteady", cases_defined_in))
         for i, row in df_cases.iterrows():
-            run_BeddoesLeishman(dir_airfoil, validation_against, index_unsteady_data=i,
+            run_BeddoesLeishman(dir_airfoil, BL_scheme, validation_against, index_unsteady_data=i,
                                 k=row["k"], inflow_speed=row["inflow_speed"], chord=row["chord"], 
                                 amplitude=row["amplitude"], mean=row["mean"], period_res=period_res)
 
     if do["plot_BL_results_meas"]:
         plotter = BLValidationPlotter()
-        plotter.plot_preparation(join(dir_airfoil, "Beddoes_Leishman_preparation"), join(dir_airfoil, "polars.dat"))
-        dir_validations = join(dir_airfoil, "Beddoes_Leishman_validation", "measurement")
+        # plotter.plot_preparation(join(dir_airfoil, f"preparation_{BL_scheme}"), join(dir_airfoil, "polars.dat"))
+        dir_validations = join(dir_airfoil, f"validation_{BL_scheme}", "measurement")
         df_cases = pd.read_csv(join(dir_airfoil, "unsteady", "info.dat"))
         for case_name in listdir(dir_validations):
             dir_case = join(dir_validations, case_name)
-            plotter.plot_model_comparison(dir_case)
+            # plotter.plot_model_comparison(dir_case)
             plotter.plot_meas_comparison(join(dir_airfoil, "unsteady", df_cases["filename"].iat[int(case_name)]),
                                          dir_case, period_res=period_res)
             
     if do["plot_BL_results_polar"]:
         file_polar = join(dir_airfoil, "polars.dat")
         plotter = BLValidationPlotter()
-        plotter.plot_preparation(join(dir_airfoil, "Beddoes_Leishman_preparation"), join(dir_airfoil, "polars.dat"))
-        # dir_validations = join(dir_airfoil, "Beddoes_Leishman_validation", "polar")
-        # df_cases = pd.read_csv(join(dir_airfoil, "unsteady", "info_polar.dat"))
-        # for case_name in listdir(dir_validations):
-        #     dir_case = join(dir_validations, case_name)
-        #     plotter.plot_over_polar(file_polar, dir_case, period_res, df_cases.iloc[int(case_name)])
+        # plotter.plot_preparation(join(dir_airfoil, f"preparation_{BL_scheme}"), join(dir_airfoil, "polars.dat"))
+        dir_validations = join(dir_airfoil, f"validation_{BL_scheme}", "polar")
+        df_cases = pd.read_csv(join(dir_airfoil, "unsteady", "info_polar.dat"))
+        for case_name in listdir(dir_validations):
+            dir_case = join(dir_validations, case_name)
+            plotter.plot_over_polar(file_polar, dir_case, period_res, df_cases.iloc[int(case_name)])
   
     if do["calc_HHT_alpha_response"] or do["plot_HHT_alpha_response"]:
         T = 10
