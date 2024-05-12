@@ -1,10 +1,8 @@
 import pathlib
 import os
 import shutil
-import matplotlib.pyplot
-import numpy as np
-from typing import Tuple, List
-import json
+from os.path import join, isfile
+import pandas as pd
 
 
 class Helper():
@@ -19,7 +17,7 @@ class Helper():
                    add_missing_parent_dirs: bool = True,
                    raise_exception: bool = False,
                    verbose: bool = False,
-                   logger=None) -> Tuple[str, bool]:
+                   logger=None) -> tuple[str, bool]:
         """Creates directory.
 
         :param path_dir: Directory to create
@@ -40,7 +38,8 @@ class Helper():
         :rtype: Tuple[str, bool]
         """
         if not isinstance(overwrite, bool):
-            raise ValueError("'overwrite' must be of type bool.")
+            raise ValueError(f"'overwrite' must be of type bool, but its value is '{overwrite}' of type "
+                             f"'{type(overwrite)}'.")
         msg, keep_going = self._create_dir(path_dir, overwrite, add_missing_parent_dirs, raise_exception, verbose)
         if logger is not None:
             logger.info(msg)
@@ -68,7 +67,7 @@ class Helper():
                     overwrite: bool,
                     add_missing_parent_dirs: bool,
                     raise_exception: bool,
-                    print_message: bool) -> Tuple[str, bool]:
+                    print_message: bool) -> tuple[str, bool]:
         msg, keep_going = str(), bool()
         try:
             if overwrite:
@@ -95,3 +94,22 @@ class Helper():
         if print_message:
             print(msg)
         return msg, keep_going
+
+
+def convert_plot_digitizer_dfs(root: str, exclude: str):
+    def rep(value):
+        return float(value.replace(",", "."))
+    map_coeff = {"Cl": "CL", "Cd": "CD", "Cm": "CM"}
+    dir_save = Helper().create_dir(join(root, "plot_digitizer_converted"))[0]
+    for file_name in os.listdir(root):
+        file = join(root, file_name)
+        if exclude in file_name or not isfile(file):
+            continue
+        df = pd.read_csv(file, delimiter=";")
+        df_converted = pd.DataFrame()
+        coeff = map_coeff[file_name[:2]]
+        for col, new_col in zip(df.columns, ["AOA", coeff]):
+            data = df[col].apply(rep)
+            df_converted[new_col] = data
+        df_converted.to_csv(join(dir_save, file_name), index=False)
+
