@@ -119,8 +119,8 @@ class SimulationSubRoutine(ABC):
                                                     "Only one at a time is allowed.")
                     defined[scheme] = vars(self, attribute)[copy_params[scheme]]
                     continue
-                assert scheme in has_keys, (f"Attribute '{attribute}' of class '{type(self).__name__}' is/are missing "
-                                            f"a key for scheme '{scheme}'. Implemented keys are {has_keys}.")
+                assert scheme in has_keys, (f"Attribute '{attribute}' of class '{type(self).__name__}' is missing "
+                                            f"a key-value pair for scheme '{scheme}'.")
             for fnc in [self.get_scheme_method, self.get_scheme_init_method]:
                 try:
                     fnc(scheme)
@@ -151,6 +151,7 @@ class SimulationSubRoutine(ABC):
         return self.get_scheme_method(scheme)
     
     def get_additional_params(self, scheme: str):
+        self._check_scheme(scheme)
         return self._sim_params_required[scheme]
 
     def _check_scheme(self, scheme: str):
