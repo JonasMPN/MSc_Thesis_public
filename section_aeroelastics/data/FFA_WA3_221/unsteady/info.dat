@@ -1,5 +1,0 @@
-filename,k,chord,inflow_speed,amplitude,mean
-"unsteady_10_-5_k1.dat",0.31,1,10,10,-5
-"unsteady_10_20_k1.dat",0.31,1,10,10,20
-"unsteady_10_-5_k2.dat",0.63,1,10,10,-5
-"unsteady_10_20_k2.dat",0.63,1,10,10,20
