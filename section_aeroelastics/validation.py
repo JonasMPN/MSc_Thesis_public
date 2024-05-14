@@ -2,9 +2,10 @@ from calculations import AeroForce, Oscillations
 import pandas as pd
 import numpy as np
 from os import listdir
-from os.path import join
+from os.path import join, isfile
 from calculations import ThreeDOFsAirfoil, AeroForce, TimeIntegration, StructForce
 from post_calculations import PostCaluculations, PostHHT_alpha
+from utils_plot import MosaicHandler
 import numpy as np
 from plotting import HHTalphaPlotter, BLValidationPlotter
 from defaults import DefaultPlot, DefaultStructure
@@ -16,16 +17,55 @@ helper = Helper()
 
 def sep_point_calc(dir_profile: str, BL_scheme: str, resolution: int=100):
     aero = AeroForce(dir_polar=dir_profile)
+    save_to = join(dir_profile, "sep_point_tests", str(resolution))
     for scheme in range(1, 6):
-        aero._pre_calculations(BL_scheme, resolution, sep_points_scheme=scheme)
+        aero._pre_calculations(BL_scheme, resolution, scheme, adjust_attached=True, adjust_separated=True,
+                               dir_save_to=save_to)
 
-def plot_sep_points(dir_sep_points: str):
+def plot_sep_points(dir_sep_points: str, alpha_limits: tuple=(-30, 30)):
     dir_plots = helper.create_dir(join(dir_sep_points, "plots"))[0]
-    fig_full, ax_full = plt.subplots()
-    fig_, ax_full = plt.subplots()
+    directions = []
     for file in listdir(dir_sep_points):
         if not "sep_points" in file:
             continue
+        file_name = file.split(".")[0]
+        directions.append(file_name[-1])
+
+    figs = {}
+    axs = {}
+    for direction in directions:
+        axs[direction] = {}
+        figs[direction] = {}
+        for extend in ["full", "limited"]:
+            fig, ax = plt.subplots()
+            figs[direction][extend] = fig
+            axs[direction][extend] = ax
+    
+    colours = {1: "peru", 2: "forestgreen", 3: "mediumblue", 4: "coral", 5: "cadetblue"}
+    for file in listdir(dir_sep_points):
+        if not "sep_points" in file:
+            continue
+        df = pd.read_csv(join(dir_sep_points, file))
+        file_name = file.split(".")[0]
+        tmp = file_name.split("_")
+        scheme_id = int(tmp[2])
+        direction = tmp[-1]
+        alpha = df["alpha"]
+        axs[direction]["full"].plot(alpha, df[f"f_{direction}"], label=scheme_id, color=colours[scheme_id])
+        alpha_data = alpha.loc[(alpha>=alpha_limits[0]) & (alpha<=alpha_limits[1])]
+        axs[direction]["limited"].plot(alpha_data.values, df[f"f_{direction}"].loc[alpha_data.index], label=scheme_id,
+                                       color=colours[scheme_id])
+
+    for direction in set(directions):
+        for extend in ["full", "limited"]:
+            handler = MosaicHandler(figs[direction][extend], axs[direction][extend])
+            y_lims = [-1.2, 1.2] if extend == "full" else [-0.2, 1.2]
+            handler.update(x_labels=r"$\alpha$ (°)", y_labels=rf"$f_{direction}$", legend=True, grid=True,
+                           y_lims=y_lims)
+            handler.save(join(dir_plots, f"{extend}_{direction}.pdf"))
+
+#todo compare f distributions for different resolutions
+#todo compare recreation of coefficients for different resolutions
 
 def run_BeddoesLeishman(
         dir_profile: str, BL_scheme: str, validation_against: str, index_unsteady_data: int,
@@ -54,6 +94,7 @@ def run_BeddoesLeishman(
 
     # airfoil.set_aero_calc(BL_scheme, A1=A1, A2=A2, b1=b1, b2=b2, pitching_around=0.25, alpha_at=0.75)
     airfoil.set_aero_calc(BL_scheme, A1=A1, A2=A2, b1=b1, b2=b2, pitching_around=0.5, alpha_at=0.75)
+    return
     airfoil._init_aero_force(airfoil, pitching_around=0.5, A1=A1, A2=A2)
     coeffs = np.zeros((t.size, 3))
     for i in range(overall_res):
@@ -65,7 +106,6 @@ def run_BeddoesLeishman(
     airfoil.save(dir_res)
     f_f_aero = join(dir_res, "f_aero.dat")
     df = pd.read_csv(f_f_aero)
-    # df["C_d"] = -coeffs[:, 0]  # because C_t and C_d are defined in opposite directions ("BL")
     df["C_d"] = coeffs[:, 0]  # "BL_openFAST"
     df["C_l"] = coeffs[:, 1]
     df["C_m"] = coeffs[:, 2]
@@ -414,9 +454,9 @@ if __name__ == "__main__":
     do = {
         "separation_point_calculation": False,
         "separation_point_plots": False,
-        "BL": True,
-        "plot_BL_results_meas": True,
-        "plot_BL_results_polar": False,
+        "BL": False,
+        "plot_BL_results_meas": False,
+        "plot_BL_results_polar": True,
         "calc_HHT_alpha_response": False,
         "plot_HHT_alpha_response": False,
         "HHT_alpha_undamped": False,
@@ -431,13 +471,14 @@ if __name__ == "__main__":
     BL_scheme = "BL_openFAST_Cl_disc"
     # BL_scheme = "BL_chinese"
     HHT_alpha_case = "test"
-    period_res = 500
+    sep_point_test_res = 202
+    period_res = 3000
 
     if do["separation_point_calculation"]:
-        sep_point_calc(dir_airfoil)
+        sep_point_calc(dir_airfoil, BL_scheme, resolution=sep_point_test_res)
 
     if do["separation_point_plots"]:
-        pass
+        plot_sep_points(join(dir_airfoil, "sep_point_tests", str(sep_point_test_res)), alpha_limits=(-30, 30))
 
     if do["BL"]:
         validation_against = "measurement"
@@ -466,9 +507,9 @@ if __name__ == "__main__":
     if do["plot_BL_results_polar"]:
         file_polar = join(dir_airfoil, "polars.dat")
         plotter = BLValidationPlotter()
-        # plotter.plot_preparation(join(dir_airfoil, f"preparation_{BL_scheme}"), join(dir_airfoil, "polars.dat"))
+        # plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), join(dir_airfoil, "polars.dat"))
         dir_validations = join(dir_airfoil, "validation", BL_scheme, "polar")
-        df_cases = pd.read_csv(join(dir_airfoil, "unsteady", "info_polar.dat"))
+        df_cases = pd.read_csv(join(dir_airfoil, "unsteady", "cases_polar.dat"))
         for case_name in listdir(dir_validations):
             dir_case = join(dir_validations, case_name)
             plotter.plot_over_polar(file_polar, dir_case, period_res, df_cases.iloc[int(case_name)])
