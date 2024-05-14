@@ -278,7 +278,8 @@ class AeroForce(SimulationSubRoutine, Rotations):
             resolution: int=1000, 
             sep_points_scheme: int=None,
             adjust_attached: bool=True,
-            adjust_separated: bool=True):
+            adjust_separated: bool=True,
+            dir_save_to: str=None):
         map_sep_point_scheme = {
             "BL_chinese": 3,
             "BL_openFAST_Cl_disc": 4,
@@ -288,18 +289,25 @@ class AeroForce(SimulationSubRoutine, Rotations):
             sep_points_scheme = map_sep_point_scheme[scheme]
         match scheme:
             case "BL_chinese"|"BL_openFAST_Cl_disc":
-                dir_BL_data = helper.create_dir(join(self.dir_polar, "preparation", scheme))[0]
+                if dir_save_to is None:
+                    dir_BL_data = helper.create_dir(join(self.dir_polar, "preparation", scheme))[0]
+                else:
+                    dir_BL_data = helper.create_dir(dir_save_to)[0]
                 f_zero_data = join(dir_BL_data, "zero_data.json")
                 f_sep = join(dir_BL_data, f"sep_points_{sep_points_scheme}.dat")
                 
                 alpha_given = self.df_polars["alpha"]
+                #todo: if resolution<=polar resolution, C_l_slope and alpha_0L are not correct anymore
                 alpha_interp = np.linspace(alpha_given.min(), alpha_given.max(), resolution)
                 coefficients = np.c_[self.C_d(alpha_interp)-self._C_d_0, self.C_l(alpha_interp)]
                 if not isfile(f_zero_data):
                     coeff_rot = self.project_2D(coefficients, -np.deg2rad(alpha_interp))
                     coeffs = {"C_l": coefficients[:, 1], "C_n": coeff_rot[:, 1]}
+                    alphas = {"C_l": alpha_interp, "C_n": alpha_interp}
+                    # coeffs = {"C_l": self.C_l(self.df_polars["alpha"].to_numpy()), "C_n": coeff_rot[:, 1]}
+                    # alphas = {"C_l": self.df_polars["alpha"].to_numpy(), "C_n": alpha_interp}
                     add = {"alpha_0_d": self._alpha_0D}
-                    zero_data = self._zero_forces(alpha=alpha_interp, coeffs=coeffs, save_as=f_zero_data, add=add)
+                    zero_data = self._zero_forces(alpha=alphas, coeffs=coeffs, save_as=f_zero_data, add=add)
                 else:
                     with open(f_zero_data, "r") as f:
                         zero_data = json.load(f)
@@ -415,7 +423,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
                     return 2*np.sqrt(C_n/(self._C_n_slope*(raoa-self._alpha_0N)))-1
                 
                 data["alpha_t"], data["f_t"] = self._adjust_f(alpha_interp, sqrt_of_f_t, adjust_attached, 
-                                                              adjust_separated)
+                                                              False)
                 data["alpha_n"], data["f_n"] = self._adjust_f(alpha_interp, sqrt_of_f_n, adjust_attached, 
                                                               adjust_separated)
             case 4:
@@ -839,16 +847,17 @@ class AeroForce(SimulationSubRoutine, Rotations):
         v_y = flow[1]-velocity[1]-v_pitching_y
         return np.arctan2(v_y, v_x), v_x, v_y
     
-    def _zero_forces(self, alpha: np.ndarray, coeffs: dict[str, np.ndarray], save_as: str, add: dict,
+    def _zero_forces(self, alpha: dict[str, np.ndarray], coeffs: dict[str, np.ndarray], save_as: str, add: dict,
                      alpha0_in: tuple=(-10, 5)):
-        ids_subset = np.logical_and(alpha>=alpha0_in[0], alpha<=alpha0_in[1])
-        alpha_subset = alpha[ids_subset]
         zero_data = {}
         for coeff_name, coeff in coeffs.items():
+            aoa = alpha[coeff_name]
+            ids_subset = np.logical_and(aoa>=alpha0_in[0], aoa<=alpha0_in[1])
+            alpha_subset = aoa[ids_subset]
             coeff_subset = coeff[ids_subset]
             find_sign_change = coeff_subset[1:]*coeff_subset[:-1]
             if np.all(find_sign_change>0):
-                raise ValueError("The given C_n does not have a sign change in the current AoA interval of "
+                raise ValueError(f"The given '{coeff_name}' does not have a sign change in the current AoA interval of "
                                 f"{alpha0_in} degree. Linear interpolation can thus not find alpha_0.")
             alpha_0, slope = self._get_zero_crossing(alpha_subset, coeff_subset)
             zero_data[f"alpha_0_{coeff_name.split("_")[-1]}"] = alpha_0
