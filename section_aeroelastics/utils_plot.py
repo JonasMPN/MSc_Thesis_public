@@ -11,7 +11,6 @@ from copy import deepcopy, copy
 class MosaicHandler:
     _default = object()
 
-    _special_options_implemented = ["legend"]
     _empty_call = "empty_call"
     _skip_call = "skip_call"
     _special_calls = [_empty_call, _skip_call]
@@ -23,16 +22,17 @@ class MosaicHandler:
 
     def update(
             self,
-            x_labels: str | dict[str]=_default,
-            y_labels: str | dict[str]=_default,
-            x_lims: tuple | dict[tuple]=_default,
-            y_lims: tuple | dict[tuple]=_default,
+            x_labels: str | dict[str, str]=_default,
+            y_labels: str | dict[str, str]=_default,
+            x_lims: tuple | dict[str, tuple]=_default,
+            y_lims: tuple | dict[str, tuple]=_default,
             x_lims_from: tuple | dict=_default,
             y_lims_from: tuple | dict=_default,
             legend: bool | dict[bool]=_default,
-            aspect: str | float | dict[str] | dict[float] =_default,
+            aspect: str | float | dict[str, str] | dict[str, float] =_default,
             equal_x_lim: tuple[str] = _default,
             equal_y_lim: tuple[str] = _default,
+            grid: bool | dict[str, bool] = _default,
             scale_limits: float=1,
             ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]:
         """Function to automate and simplify the annotation of axes created with plt.subplot_mosaic(). Except for 'axs',
@@ -77,8 +77,8 @@ class MosaicHandler:
 
         # self._check_mosaic_options_completeness(self._ax_labels, **lcs)  # not used/wanted
         # filter for parameters that the user wants to update
-        is_set = deepcopy({param: values for param, values in lcs.items() if values != self._default})
-        # deepcopy needed because of the mutable input parameters.
+        is_set = deepcopy({param: values for param, values in lcs.items() if values not in [self._default, None]})
+        # deepcopy needed because of the mutable input parameters which are changed in the next two lines
         is_set = self._treat_special_options(**is_set)
         filled = self._handle_mosaic_options(self._ax_labels, **is_set)
         map_params_to_axs_methods = {
@@ -87,7 +87,8 @@ class MosaicHandler:
             "x_lims": "set_xlim",
             "y_lims": "set_ylim",
             "legend": "legend",
-            "aspect": "set_aspect"
+            "aspect": "set_aspect",
+            "grid": "grid"
         }
         self._handle_mosaic(**{map_params_to_axs_methods[param]: values for param, values in filled.items()})
         return self.fig, self.axs
@@ -103,7 +104,8 @@ class MosaicHandler:
             set_xlim: dict[tuple]=_default,
             set_ylim: dict[tuple]=_default,
             legend: dict[bool]=_default,
-            set_aspect: dict[str] | dict[tuple[float]]=_default
+            set_aspect: dict[str] | dict[tuple[float]]=_default,
+            grid: dict[str, bool]=_default
             ) -> None:
         """Core function that update the axes. The keyword arguments of this function are the names of class methods of
         pyplot axes. This function goes through all keyword arguments filtering for those that have been set by the 
@@ -172,12 +174,14 @@ class MosaicHandler:
         :rtype: dict
         """
         map_params = {
-            "legend": {True: self._empty_call, False: self._skip_call}
+            "legend": {True: self._empty_call, False: self._skip_call},
+            "grid": {True: self._empty_call, False: self._skip_call}
         }
+        implemented_special_options = map_params.keys()
         for param, values in copy(kwargs).items():
-            if param not in self._special_options_implemented:
+            if param not in implemented_special_options:
                 if param in map_params.keys():
-                    raise ValueError("For coder: update 'self._special_options_implemented'.")
+                    raise ValueError(f"For coder: update 'map_params' a few lines above to include '{param}'.")
                 continue
             if not isinstance(values, dict):
                 kwargs[param] = map_params[param][values]
