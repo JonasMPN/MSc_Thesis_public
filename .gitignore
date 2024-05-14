@@ -12,6 +12,7 @@ test.py
 !Cl*.dat
 !Cm*.dat
 !cases*.dat
+!f_s.dat
 
 *.json
 *.mp4
