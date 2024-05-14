@@ -326,7 +326,11 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_nv_instant",
         "C_nv",
         "C_mqs",
-        "C_mnc"
+        "C_mnc",
+        "f_n",
+        "f_t",
+        "C_l_rec",
+        "C_d_rec",
     ]
     _params = _prep_params + _sim_params
 
@@ -345,7 +349,11 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_tpot": "orange",
         "C_tf": "green",
         "C_mqs": "black",
-        "C_mnc": "orange"
+        "C_mnc": "orange",
+        "f_n": "forestgreen",
+        "f_t": "mediumblue",
+        "C_l_rec": "forestgreen", 
+        "C_d_rec": "mediumblue", 
     }
     _colours = _prep_colours|_c_rest
 
@@ -358,6 +366,8 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_l_rec_section": r"section reconstructed $C_l$", 
         "C_d_rec_aerohor": r"aerohor reconstructed $C_d$", 
         "C_d_rec_section": r"section reconstructed $C_d$",
+        "C_l_rec": r"reconstructed $C_l$", 
+        "C_d_rec": r"reconstructed $C_d$", 
         "C_nc": r"$C_{n\text{,c}}$",
         "C_ni": r"$C_{n\text{,i}}$",
         "C_npot": r"$C_{n\text{,p}}$",
@@ -369,6 +379,8 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_nv": r"$C_{n\text{,v}}$",
         "C_mqs": r"$C_{m\text{,qs}}$",
         "C_mnc": r"$C_{m\text{,nc}}$",
+        "f_n": r"$f_n$",
+        "f_t": r"$f_t$",
     }
 
     _linestyles = {  # line style
@@ -391,12 +403,15 @@ class _DefaultMeasurement(_BaseDefaultPltSettings):
     _settings = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
         "_labels": "label",
         "_markers": "marker",
-        "_linestyles": "ls"
+        "_linestyles": "ls",
+        "_marker_size": "ms"
     }
 
     _params = [ 
         "C_l",
         "C_d",
+        "C_l_specify",
+        "C_d_specify",
         "C_m",
         "C_l_HAWC2",
         "C_d_HAWC2",
@@ -409,6 +424,8 @@ class _DefaultMeasurement(_BaseDefaultPltSettings):
     _labels = {
         "C_l": "steady",
         "C_d": "steady",
+        "C_l_specify": r"$C_l$ steady",
+        "C_d_specify": r"$C_d$ steady",
         "C_m": "steady",
         "C_l_HAWC2": "HAWC2",
         "C_d_HAWC2": "HAWC2",
@@ -421,13 +438,21 @@ class _DefaultMeasurement(_BaseDefaultPltSettings):
     _markers = {
         "C_l": "x",
         "C_d": "x",
+        "C_l_specify": "x",
+        "C_d_specify": "+",
         "C_m": "x",
-        "C_l_HAWC2": "x",
-        "C_d_HAWC2": "x",
-        "C_m_HAWC2": "x",
-        "C_l_openFAST": "o",
-        "C_d_openFAST": "o",
-        "C_m_openFAST": "o",
+        "C_l_HAWC2": "+",
+        "C_d_HAWC2": "+",
+        "C_m_HAWC2": "+",
+        "C_l_openFAST": "x",
+        "C_d_openFAST": "x",
+        "C_m_openFAST": "x",
+    }
+
+    _marker_size = {
+        "C_l_HAWC2": 0.8,
+        "C_d_HAWC2": 0.8,
+        "C_m_HAWC2": 0.8,
     }
     
     def _linestyles(params):
@@ -436,7 +461,37 @@ class _DefaultMeasurement(_BaseDefaultPltSettings):
 
     def __init__(self) -> None:
         _BaseDefaultPltSettings.__init__(self, "line")
+
+
+class _DefaultGeneral(_BaseDefaultPltSettings):
+    _copy_params = {}
         
+    _settings = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
+        "_colours": "color",
+        "_labels": "label"
+    }
+
+    _params = [  # parameters that are supported by default
+        "HAWC2",
+        "openFAST",
+        "section"
+    ]
+
+    _colours = {  # line colour
+        "HAWC2": "forestgreen",
+        "openFAST": "coral",
+        "section": "royalblue"
+    }
+
+    _labels = {  # line label
+        "HAWC2": "HAWC2",
+        "openFAST": "openFAST",
+        "section": "section"
+    }
+    
+    def __init__(self) -> None:
+        _BaseDefaultPltSettings.__init__(self, "line")
+
 
 class DefaultPlot:
     """C_lass to specify plot settings for parameters of this project. Example:
@@ -448,6 +503,7 @@ class DefaultPlot:
     This will cause the plot to have all axes settings defined in this class to be set for the values connected 
     to "lift.
     """
+    plt_settings = {}
     def __init__(self) -> None:
         arrow = _DefaultArrow()
         aoa = _DefaultAngleOfAttack()
@@ -456,7 +512,8 @@ class DefaultPlot:
         energy = _DefaultEnergy()
         BL = _DefaultBL()
         measurement = _DefaultMeasurement()
-        _CombineDefaults.__init__(self, (arrow, "arrow_"), aoa, force, profile, energy, BL, measurement)
+        general = _DefaultGeneral()
+        _CombineDefaults.__init__(self, (arrow, "arrow_"), aoa, force, profile, energy, BL, measurement, general)
         
 
 class DefaultStructure:
