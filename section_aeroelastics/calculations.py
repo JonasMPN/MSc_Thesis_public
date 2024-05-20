@@ -222,12 +222,6 @@ class ThreeDOFsAirfoil(SimulationResults):
         self.aero[i, :] = self._aero_force(self, i, **self._aero_scheme_settings)
         self.damp[i, :], self.stiff[i, :] = self._struct_force(self, i, **self._struct_scheme_settings)
 
-    def _check_simulation_readiness(self, **kwargs):
-        """Utility function checking whether all settings given in kwargs have been set.
-        """
-        for property, value in kwargs.items():
-            assert value, f"Method {self._sim_assert[property]}() must be used before simulation."
-
     def save(self, root: str, files: dict=None, split: dict=None, use_default: bool=True):
         """Wrapper for SimulationResults._save(). See more details there. Additionally to _save(), also saves the
         structural and section data.
@@ -256,6 +250,12 @@ class ThreeDOFsAirfoil(SimulationResults):
                 files[filename] = list(set(files[filename]+params))
         #todo add error if use_default==False and files==None in method call
         self._save(root, files, split, use_default)
+
+    def _check_simulation_readiness(self, **kwargs):
+        """Utility function checking whether all settings given in kwargs have been set.
+        """
+        for property, value in kwargs.items():
+            assert value, f"Method {self._sim_assert[property]}() must be used before simulation."
 
 
 class AeroForce(SimulationSubRoutine, Rotations):
