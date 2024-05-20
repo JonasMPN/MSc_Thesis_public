@@ -22,7 +22,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
     simulation. The name of these files is given in the parent class DefaultStructure.
     """
     
-    def __init__(self, file_profile: str, dir_data: str, dir_plots: str) -> None:
+    def __init__(self, file_profile: str, dir_data: str, dir_plots: str, dt_res: float=None) -> None:
         """Initialises a plotter instance.
 
         :param file_profile: Path from the current working directory to a text file holding the profile coordinates. The
@@ -50,6 +50,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
 
         self.dir_plots = dir_plots
         helper.create_dir(self.dir_plots)
+        self.dt_res = dt_res
         self._rot = Rotations()
 
     def force(self, equal_y: tuple[str]=None, trailing_every: int=2):
@@ -223,7 +224,8 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
             arrow_scale_moment: float=1,
             plot_qc_trailing_every: int=2,
             keep_qc_trailing: int=40,
-            time_steps: int=0):
+            time_steps: int=0,
+            frame_skip_timesteps: int=1):
         qc_pos = self.df_general[["pos_x", "pos_y"]].to_numpy()
         profile = np.zeros((self.time.size, *self.profile.shape))
         norm_moments = self.df_f_aero["aero_mom"]/np.abs(self.df_f_aero["aero_mom"]).max()
@@ -259,7 +261,7 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
         data_arrows = {"drag": force_arrows[:, :2], "lift": force_arrows[:, 2:4]}
         
         def update(i: int):
-            i += 1
+            i = frame_skip_timesteps*i+1
             for linename, data in data_lines.items():
                 match linename:
                     case "profile"|"mom":
@@ -275,7 +277,7 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
             rtrn = [*plt_lines.values()]+[*plt_arrows.values()]
             return tuple(rtrn)
         
-        frames = self.time.size-1 if time_steps==0 else time_steps
+        frames = int((self.time.size-1)/frame_skip_timesteps) if time_steps==0 else int(time_steps/frame_skip_timesteps)
         ani = animation.FuncAnimation(fig=fig, func=update, frames=frames, interval=15, blit=True)
         writer = animation.FFMpegWriter(fps=30)
         ani.save(join(self.dir_plots, "animation_force.mp4"), writer=writer)
@@ -803,32 +805,63 @@ class BLValidationPlotter(DefaultPlot, Rotations):
 
     
 def combined_forced(root_dir: str):
-    root_dir = root_dir.replace("\\", "/")
-    ampls_and_aoas = root_dir.split("/")[-1].split("_")
-    amplitudes = literal_eval(ampls_and_aoas[0])
-    aoas = literal_eval(ampls_and_aoas[1])
-    period_work = np.zeros((len(amplitudes), len(aoas)))
-    convergence = np.zeros((len(amplitudes), len(aoas)))
+    df_combinations = pd.read_csv(join(root_dir, "combinations.dat"))
+    amplitudes = np.sort(df_combinations["amplitude"].unique())
+    aoas = np.sort(df_combinations["alpha"].unique())
+
+    period_aero_work = np.zeros((amplitudes.size, aoas.size))
+    period_struct_work = np.zeros((amplitudes.size, aoas.size))
+    convergence_aero = np.zeros((amplitudes.size, aoas.size))
+    convergence_struct = np.zeros((amplitudes.size, aoas.size))
+
     ampl_to_ind = {ampl: i for i, ampl in enumerate(amplitudes)}
     aoa_to_ind = {aoa: i for i, aoa in enumerate(aoas)}
-    for case_dir_name in listdir(root_dir):
-        if case_dir_name == "plots":
-            continue
-        ampl_and_aoa = case_dir_name.split("_")
-        ampl = float(ampl_and_aoa[0])
-        aoa = float(ampl_and_aoa[1])
-        df = pd.read_csv(join(root_dir, case_dir_name, "period_work.dat"))
-        work = df["period_work"].to_numpy()
-        period_work[ampl_to_ind[ampl], aoa_to_ind[aoa]] = work[-1]
-        convergence[ampl_to_ind[ampl], aoa_to_ind[aoa]] = (work[-1]-work[-2])/work[-1]
+    for i, row in df_combinations.iterrows():
+        ampl = row["amplitude"]
+        aoa = row["alpha"]
+        df = pd.read_csv(join(root_dir, str(i), "period_work.dat"))
+        aero_work = df[["aero_drag", "aero_lift", "aero_mom"]].sum(axis=1).to_numpy()
+        struct_work = df[["damp_edge", "damp_flap", "damp_tors"]].sum(axis=1).to_numpy()
+
+        period_aero_work[ampl_to_ind[ampl], aoa_to_ind[aoa]] = aero_work[-1]
+        period_struct_work[ampl_to_ind[ampl], aoa_to_ind[aoa]] = struct_work[-1]
+
+        convergence_aero[ampl_to_ind[ampl], aoa_to_ind[aoa]] = (aero_work[-1]-aero_work[-2])/aero_work[-1]
+        convergence_struct[ampl_to_ind[ampl], aoa_to_ind[aoa]] = (struct_work[-1]-struct_work[-2])/struct_work[-1]
         
     dir_plots = helper.create_dir(join(root_dir, "plots"))[0]
     fig, ax = plt.subplots()
-    ax = heatmap(period_work, xticklabels=np.round(aoas, 3), ax=ax, yticklabels=np.round(amplitudes, 3),
-                 cbar_kws={"label": r"period work"}, cmap="RdYlGn", annot=False, fmt=".3g")
-    fig.savefig(join(dir_plots, "period_work.pdf"))
+    ax = heatmap(period_aero_work, xticklabels=np.round(aoas, 3), ax=ax, yticklabels=np.round(amplitudes, 3),
+                 cbar_kws={"label": r"period work"}, cmap="RdYlGn", annot=True, fmt=".3g")
+    handler = MosaicHandler(fig, ax)
+    handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude (m)")
+    handler.save(join(dir_plots, "period_aero_work.pdf"))
 
     fig, ax = plt.subplots()
-    ax = heatmap(convergence, xticklabels=np.round(aoas, 3), ax=ax, yticklabels=np.round(amplitudes, 3),
-                 cbar_kws={"label": r"convergence"}, cmap="RdYlGn", annot=False, fmt=".3g")
-    fig.savefig(join(dir_plots, "convergence.pdf"))
+    ax = heatmap(convergence_aero, xticklabels=np.round(aoas, 3), ax=ax, yticklabels=np.round(amplitudes, 3),
+                 cbar_kws={"label": r"convergence"}, cmap="RdYlGn", annot=True, fmt=".3g")
+    handler = MosaicHandler(fig, ax)
+    handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude (m)")
+    handler.save(join(dir_plots, "convergence_aero.pdf"))
+
+    fig, ax = plt.subplots()
+    ax = heatmap(period_struct_work, xticklabels=np.round(aoas, 3), ax=ax, yticklabels=np.round(amplitudes, 3),
+                 cbar_kws={"label": r"period work"}, cmap="RdYlGn", annot=True, fmt=".3g")
+    handler = MosaicHandler(fig, ax)
+    handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude (m)")
+    handler.save(join(dir_plots, "period_struct_work.pdf"))
+
+    fig, ax = plt.subplots()
+    ax = heatmap(convergence_struct, xticklabels=np.round(aoas, 3), ax=ax, yticklabels=np.round(amplitudes, 3),
+                 cbar_kws={"label": r"convergence"}, cmap="RdYlGn", annot=True, fmt=".3g")
+    handler = MosaicHandler(fig, ax)
+    handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude (m)")
+    handler.save(join(dir_plots, "convergence_struct.pdf"))
+    
+    fig, ax = plt.subplots()
+    ax = heatmap(period_aero_work+period_struct_work, xticklabels=np.round(aoas, 3), ax=ax, 
+                 yticklabels=np.round(amplitudes, 3), cbar_kws={"label": "total period work"}, cmap="RdYlGn", 
+                 annot=True, fmt=".3g")
+    handler = MosaicHandler(fig, ax)
+    handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude (m)")
+    handler.save(join(dir_plots, "stability.pdf"))
