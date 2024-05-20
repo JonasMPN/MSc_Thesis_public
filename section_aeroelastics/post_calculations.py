@@ -257,21 +257,22 @@ class PostCaluculations(Rotations, DefaultsSimulation):
             df[category] = values
         df.to_csv(join(self.dir_in, self._dfl_filenames["e_pot"]), index=None)
 
-    def work_per_cycle(self):
+    def work_per_cycle(self, peaks: np.ndarray=None):
         t = self.df_general["time"].to_numpy()
         dt = t[1:]-t[:-1]
-        pos_x = self.df_general["pos_x"].to_numpy()
-        peaks = find_peaks(pos_x)[0]
+        if peaks is None:
+            pos_x = self.df_general["pos_x"].to_numpy()
+            peaks = find_peaks(pos_x)[0]
         
         df_power = pd.read_csv(join(self.dir_in, self._dfl_filenames["power"]))
-        aero_power = df_power["aero_drag"]+df_power["aero_lift"]+df_power["aero_mom"]
-        aero_power = aero_power.to_numpy()
-        period_power = [(aero_power[i_begin:i_end]*dt[i_begin:i_end]).sum() for 
-                        i_begin, i_end in zip(peaks[:-1], peaks[1:])]
-        df = pd.DataFrame(
-            {"cycle_no": np.arange(len(peaks)-1), 
-             "T": t[peaks[1:]]-t[peaks[:-1]], 
-             "period_work": period_power})
+        period_power = {}
+        for col in df_power.columns:
+            timeseries = df_power[col].to_numpy()
+            period_power[col] = [(timeseries[i_begin:i_end]*dt[i_begin:i_end]).sum() for 
+                                 i_begin, i_end in zip(peaks[:-1], peaks[1:])]
+        
+        data =  {"cycle_no": np.arange(len(peaks)-1), "T": t[peaks[1:]]-t[peaks[:-1]]} | period_power
+        df = pd.DataFrame(data)
         df.to_csv(join(self.dir_in, "period_work.dat"), index=None)
 
 class PostHHT_alpha:
