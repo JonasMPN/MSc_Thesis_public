@@ -157,6 +157,71 @@ class ThreeDOFsAirfoil(SimulationResults):
         self.aero[i, :] = self._aero_force(self, i, **self._aero_scheme_settings)
         self.damp[i, :], self.stiff[i, :] = self._struct_force(self, i, **self._struct_scheme_settings)
 
+    def simulate_along_path(
+        self, 
+        inflow: np.ndarray,
+        position: dict[str, np.ndarray],
+        velocity: dict[str, np.ndarray],
+        acceleration: dict[str, np.ndarray]):
+        """Performs a simulation in which the airfoil follows the path of "position" with the respective velocity 
+        "velocity" and acceleration "acceleration". Before the simulation can be run, the methods "set_aero_calc()", 
+        "set_struct_calc()", and "set_time_integration()" have to be used. 
+
+        The keys for "position", "velocity", and "acceleration" have to be "x", "y", or "rot_z". The path is only set
+        for the given keys, all other directions are free to move.
+
+        :param inflow: The inflow at each time step with components in the x and y direction [x, y].
+        :type inflow: np.ndarray
+        :param density: Density of the fluid
+        :type density: float
+        :param position: position of the quarter-chord for [x, y, rotation around z in rad]
+        :type position: np.ndarray
+        :param velocity: Initial velocity of the quarter-chord for [x, y, rotation around z in rad/s]
+        :type velocity: np.ndarray
+        :param acceleration: Initial acceleration of the quarter-chord for [x, y, rotation around z in rad/s**2]
+        :type acceleration: np.ndarray
+        """
+        map_direction = {"x": 0, "y": 1, "rot_z": 2}
+        position = {map_direction[direction]: pos for direction, pos in position.items()}
+        velocity = {map_direction[direction]: vel for direction, vel in velocity.items()}
+        acceleration = {map_direction[direction]: accel for direction, accel in acceleration.items()}
+
+        inflow_angle = np.arctan(inflow[:, 1]/inflow[:, 0])
+        dt = np.r_[self.time[1:]-self.time[:-1], self.time[1]]  # todo hard coded additional dt at the end  
+        self.set_param(inflow=inflow, inflow_angle=inflow_angle, dt=dt)
+
+        # check whether all necessary settings have been set.
+        #todo sim readiness should include inits of sub modules
+        self._check_simulation_readiness(_aero_force=self._aero_force, 
+                                         _struct_force=self._struct_force,
+                                         _time_integration=self._time_integration)
+
+        init_funcs = [self._init_aero_force, self._init_struct_force, self._init_time_integration]
+        scheme_settings = [self._aero_scheme_settings, self._struct_scheme_settings, 
+                           self._time_integration_scheme_settings]
+        for init_func, scheme_setting in zip(init_funcs, scheme_settings):
+            init_func(self, **scheme_setting)
+
+        for i in range(self.time.size-1):
+            for direction, pos in position.items():
+                self.pos[i, direction] = pos[i]
+            for direction, vel in velocity.items():
+                self.vel[i, direction] = vel[i]
+            for direction, accel in acceleration.items():
+                self.accel[i, direction] = accel[i]
+            # get aerodynamic forces
+            self.aero[i, :] = self._aero_force(self, i, **self._aero_scheme_settings)
+            # get structural forces
+            self.damp[i, :], self.stiff[i, :] = self._struct_force(self, i, **self._struct_scheme_settings)
+            # performe time integration
+            self.pos[i+1, :], self.vel[i+1, :], self.accel[i+1, :] = self._time_integration(self, i,
+                                                                            **self._time_integration_scheme_settings)
+            
+        i = self.time.size-1
+        # for the last time step, only the forces are calculated because there is no next time step for the positions
+        self.aero[i, :] = self._aero_force(self, i, **self._aero_scheme_settings)
+        self.damp[i, :], self.stiff[i, :] = self._struct_force(self, i, **self._struct_scheme_settings)
+
     def _check_simulation_readiness(self, **kwargs):
         """Utility function checking whether all settings given in kwargs have been set.
         """
@@ -280,24 +345,24 @@ class AeroForce(SimulationSubRoutine, Rotations):
             adjust_attached: bool=True,
             adjust_separated: bool=True,
             dir_save_to: str=None):
-        map_sep_point_scheme = {
-            "BL_chinese": 3,
-            "BL_openFAST_Cl_disc": 4,
-            "BL_openFAST_Cd": 5,
-        }
-        if sep_points_scheme is None:
-            sep_points_scheme = map_sep_point_scheme[scheme]
         match scheme:
             case "BL_chinese"|"BL_openFAST_Cl_disc":
+                map_sep_point_scheme = {
+                    "BL_chinese": 3,
+                    "BL_openFAST_Cl_disc": 4,
+                    "BL_openFAST_Cd": 5,
+                }
+                if sep_points_scheme is None:
+                    sep_points_scheme = map_sep_point_scheme[scheme]
                 if dir_save_to is None:
                     dir_BL_data = helper.create_dir(join(self.dir_polar, "preparation", scheme))[0]
                 else:
                     dir_BL_data = helper.create_dir(dir_save_to)[0]
                 f_zero_data = join(dir_BL_data, "zero_data.json")
-                f_sep = join(dir_BL_data, f"sep_points_{sep_points_scheme}.dat")
                 
                 alpha_given = self.df_polars["alpha"]
-                #todo: if resolution<=polar resolution, C_l_slope and alpha_0L are not correct anymore
+                #todo: if resolution<=polar resolution around alpha_0, C_l_slope and alpha_0L are not correct anymore;
+                #todo if the polar is not resolved by equidistant points further care needs to be taken!
                 alpha_interp = np.linspace(alpha_given.min(), alpha_given.max(), resolution)
                 coefficients = np.c_[self.C_d(alpha_interp)-self._C_d_0, self.C_l(alpha_interp)]
                 if not isfile(f_zero_data):
@@ -317,13 +382,16 @@ class AeroForce(SimulationSubRoutine, Rotations):
                 self._C_l_slope = np.rad2deg(zero_data["C_l_slope"])
                 self._C_n_slope = np.rad2deg(zero_data["C_n_slope"])
 
-                if not isfile(f_sep):
-                    sep_data = self._write_and_get_separation_points(f_sep, alpha_interp, sep_points_scheme,
-                                                                     adjust_attached, adjust_separated)
-                else:
-                    sep_data = pd.read_csv(f_sep)
+                f_sep = join(dir_BL_data, f"sep_points_{sep_points_scheme}.dat")
+                #todo could write something like the below; currently doesn't work because the file name is
+                #todo apadated in _write_and_get_separation_points()
                 sep_data = self._write_and_get_separation_points(f_sep, alpha_interp, sep_points_scheme,
                                                                  adjust_attached, adjust_separated)
+                # if not isfile(f_sep):
+                #     sep_data = self._write_and_get_separation_points(f_sep, alpha_interp, sep_points_scheme,
+                #                                                      adjust_attached, adjust_separated)
+                # else:
+                #     sep_data = pd.read_csv(f_sep)
 
                 if "f_n" in sep_data:
                     self._f_n = interpolate.interp1d(sep_data["alpha_n"], sep_data["f_n"])
@@ -332,7 +400,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
                 if "f_l" in sep_data:
                     self._f_l = interpolate.interp1d(sep_data["alpha_l"], sep_data["f_l"])
 
-                if "BL_openFAST" in scheme:
+                if "BL_openFAST" in scheme:  # calculate fully separated polar
                     for param in sep_data.keys():
                         direction = param[-1]
                         save_as = join(dir_BL_data, f"C_fs_{sep_points_scheme}_{direction}.dat")
@@ -447,7 +515,8 @@ class AeroForce(SimulationSubRoutine, Rotations):
             idx_last_dot = save_as.rfind(".")
             file_name = save_as[:idx_last_dot]+f"_{param}"+save_as[idx_last_dot:]
             direction = param[-1]
-            pd.DataFrame({"alpha": data[f"alpha_{direction}"], f"{param}": values}).to_csv(file_name, index=None)
+            df = pd.DataFrame({f"alpha_{direction}": data[f"alpha_{direction}"], f"{param}": values})
+            df.to_csv(file_name, index=None)
         return data
     
     def _adjust_f(
@@ -698,20 +767,20 @@ class AeroForce(SimulationSubRoutine, Rotations):
 
         # --------- Combining everything
         # for return of [C_d, C_l, C_m]
-        coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], C_m])
-        rot = self.passive_3D_planar(sim_res.pos[i, 2]+sim_res.inflow_angle[i])
-        coeffs = rot@coefficients-np.asarray([self._C_d_0, 0, 0])
-        coeffs[0] = -coeffs[0] 
-        return coeffs
+        # coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], C_m])
+        # rot = self.passive_3D_planar(sim_res.pos[i, 2]+sim_res.inflow_angle[i])
+        # coeffs = rot@coefficients-np.asarray([self._C_d_0, 0, 0])
+        # coeffs[0] = -coeffs[0] 
+        # return coeffs
 
         # for return of [f_x, f_y, mom]
         # C_t and C_d point in opposite directions!
-        # coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], -C_m*chord])
-        # rot = self.passive_3D_planar(-sim_res.pos[i, 2]) 
-        # dynamic_pressure = density/2*rel_speed
-        # forces = dynamic_pressure*chord*rot@coefficients  # for [-f_x, f_y, mom]
-        # forces[0] *= -1
-        # return forces  # for [f_x, f_y, mom]
+        coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], -C_m*chord])
+        rot = self.passive_3D_planar(-sim_res.pos[i, 2]) 
+        dynamic_pressure = density/2*rel_speed
+        forces = dynamic_pressure*chord*rot@coefficients  # for [-f_x, f_y, mom]
+        forces[0] *= -1
+        return forces  # for [f_x, f_y, mom]
 
     def _BL_openFAST_Cl_disc(
             self, 
@@ -751,6 +820,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
                                                                 sim_res.inflow[i, :], chord, pitching_around, alpha_at)
         sim_res.alpha_qs[i] = -sim_res.pos[i, 2]+qs_flow_angle
         
+        # todo realy with v_x and v_y and not just inflow conditions?
         T_u = 0.5*chord/np.sqrt(v_x**2+v_y**2)
         tmp1 = np.exp(-sim_res.dt[i]*b1/T_u)
         tmp2 = np.exp(-sim_res.dt[i]*b2/T_u)
@@ -785,10 +855,19 @@ class AeroForce(SimulationSubRoutine, Rotations):
         C_m = sim_res.C_ms[i]+sim_res.C_mnc[i]
 
         # --------- Combining everything
+        # coeffs = np.asarray([C_d, C_l, C_m])
         # for return of [C_d, C_l, C_m]
-        return np.asarray([C_d, C_l, C_m])
+        # return coeffs
 
         # for return of [f_x, f_y, mom]
+        coeffs = np.asarray([C_d, C_l, -C_m*chord])
+        rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
+                            (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
+        dynamic_pressure = density/2*rel_speed
+        rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])
+        # print( rel_speed, dynamic_pressure*chord*rot@coeffs)
+        return dynamic_pressure*chord*rot@coeffs
+        
 
     def _init_BL_chinese(
             self,

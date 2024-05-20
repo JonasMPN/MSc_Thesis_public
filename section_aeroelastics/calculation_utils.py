@@ -384,3 +384,43 @@ class Rotations:
                            [np.zeros_like(angle), np.cos(angle), np.zeros_like(angle)],
                            [np.zeros_like(angle), np.zeros_like(angle), np.ones_like(angle)]])
     
+
+def get_inflow(
+    t: np.ndarray, 
+    ramps: list[tuple[float, float, float]], 
+    init_velocity: float=0, 
+    init_angle: float=0) -> np.ndarray:
+    """Creates a 2D np.ndarray array with the inflow conditions. Assumes constant time step size
+
+    :param t: time array for the simulation with equidistant time steps
+    :type t: np.ndarray
+    :param ramps: list of tuples of (time begin ramp, time end ramp, velocity, angle). 'time begin ramp' defines when
+     the ramp starts, 'time for ramp' how long the ramp takes, and 'velocity' and 'angle' what the velocity and angle 
+     are after the ramp.
+    :type ramps: list[tuple[float, float, float, float]]
+    :return: _description_
+    :rtype: np.ndarray
+    """
+    n_ramps = len(ramps)
+    inflow = np.zeros((t.size, 2))
+    init_inflow = init_velocity*np.c_[np.cos(np.deg2rad(init_angle)), np.sin(np.deg2rad(init_angle))]
+    inflow[0:(t<=ramps[0][0]).argmax(), :] = init_inflow
+    last_velocity = init_velocity
+    last_angle = init_angle
+    for i_ramp, (t_begin, t_end, velocity, angle) in enumerate(ramps):
+        ids = np.logical_and(t>=t_begin, t<=t_end)
+        n_timesteps = ids.sum()
+        velocities = np.linspace(last_velocity, velocity, n_timesteps)
+        angles = np.linspace(np.deg2rad(last_angle), np.deg2rad(angle), n_timesteps)
+        inflow[ids] = velocities[:, np.newaxis]*np.c_[np.cos(angles), np.sin(angles)]
+        last_velocity = velocity
+        last_angle = angle
+
+        i_end_current_ramp = ids.argmax()+n_timesteps
+        if i_ramp<n_ramps-1:
+            i_next_ramp = (t>=ramps[i_ramp+1][0]).argmax()
+            inflow[i_end_current_ramp:i_next_ramp, :] = inflow[i_end_current_ramp-1, :]
+        else:
+            inflow[i_end_current_ramp:, :] = inflow[i_end_current_ramp-1, :]
+    return inflow
+        

@@ -153,7 +153,8 @@ class _DefaultAngleOfAttack(_BaseDefaultPltSettings):
         "alpha_steady",
         "alpha_qs",
         "alpha_eff",
-        "alpha_sEq",
+        "alpha_sEq",    
+        "alpha_eq",
     ]
 
     copy_from = {}
@@ -162,7 +163,8 @@ class _DefaultAngleOfAttack(_BaseDefaultPltSettings):
         "alpha_steady": "black",
         "alpha_qs": "darkgreen",
         "alpha_eff": "orangered",
-        "alpha_sEq": "royalblue"
+        "alpha_sEq": "royalblue",
+        "alpha_eq": "royalblue",
     }
 
     _labels = {  # line label
@@ -170,7 +172,8 @@ class _DefaultAngleOfAttack(_BaseDefaultPltSettings):
         "alpha_steady": r"$\alpha_{\text{steady}}$",
         "alpha_qs": r"$\alpha_{\text{qs}}$",
         "alpha_eff": r"$\alpha_{\text{eff}}$",
-        "alpha_sEq": r"$\alpha_{\text{sEq}}$"
+        "alpha_sEq": r"$\alpha_{\text{sEq}}$",
+        "alpha_eq": r"$\alpha_{\text{eq}}$",
     }
 
     def __init__(self) -> None:
@@ -319,6 +322,7 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_nc",
         "C_ni",
         "C_npot",
+        "C_lpot",
         "C_tpot",
         "C_nsEq",
         "C_nf",
@@ -331,6 +335,12 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "f_t",
         "C_l_rec",
         "C_d_rec",
+        "C_lc", 
+        "C_lnc", 
+        "C_ds",   
+        "C_dc", 
+        "C_dsep", 
+        "C_ms",
     ]
     _params = _prep_params + _sim_params
 
@@ -342,11 +352,13 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_nc": "blue",
         "C_ni": "red",
         "C_npot": "green",
+        "C_lpot": "green",
         "C_nsEq": "orange",
         "C_nf": "blue",
         "C_nv_instant": "red",
         "C_nv": "green",
         "C_tpot": "orange",
+        "C_lpot": "orange",
         "C_tf": "green",
         "C_mqs": "black",
         "C_mnc": "orange",
@@ -354,6 +366,12 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "f_t": "mediumblue",
         "C_l_rec": "forestgreen", 
         "C_d_rec": "mediumblue", 
+        "C_lc": "blue", 
+        "C_lnc": "red", 
+        "C_ds": "green",
+        "C_dc": "orange", 
+        "C_dsep": "blue", 
+        "C_ms": "red",
     }
     _colours = _prep_colours|_c_rest
 
@@ -371,6 +389,7 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_nc": r"$C_{n\text{,c}}$",
         "C_ni": r"$C_{n\text{,i}}$",
         "C_npot": r"$C_{n\text{,p}}$",
+        "C_lpot": r"$C_{l\text{,p}}$",
         "C_tpot": r"$C_{t\text{,c}}$",
         "C_nsEq": r"$C_{n\text{,seq}}$",
         "C_nf": r"$C_{n\text{,f}}$",
@@ -381,6 +400,12 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_mnc": r"$C_{m\text{,nc}}$",
         "f_n": r"$f_n$",
         "f_t": r"$f_t$",
+        "C_lc": "$C_{lc}$",
+        "C_lnc": "$C_{lnc}$",
+        "C_ds": "$C_{ds}$",
+        "C_dc": "$C_{dc}$",
+        "C_dsep": "$C_{dsep}$",
+        "C_ms": "$C_{ms}$",
     }
 
     _linestyles = {  # line style
@@ -391,6 +416,7 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_nc": "--",
         "C_ni": "--",
         "C_npot": "--",
+        "C_lpot": "--",
     }
 
     def __init__(self) -> None:
@@ -525,7 +551,7 @@ class DefaultStructure:
         "f_structural": "f_structural.dat",
         "general": "general.dat",
         "section_data": "section_data.json" ,
-        "work": "work.dat",
+        "power": "power.dat",
         "e_kin": "e_kin.dat",
         "e_pot": "e_pot.dat",
     }
