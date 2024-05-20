@@ -12,6 +12,8 @@ from os import listdir
 from scipy.signal import find_peaks
 from helper_functions import Helper
 from typing import Callable
+from ast import literal_eval
+from seaborn import heatmap
 helper = Helper()
 
 
@@ -39,7 +41,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         self.df_f_aero = pd.read_csv(join(dir_data, self._dfl_filenames["f_aero"]))
         self.df_f_structural = pd.read_csv(join(dir_data, self._dfl_filenames["f_structural"]))
         self.df_general = pd.read_csv(join(dir_data, self._dfl_filenames["general"]))
-        self.df_work = pd.read_csv(join(dir_data, self._dfl_filenames["work"]))
+        self.df_power = pd.read_csv(join(dir_data, self._dfl_filenames["power"]))
         self.df_e_kin = pd.read_csv(join(dir_data, self._dfl_filenames["e_kin"]))
         self.df_e_pot = pd.read_csv(join(dir_data, self._dfl_filenames["e_pot"]))
         self.time = self.df_general["time"].to_numpy()
@@ -71,9 +73,9 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plt_settings["qc_trail"])
         
         # grab all angles of attack from the data
-        aoas, df_aoas = self._get_aoas(self.df_f_aero)
+        aoas = self._get_aoas(self.df_f_aero)
         # prepare dictionary of dataframes to plot
-        dfs = {"aoa": df_aoas, "aero": self.df_f_aero, "damp": self.df_f_structural, 
+        dfs = {"aoa": self.df_f_aero, "aero": self.df_f_aero, "damp": self.df_f_structural, 
                "stiff": self.df_f_structural}
         
         plot = {
@@ -89,7 +91,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         fig.savefig(join(self.dir_plots, "forces.pdf"))
 
     def energy(self, equal_y: tuple[str]=None, trailing_every: int=2):
-        """Plots the history of the airfoil movement and different energies/work.
+        """Plots the history of the airfoil movement and different energies/power.
 
         :param equal_y: Whether the force axes should have equal y scaling, defaults to None
         :type equal_y: tuple[str], optional
@@ -110,12 +112,12 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         
         df_total = pd.concat([self.df_e_kin.sum(axis=1), self.df_e_pot.sum(axis=1)], keys=["e_kin", "e_pot"], axis=1)
         df_total["e_total"] = df_total.sum(axis=1)
-        dfs = {"total": df_total, "work": self.df_work, "kinetic": self.df_e_kin, 
+        dfs = {"total": df_total, "power": self.df_power, "kinetic": self.df_e_kin, 
                "potential": self.df_e_pot}
         
         plot = {
             "total": ["e_total", "e_kin", "e_pot"],
-            "work": ["aero_drag", "aero_lift", "aero_mom", "damp_edge", "damp_flap", "damp_tors"],
+            "power": ["aero_drag", "aero_lift", "aero_mom", "damp_edge", "damp_flap", "damp_tors"],
             "kinetic": ["edge", "flap", "tors"],
             "potential": ["edge", "flap", "tors"]
         }        
@@ -135,7 +137,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         :return: None
         :rtype: None
         """
-        fig, axs, handler = self._prepare_BL_plot(equal_y)
+        coeffs = self._get_force_and_moment_coeffs(self.df_f_aero)
+        fig, axs, handler = self._prepare_BL_plot([*coeffs.keys()], equal_y)
         
         # get final position of the profile. Displace it such that the qc is at (0, 0) at t=0.
         pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
@@ -146,17 +149,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plt_settings["qc_trail"])
         
         # grab all angles of attack from the data
-        aoas, df_aoas = self._get_aoas(self.df_f_aero)
-        # prepare dictionary of dataframes to plot
-        dfs = {ax_label: self.df_f_aero for ax_label in axs.keys() if ax_label not in ["profile", "aoa"]}
-        dfs["aoa"] = df_aoas
+        aoas = self._get_aoas(self.df_f_aero)
         
-        plot = {
-            "aoa": aoas,
-            "C_n": ["C_nc", "C_ni", "C_npot", "C_nsEq", "C_nf", "C_nv_instant", "C_nv"],
-            "C_t": ["C_tpot", "C_tf"],
-            "C_m": ["C_mqs", "C_mnc"]
-        }        
+        plot = {"aoa": aoas}|coeffs
+        dfs = {ax: self.df_f_aero for ax in plot.keys()}
         def param_name(param: str):
             return param
         axs = self._plot_to_mosaic(axs, plot, dfs, param_name)
@@ -167,16 +163,20 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             self,
             axes: dict[str, matplotlib.axes.Axes],
             plot: dict[str, list[str]],
-            data: dict[str, pd.DataFrame],
-            map_column_to_settings: Callable) -> dict[str, matplotlib.axes.Axes]:
+            data: dict[str, pd.DataFrame|dict],
+            map_column_to_settings: Callable,
+            apply: dict[str, Callable]={"aoa": np.rad2deg}) -> dict[str, matplotlib.axes.Axes]:
+        apply_to_axs = apply.keys()
         for ax, cols in plot.items():
-            time = self.time if ax != "work" else self.time[:-1]
             for col in cols:
                 try: 
                     self.plt_settings[map_column_to_settings(col)]
                 except KeyError:
                     raise NotImplementedError(f"Default plot styles for '{col}' are missing.")
-                axes[ax].plot(time, data[ax][col].to_numpy(), **self.plt_settings[map_column_to_settings(col)])
+                if ax in apply_to_axs:
+                    axes[ax].plot(self.time, apply[ax](data[ax][col]), **self.plt_settings[map_column_to_settings(col)])
+                else:
+                    axes[ax].plot(self.time, data[ax][col], **self.plt_settings[map_column_to_settings(col)])
         return axes
 
 
@@ -205,7 +205,7 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
         self.df_f_aero = pd.read_csv(join(dir_data, self._dfl_filenames["f_aero"]))
         self.df_f_structural = pd.read_csv(join(dir_data, self._dfl_filenames["f_structural"]))
         self.df_general = pd.read_csv(join(dir_data, self._dfl_filenames["general"]))
-        self.df_work = pd.read_csv(join(dir_data, self._dfl_filenames["work"]))
+        self.df_power = pd.read_csv(join(dir_data, self._dfl_filenames["power"]))
         self.df_e_kin = pd.read_csv(join(dir_data, self._dfl_filenames["e_kin"]))
         self.df_e_pot = pd.read_csv(join(dir_data, self._dfl_filenames["e_pot"]))
         self.time = self.df_general["time"].to_numpy()
@@ -222,7 +222,8 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
             arrow_scale_forces: float=1,
             arrow_scale_moment: float=1,
             plot_qc_trailing_every: int=2,
-            keep_qc_trailing: int=40):
+            keep_qc_trailing: int=40,
+            time_steps: int=0):
         qc_pos = self.df_general[["pos_x", "pos_y"]].to_numpy()
         profile = np.zeros((self.time.size, *self.profile.shape))
         norm_moments = self.df_f_aero["aero_mom"]/np.abs(self.df_f_aero["aero_mom"]).max()
@@ -246,10 +247,10 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
         force_arrows = self._rot.project_separate(aero_force, angle_aero_to_xyz)*arrow_scale_forces
         
         dfs = {"general": self.df_general, "f_aero": self.df_f_aero, "f_structural": self.df_f_structural}
-        fig, plt_lines, plt_arrows, df_aoas = self._prepare_force_animation(dfs)
+        fig, plt_lines, plt_arrows, aoas = self._prepare_force_animation(dfs)
 
         data_lines = {linename: self.df_f_aero[linename] for linename in ["aero_edge", "aero_flap", "aero_mom"]} |\
-                     {linename: df_aoas[linename] for linename in df_aoas.columns} |\
+                     {linename: self.df_f_aero[linename] for linename in aoas} |\
                      {linename: self.df_f_structural[linename] for linename in ["damp_edge", "damp_flap", "damp_tors"]+
                                                                             ["stiff_edge", "stiff_flap", "stiff_tors"]}
         data_lines = data_lines | {"qc_trail": qc_pos,
@@ -274,7 +275,8 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
             rtrn = [*plt_lines.values()]+[*plt_arrows.values()]
             return tuple(rtrn)
         
-        ani = animation.FuncAnimation(fig=fig, func=update, frames=self.time.size-1, interval=15, blit=True)
+        frames = self.time.size-1 if time_steps==0 else time_steps
+        ani = animation.FuncAnimation(fig=fig, func=update, frames=frames, interval=15, blit=True)
         writer = animation.FFMpegWriter(fps=30)
         ani.save(join(self.dir_plots, "animation_force.mp4"), writer=writer)
 
@@ -309,12 +311,12 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
         
         df_total = pd.concat([self.df_e_kin.sum(axis=1), self.df_e_pot.sum(axis=1)], keys=["e_kin", "e_pot"], axis=1)
         df_total["e_total"] = df_total.sum(axis=1)
-        dfs = {"general": self.df_general, "e_tot": df_total, "work": self.df_work, "e_kin": self.df_e_kin, 
+        dfs = {"general": self.df_general, "e_tot": df_total, "power": self.df_power, "e_kin": self.df_e_kin, 
                "e_pot": self.df_e_pot}
         fig, plt_lines, plt_arrows = self._prepare_energy_animation(dfs)
 
         data_lines = {linename: df_total[linename] for linename in ["e_total", "e_kin", "e_pot"]} |\
-                     {linename: self.df_work[linename] for linename in ["aero_drag", "aero_lift", "aero_mom", 
+                     {linename: self.df_power[linename] for linename in ["aero_drag", "aero_lift", "aero_mom", 
                                                                         "damp_edge", "damp_flap", "damp_tors"]} |\
                      {linename: self.df_e_kin[linename[linename.rfind("_")+1:]] for linename in ["kin_edge",
                                                                                                  "kin_flap", "kin_tors"]} |\
@@ -476,7 +478,7 @@ class HHTalphaPlotter(DefaultStructure):
         time = df_general["time"]
         df_f_aero = pd.read_csv(join(case_dir, self._dfl_filenames["f_aero"]))
         df_f_struct = pd.read_csv(join(case_dir, self._dfl_filenames["f_structural"]))
-        df_work = pd.read_csv(join(case_dir, self._dfl_filenames["work"]))
+        df_power = pd.read_csv(join(case_dir, self._dfl_filenames["power"]))
         df_e_kin = pd.read_csv(join(case_dir, self._dfl_filenames["e_kin"]))
         df_e_pot = pd.read_csv(join(case_dir, self._dfl_filenames["e_pot"]))
 
@@ -499,14 +501,14 @@ class HHTalphaPlotter(DefaultStructure):
         handler_err.update(legend=legend, y_labels=y_labels_err, x_labels="time (s)")
         handler_err.save(join(dir_plots, "error_pos.pdf"))
 
-        fig, axs = plt.subplot_mosaic([["total", "work"],
+        fig, axs = plt.subplot_mosaic([["total", "power"],
                                        ["e_kin", "e_pot"]], tight_layout=True)
-        y_labels = {"total": "Energy (Nm)", "work": "Work (Nm)",
+        y_labels = {"total": "Energy (Nm)", "power": "Work (Nm)",
                    "e_kin": f"Kinetic energy (Nm)", "e_pot": "Potential energy (Nm)"}
         y_labels_err = {ax: f"{error_type} error {label[:label.find("(")-1]}" for ax, label in y_labels.items()}
         df_total = pd.concat([df_e_kin.sum(axis=1), df_e_pot.sum(axis=1)], keys=["e_kin", "e_pot"], axis=1)
         df_total["e_total"] = df_total.sum(axis=1)
-        dfs = {"total": df_total, "work": df_work, "e_kin": df_e_kin, "pot": df_e_pot}
+        dfs = {"total": df_total, "power": df_power, "e_kin": df_e_kin, "pot": df_e_pot}
         directions_wanted += ["kin", "pot", "total"]
         legend = self._plot(axs, axs_err, dfs, solution, time, directions_wanted, error_type)
 
@@ -799,3 +801,34 @@ class BLValidationPlotter(DefaultPlot, Rotations):
                 coeffs["C_t"] = C_slope*(alpha_t-alpha_0)*np.tan(alpha_t)*np.sqrt(np.abs(f_t))*np.sign(f_t)
         return coeffs
 
+    
+def combined_forced(root_dir: str):
+    root_dir = root_dir.replace("\\", "/")
+    ampls_and_aoas = root_dir.split("/")[-1].split("_")
+    amplitudes = literal_eval(ampls_and_aoas[0])
+    aoas = literal_eval(ampls_and_aoas[1])
+    period_work = np.zeros((len(amplitudes), len(aoas)))
+    convergence = np.zeros((len(amplitudes), len(aoas)))
+    ampl_to_ind = {ampl: i for i, ampl in enumerate(amplitudes)}
+    aoa_to_ind = {aoa: i for i, aoa in enumerate(aoas)}
+    for case_dir_name in listdir(root_dir):
+        if case_dir_name == "plots":
+            continue
+        ampl_and_aoa = case_dir_name.split("_")
+        ampl = float(ampl_and_aoa[0])
+        aoa = float(ampl_and_aoa[1])
+        df = pd.read_csv(join(root_dir, case_dir_name, "period_work.dat"))
+        work = df["period_work"].to_numpy()
+        period_work[ampl_to_ind[ampl], aoa_to_ind[aoa]] = work[-1]
+        convergence[ampl_to_ind[ampl], aoa_to_ind[aoa]] = (work[-1]-work[-2])/work[-1]
+        
+    dir_plots = helper.create_dir(join(root_dir, "plots"))[0]
+    fig, ax = plt.subplots()
+    ax = heatmap(period_work, xticklabels=np.round(aoas, 3), ax=ax, yticklabels=np.round(amplitudes, 3),
+                 cbar_kws={"label": r"period work"}, cmap="RdYlGn", annot=False, fmt=".3g")
+    fig.savefig(join(dir_plots, "period_work.pdf"))
+
+    fig, ax = plt.subplots()
+    ax = heatmap(convergence, xticklabels=np.round(aoas, 3), ax=ax, yticklabels=np.round(amplitudes, 3),
+                 cbar_kws={"label": r"convergence"}, cmap="RdYlGn", annot=False, fmt=".3g")
+    fig.savefig(join(dir_plots, "convergence.pdf"))

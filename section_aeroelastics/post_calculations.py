@@ -10,19 +10,19 @@ from defaults import DefaultsSimulation
 helper = Helper()
 
 
-class WorkAndEnergy(Rotations):
+class PowerAndEnergy(Rotations):
     def __init__(
             self,
-            time: np.ndarray, 
             inertia: np.ndarray,
             stiffness: np.ndarray,
             position_xyz: np.ndarray,
+            velocity_xyz: np.ndarray,
             position_efz: np.ndarray,
             velocity_efz: np.ndarray,
             f_aero_dlm: np.ndarray,
             alpha_lift: np.ndarray,
             f_damp_efm: np.ndarray) -> None:
-        """Class to calculate the energy of a system and the work done by various forces.
+        """Class to calculate the energy of a system and the power done by various forces.
 
         :param time: (n, ) array with the time
         :type inertia: np.ndarray
@@ -49,40 +49,37 @@ class WorkAndEnergy(Rotations):
         self.inertia = inertia
         self.stiffness = stiffness
         self.position_xyz = position_xyz
+        self.velocity_xyz = velocity_xyz
         self.position_efz = position_efz
         self.velocity_efz = velocity_efz
         self.f_aero_dlm = f_aero_dlm
         self.alpha_lift = alpha_lift
         self.f_damp_efm = f_damp_efm
 
-        self._pos_change_xyz = position_xyz[1:, :]-position_xyz[:-1, :]
-        # for '_pos_change_efz' it is cumberson to use 'position_efz' because each position is in a differently 
-        # positioned coordinate system. Hence the velocities are used.
-        self._pos_change_efz = velocity_efz[:-1]*(time[1:]-time[:-1])[:, np.newaxis]
 
-    def work(self) -> dict[str: dict[str: np.ndarray]]:
-        """Calculates the work done by the aerodynamic and structural damping forces.
+    def power(self) -> dict[str: dict[str: np.ndarray]]:
+        """Calculates the power done by the aerodynamic and structural damping forces.
 
-        :return: Dictionary containing the work done by the aerodynamic forces (key: "aero") and the structural
+        :return: Dictionary containing the power done by the aerodynamic forces (key: "aero") and the structural
         damping forces (key: "damp").
         :rtype: dict[str: dict[str: np.ndarray]]
         """
         sep_f_aero = self.project_separate(self.f_aero_dlm, -self.alpha_lift-self.position_xyz[:, 2])
-        work_drag = (sep_f_aero[:-1, :2]*self._pos_change_xyz[:, :2]).sum(axis=1)
-        work_lift = (sep_f_aero[:-1, 2:4]*self._pos_change_xyz[:, :2]).sum(axis=1)
-        work_moment = (sep_f_aero[:-1, 4]*self._pos_change_xyz[:, 2])
+        power_drag = (sep_f_aero[:, :2]*self.velocity_xyz[:, :2]).sum(axis=1)
+        power_lift = (sep_f_aero[:, 2:4]*self.velocity_xyz[:, :2]).sum(axis=1)
+        power_moment = (sep_f_aero[:, 4]*self.velocity_xyz[:, 2])
         
-        work_damp = self.f_damp_efm[:-1, :]*self._pos_change_efz
+        power_damp = self.f_damp_efm[:, :]*self.velocity_efz
         return {
             "aero": {
-                "drag": work_drag,
-                "lift": work_lift,
-                "mom": work_moment
+                "drag": power_drag,
+                "lift": power_lift,
+                "mom": power_moment
             },
             "damp": {
-                "edge": work_damp[:, 0],
-                "flap": work_damp[:, 1],
-                "tors": work_damp[:, 2]
+                "edge": power_damp[:, 0],
+                "flap": power_damp[:, 1],
+                "tors": power_damp[:, 2]
             }}
     
     def kinetic_energy(self) -> dict[str: np.ndarray]:
@@ -178,16 +175,18 @@ class PostCaluculations(Rotations, DefaultsSimulation):
             df.to_csv(join(self.dir_in, self._dfl_filenames[df_name]), index=None)
 
     def _init_calc(func) -> callable:
-        """Decorator initialising a WorkAndEnergy instance if it is not already initialised.
+        """Decorator initialising a PowerAndEnergy instance if it is not already initialised.
 
-        :param func: A function needing self._calc, type(self._calc) = WorkAndEnergy to be initialised
+        :param func: A function needing self._calc, type(self._calc) = PowerAndEnergy to be initialised
         :type func: callable
         """
         def wrapper(self):
+            #todo the way self._calc is handled is silly. It's meant to prevent PostCalculations from inheriting
+            #todo all PowerAndEnergy methods; instead self._calc is a PowerAndEnergy instance
             if self._calc is not None:  # if self._calc is already initialised
                 func(self)
                 return
-            # prepare inputs for constructor of WorkAndEnergy
+            # prepare inputs for constructor of PowerAndEnergy
             time = self.df_general["time"].to_numpy()
             inertia = np.asarray([self.section_data["mass"], 
                                   self.section_data["mass"],
@@ -196,6 +195,7 @@ class PostCaluculations(Rotations, DefaultsSimulation):
                                     self.section_data["stiffness_flap"], 
                                     self.section_data["stiffness_tors"]])
             position_xyz = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
+            velocity_xyz = self.df_general[["vel_x", "vel_y", "vel_tors"]].to_numpy()
             previously_projected_data = [
                 (self.df_general, ["pos_edge", "pos_flap", "pos_tors", "vel_edge", "vel_flap", "vel_tors"]),
                 (self.df_f_aero, ["aero_drag", "aero_lift", "aero_mom"]),
@@ -214,27 +214,27 @@ class PostCaluculations(Rotations, DefaultsSimulation):
             f_aero_dlm = self.df_f_aero[["aero_drag", "aero_lift", "aero_mom"]].to_numpy()
             alpha_lift = self.df_f_aero[self.name_alpha_lift].to_numpy()
             f_damp_efm = self.df_f_structural[["damp_edge", "damp_flap", "damp_tors"]].to_numpy()
-            self._calc = WorkAndEnergy(time, inertia, stiffness, position_xyz, position_efz, velocity_efz, f_aero_dlm,
-                                       alpha_lift, f_damp_efm)
+            self._calc = PowerAndEnergy(inertia, stiffness, position_xyz, velocity_xyz, position_efz,
+                                        velocity_efz, f_aero_dlm, alpha_lift, f_damp_efm)
             func(self)
         return wrapper
     
     @_init_calc
-    def work(self):
-        """Wrapper for WorkAndEnergy.work(). See details of the implementation there. "project()" needs to be called
-        before work().
+    def power(self):
+        """Wrapper for PowerAndEnergy.power(). See details of the implementation there. "project()" needs to be called
+        before power().
         """
-        work_res = self._calc.work()
+        power_res = self._calc.power()
         df = pd.DataFrame()
-        for category, forces in work_res.items():
+        for category, forces in power_res.items():
             for force, values in forces.items():
                 df[category+"_"+force] = values
-        df.to_csv(join(self.dir_in, self._dfl_filenames["work"]), index=None)
+        df.to_csv(join(self.dir_in, self._dfl_filenames["power"]), index=None)
     
     @_init_calc
     def kinetic_energy(self):
-        """Wrapper for WorkAndEnergy.kinetic_energy(). See details of the implementation there. "project()" needs to be 
-        called before work().
+        """Wrapper for PowerAndEnergy.kinetic_energy(). See details of the implementation there. "project()" needs to be 
+        called before kinetic_energy().
         """
         if self._calc is None:
             self._init_calc()
@@ -246,8 +246,8 @@ class PostCaluculations(Rotations, DefaultsSimulation):
     
     @_init_calc
     def potential_energy(self):
-        """Wrapper for WorkAndEnergy.potential_energy(). See details of the implementation there. "project()" needs to 
-        be called before work().
+        """Wrapper for PowerAndEnergy.potential_energy(). See details of the implementation there. "project()" needs to 
+        be called before potential_energy().
         """
         if self._calc is None:
             self._init_calc()
@@ -256,7 +256,24 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         for category, values in e_pot_res.items():
             df[category] = values
         df.to_csv(join(self.dir_in, self._dfl_filenames["e_pot"]), index=None)
+
+    def work_per_cycle(self):
+        t = self.df_general["time"].to_numpy()
+        dt = t[1:]-t[:-1]
+        pos_x = self.df_general["pos_x"].to_numpy()
+        peaks = find_peaks(pos_x)[0]
         
+        df_power = pd.read_csv(join(self.dir_in, self._dfl_filenames["power"]))
+        aero_power = df_power["aero_drag"]+df_power["aero_lift"]+df_power["aero_mom"]
+        aero_power = aero_power.to_numpy()
+        period_power = [(aero_power[i_begin:i_end]*dt[i_begin:i_end]).sum() for 
+                        i_begin, i_end in zip(peaks[:-1], peaks[1:])]
+        df = pd.DataFrame(
+            {"cycle_no": np.arange(len(peaks)-1), 
+             "T": t[peaks[1:]]-t[peaks[:-1]], 
+             "period_work": period_power})
+        df.to_csv(join(self.dir_in, "period_work.dat"), index=None)
+
 class PostHHT_alpha:
     @staticmethod
     def amplitude_and_period(root_dir: str, first_peak_at=0):
