@@ -359,21 +359,21 @@ class PlotPreparation:
         :return: A pyplot figure, axes and an instance of MosaicHandler for the same figure and axes
         :rtype: tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]
         """
-        fig, axs = plt.subplot_mosaic([["profile", "total", "work"],
+        fig, axs = plt.subplot_mosaic([["profile", "total", "power"],
                                        ["profile", "kinetic", "potential"]], figsize=(10, 5), tight_layout=True,
                                       dpi=300)
         handler = MosaicHandler(fig, axs)
         x_labels = {
             "profile": "normal (m)",
             "total": "t (s)",
-            "work": "t (s)",
+            "power": "t (s)",
             "kinetic": "t (s)",
             "potential": "t (s)",
         }
         y_labels = {
             "profile": "tangential (m)",
             "total": "energy (Nm)",
-            "work": "work (Nm)",
+            "power": "power (Nm)",
             "kinetic": "kinetic energy (Nm)",
             "potential": "potential energy (Nm)",
         }
@@ -384,7 +384,8 @@ class PlotPreparation:
     
     @staticmethod
     def _prepare_BL_plot(
-            equal_y: tuple[str]=None
+            coeffs: list[str],
+            equal_y: tuple[str]=None,
             ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]:
         """Prepares the pyplot figure and axes and a MosaicHandler instance for a energy plot.
 
@@ -393,23 +394,23 @@ class PlotPreparation:
         :return: A pyplot figure, axes and an instance of MosaicHandler for the same figure and axes
         :rtype: tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]
         """
-        fig, axs = plt.subplot_mosaic([["profile", "aoa", "C_n"],
-                                       ["profile", "C_t", "C_m"]], figsize=(10, 5), tight_layout=True,
+        fig, axs = plt.subplot_mosaic([["profile", "aoa", coeffs[0]],
+                                       ["profile", coeffs[1], "C_m"]], figsize=(10, 5), tight_layout=True,
                                       dpi=300)
         handler = MosaicHandler(fig, axs)
         x_labels = {
             "profile": "normal (m)",
             "aoa": "t (s)",
-            "C_n": "t (s)",
-            "C_t": "t (s)",
+            coeffs[0]: "t (s)",
+            coeffs[1]: "t (s)",
             "C_m": "t (s)",
         }
         y_labels = {
             "profile": "tangential (m)",
             "aoa": "angle of attack (°)",
-            "C_n": r"contribution to $C_n$ (-)",
-            "C_t": r"contribution to $C_t$ (-)",
-            "C_m": r"contribution to $C_m$ (-)"
+            coeffs[0]: f"contribution to ${coeffs[0]}$ (-)",
+            coeffs[1]: f"contribution to ${coeffs[1]}$ (-)",
+            "C_m": f"contribution to $C_m$ (-)"
         }
         aspect = {
             "profile": "equal"
@@ -432,9 +433,22 @@ class PlotPreparation:
         aoas = [column for column in df_aero.columns if "alpha" in column and column != "d_alpha_qs_dt"]
         aoas.pop(aoas.index("alpha_steady"))
         aoas = ["alpha_steady"] + aoas  # plot "alpha_steady" first
-        dfs_aoas = df_aero[aoas]
-        dfs_aoas = dfs_aoas.apply(np.rad2deg)
-        return aoas, dfs_aoas
+        return aoas
+    
+    @staticmethod
+    def _get_force_and_moment_coeffs(df_aero: pd.DataFrame):
+        params = df_aero.columns
+        if any(["C_n" in param for param in params]):
+            collect_with =  ["C_n", "C_t"]
+        elif any(["C_l" in param for param in params]):
+            collect_with = ["C_l", "C_d"]
+        else:
+            raise ValueError("No parameters with 'C_l' or 'C_n' found in 'df_aero'.")
+        collect_with.append("C_m")
+        coeffs = {category: None for category in collect_with}
+        for coeff_category in collect_with:
+            coeffs[coeff_category] = [param for param in params if coeff_category in param]
+        return coeffs
     
 
 class AnimationPreparation(PlotPreparation, DefaultPlot):
@@ -444,7 +458,7 @@ class AnimationPreparation(PlotPreparation, DefaultPlot):
     
     def _prepare_force_animation(self, dfs: pd.DataFrame, equal_y: tuple[str]=None):
         fig, axs, handler = self._prepare_force_plot(equal_y)
-        aoas, df_aoas = self._get_aoas(dfs["f_aero"])
+        aoas = self._get_aoas(dfs["f_aero"])
         x_lims_from = {
             "profile": [dfs["general"]["pos_x"]-.4, dfs["general"]["pos_x"]+1],
             "aoa": dfs["general"]["time"],
@@ -454,7 +468,7 @@ class AnimationPreparation(PlotPreparation, DefaultPlot):
         }
         y_lims_from = {
             "profile": [dfs["general"]["pos_y"]-.4, dfs["general"]["pos_y"]+0.3],
-            "aoa": [df_aoas[col] for col in df_aoas.columns],
+            "aoa": [dfs["f_aero"][col] for col in aoas],
             "aero": [dfs["f_aero"]["aero_edge"], dfs["f_aero"]["aero_flap"], self.df_f_aero["aero_mom"]],
             "damp": [dfs["f_structural"]["damp_edge"], dfs["f_structural"]["damp_flap"], 
                      dfs["f_structural"]["damp_tors"]],
@@ -479,22 +493,22 @@ class AnimationPreparation(PlotPreparation, DefaultPlot):
         fig, axs = handler.update(x_lims_from=x_lims_from, y_lims_from=y_lims_from, scale_limits=1.2)
         plt_lines, plt_arrows = self._get_lines_and_arrows(axs, plot, map_cols_to_settings)
         fig, axs = handler.update(legend=True)
-        return fig, plt_lines, plt_arrows, df_aoas
+        return fig, plt_lines, plt_arrows, aoas
     
     def _prepare_energy_animation(self, dfs: pd.DataFrame, equal_y: tuple[str]=None):
         fig, axs, handler = self._prepare_energy_plot(equal_y)
         x_lims_from = {
             "profile": [dfs["general"]["pos_x"]-.4, dfs["general"]["pos_x"]+1],
             "total": dfs["general"]["time"],
-            "work": dfs["general"]["time"],
+            "power": dfs["general"]["time"],
             "kinetic": dfs["general"]["time"],
             "potential": dfs["general"]["time"],
         }
         y_lims_from = {
             "profile": [dfs["general"]["pos_y"]-.4, dfs["general"]["pos_y"]+0.3],
             "total": [dfs["e_tot"]["e_total"], dfs["e_tot"]["e_kin"], dfs["e_tot"]["e_pot"]],
-            "work": [dfs["work"]["aero_drag"], dfs["work"]["aero_lift"], dfs["work"]["aero_mom"],
-                     dfs["work"]["damp_edge"], dfs["work"]["damp_flap"], dfs["work"]["damp_tors"]],
+            "power": [dfs["power"]["aero_drag"], dfs["power"]["aero_lift"], dfs["power"]["aero_mom"],
+                     dfs["power"]["damp_edge"], dfs["power"]["damp_flap"], dfs["power"]["damp_tors"]],
             "kinetic": [dfs["e_kin"]["edge"], dfs["e_kin"]["flap"], dfs["e_kin"]["tors"]],
             "potential": [dfs["e_pot"]["edge"], dfs["e_pot"]["flap"], dfs["e_pot"]["tors"]],
         }
@@ -502,7 +516,7 @@ class AnimationPreparation(PlotPreparation, DefaultPlot):
         plot = {
             "profile": ["qc_trail", "profile", "drag", "lift", "mom"],
             "total": ["e_total", "e_kin", "e_pot"],
-            "work": ["aero_drag", "aero_lift", "aero_mom", "damp_edge", "damp_flap", "damp_tors"],
+            "power": ["aero_drag", "aero_lift", "aero_mom", "damp_edge", "damp_flap", "damp_tors"],
             "kinetic": ["kin_edge", "kin_flap", "kin_tors"],
             "potential": ["pot_edge", "pot_flap", "pot_tors"]
         }
