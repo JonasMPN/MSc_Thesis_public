@@ -94,7 +94,6 @@ def run_BeddoesLeishman(
 
     # airfoil.set_aero_calc(BL_scheme, A1=A1, A2=A2, b1=b1, b2=b2, pitching_around=0.25, alpha_at=0.75)
     airfoil.set_aero_calc(BL_scheme, A1=A1, A2=A2, b1=b1, b2=b2, pitching_around=0.5, alpha_at=0.75)
-    return
     airfoil._init_aero_force(airfoil, pitching_around=0.5, A1=A1, A2=A2)
     coeffs = np.zeros((t.size, 3))
     for i in range(overall_res):
@@ -454,9 +453,9 @@ if __name__ == "__main__":
     do = {
         "separation_point_calculation": False,
         "separation_point_plots": False,
-        "BL": False,
-        "plot_BL_results_meas": False,
-        "plot_BL_results_polar": True,
+        "BL": True,
+        "plot_BL_results_meas": True,
+        "plot_BL_results_polar": False,
         "calc_HHT_alpha_response": False,
         "plot_HHT_alpha_response": False,
         "HHT_alpha_undamped": False,
@@ -472,7 +471,7 @@ if __name__ == "__main__":
     # BL_scheme = "BL_chinese"
     HHT_alpha_case = "test"
     sep_point_test_res = 202
-    period_res = 3000
+    period_res = 30
 
     if do["separation_point_calculation"]:
         sep_point_calc(dir_airfoil, BL_scheme, resolution=sep_point_test_res)
@@ -493,7 +492,7 @@ if __name__ == "__main__":
 
     if do["plot_BL_results_meas"]:
         plotter = BLValidationPlotter()
-        plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), join(dir_airfoil, "polars.dat"))
+        # plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), join(dir_airfoil, "polars.dat"))
         dir_validations = join(dir_airfoil, "validation", BL_scheme, "measurement")
         dir_unsteady = join(dir_airfoil, "unsteady")
         df_cases = pd.read_csv(join(dir_unsteady, "cases.dat"))
