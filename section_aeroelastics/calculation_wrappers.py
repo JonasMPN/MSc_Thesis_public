@@ -1,9 +1,9 @@
-from calculation_utils import get_inflow
+from calculation_utils import get_inflow, compress_oscillation, reconstruct_from_file, zero_oscillations
 from calculations import ThreeDOFsAirfoil
 from post_calculations import PostCaluculations
 from helper_functions import Helper
 import numpy as np
-from os.path import join
+from os.path import join, isfile
 from os import listdir
 import json
 from itertools import product
@@ -11,6 +11,7 @@ from multiprocessing import Pool
 import pandas as pd
 helper = Helper()
 
+import matplotlib.pyplot as plt
 
 def prepare_multiprocessing_input(
         n_processes: int,
@@ -41,8 +42,14 @@ def run_forced(
         dir_airfoil: str,
         root: str,
         aero_scheme: str,
-        t: np.ndarray,
-        frequency: float,
+        coordinate_system: str,
+        time: np.ndarray,
+        base_pos: dict[str, np.ndarray],
+        base_vel: dict[str, np.ndarray],
+        # base_accel: dict[str, np.ndarray],
+        mean_pos: dict[str, float],
+        mean_vel: dict[str, float],
+        # mean_accel: dict[str, float],
         structure_data: dict[str, float],
         helper: Helper,
         ):
@@ -51,13 +58,19 @@ def run_forced(
         case_dir = helper.create_dir(join(root, str(i)))[0]
         with open(join(case_dir, "section_data.json"), "w") as f:
             json.dump(structure_data, f, indent=4)
-        omega = 2*np.pi*frequency 
-        pos = {"x": ampl*np.sin(omega*t)}
-        vel = {"x": ampl*omega*np.cos(omega*t)}
-        accel = {"x": -ampl*omega**2*np.sin(omega*t)}
-        inflow = get_inflow(t, [(0, 3, 1, aoa)], init_velocity=1)
 
-        NACA_643_618 = ThreeDOFsAirfoil(dir_airfoil, t, verbose=False)
+        pos = {}
+        vel = {}
+        # accel = {}
+        for axes, position in base_pos.items():
+            # it is assumed that for a given axes, position, velocity, AND acceleration are given.
+            pos[axes] = ampl*position+mean_pos[axes]
+            vel[axes] = ampl*base_vel[axes]+mean_vel[axes]
+            # accel[axes] = ampl*base_accel[axes]+mean_accel[axes]
+            
+        inflow = get_inflow(time, [(0, 3, 1, aoa)], init_velocity=1)
+
+        NACA_643_618 = ThreeDOFsAirfoil(dir_airfoil, time, verbose=False)
         # set the calculation scheme for the aerodynamic forces
         if aero_scheme == "qs":
             NACA_643_618.set_aero_calc()
@@ -70,21 +83,28 @@ def run_forced(
         # set the calculation scheme for the structural damping and stiffness forces
         NACA_643_618.set_struct_calc("linear", **structure_data)
         # set the time integration scheme
-        NACA_643_618.set_time_integration("HHT-alpha-adapted", alpha=0.1, dt=t[1], **structure_data)
-        NACA_643_618.simulate_along_path(inflow, pos, vel, accel)  # perform simulation
+        NACA_643_618.set_time_integration("HHT-alpha-adapted", alpha=0.1, dt=time[1], **structure_data)
+        # NACA_643_618.simulate_along_path(inflow, coordinate_system, pos, vel, accel)  # perform simulation
+        NACA_643_618.simulate_along_path(inflow, coordinate_system, pos, vel)  # perform simulation
         NACA_643_618.save(case_dir)  # save simulation results
 
 
-def run_forced_parallel(
+def _run_forced_parallel(
         dir_airfoil: str,
         root: str,
-        n_processes: int,
         aero_scheme: str,
-        t: np.ndarray,
         structure_data: dict[str, float],
-        frequency: float,
-        amplitude: list[float]|float,
+        n_processes: int,
+        coordinate_system: str,
+        amplitude: dict[int, list[float]|float],
         angle_of_attack: list[float]|float,
+        time: np.ndarray,
+        base_pos: dict[str, np.ndarray],
+        base_vel: dict[str, np.ndarray],
+        # base_accel: dict[str, np.ndarray],
+        mean_pos: dict[str, float],
+        mean_vel: dict[str, float],
+        # mean_accel: dict[str, float],
         ):
     root_dir = helper.create_dir(root)[0]
     amplitude = amplitude if isinstance(amplitude, list) else [amplitude]
@@ -98,10 +118,101 @@ def run_forced_parallel(
     dict_combinations = {"amplitude": amplitudes, "alpha": alphas}
     pd.DataFrame(dict_combinations).to_csv(join(root_dir, "combinations.dat"), index=None)
 
-    always_use = [dir_airfoil, root, aero_scheme, t, frequency, structure_data, helper]
+    always_use = [dir_airfoil, root, aero_scheme, coordinate_system,
+                  time, base_pos, base_vel, mean_pos, mean_vel, 
+                #   time, base_pos, base_vel, base_accel, mean_pos, mean_vel, mean_accel, 
+                  structure_data, helper]
     input_args = prepare_multiprocessing_input(n_processes, always_use, amplitudes, alphas, add_call_number=True)
     with Pool(processes=n_processes) as pool:
         pool.starmap(run_forced, input_args)
+
+
+def run_forced_parallel_from_free_case(
+        dir_airfoil: str,
+        ffile_free_motion: str,
+        motion_cols: list[str],
+        coordinate_system: str,
+        root: str,
+        n_processes: int,
+        aero_scheme: str,
+        periods: int,
+        period_resolution: int,
+        structure_data: dict[str, float],
+        amplitude: dict[int, list[float]|float],
+        angle_of_attack: list[float]|float):
+    ffile_free_motion = ffile_free_motion.replace("\\", "/")
+    dir_base_motion = ffile_free_motion[:ffile_free_motion.rfind("/")]
+    motion_file = ffile_free_motion.split("/")[-1]
+    motion_filename = motion_file[:motion_file.rfind(".")]
+    ffile_compressed_motion = join(dir_base_motion, f"{motion_filename}_compressed.json")
+
+    # if not isfile(ffile_compressed_motion):
+    if True:
+        compress_oscillation(ffile_free_motion, ffile_compressed_motion, motion_cols, period_res=period_resolution)
+    else:
+        with open(ffile_compressed_motion, "r") as f:
+            compressed_data = json.load(f)
+            old_period_res = compressed_data.values()[0]["N"]
+            if old_period_res != period_resolution:
+                compress_oscillation(ffile_free_motion, ffile_compressed_motion, motion_cols,
+                                     period_res=period_resolution)
+    base_motion, mean = reconstruct_from_file(ffile_compressed_motion, separate_mean=True)
+    base_time = base_motion[motion_cols[0]]["time"]
+    osci_time, base_osci = zero_oscillations(base_time, periods, **base_motion)
+
+    axes_name_to_axes_idx = {
+        "edge": 0,
+        "x": 0,
+        "flap": 1,
+        "y": 1,
+        "tors": 2
+    }
+    
+    base_pos = {}
+    base_vel = {}
+    base_accel = {}
+    mean_pos = {}
+    mean_vel = {}
+    mean_accel = {}
+    # implemented_motion = ["vel", "pos", "accel"]
+    implemented_motion = ["vel", "pos"]
+    implemented_axes = ["edge", "flap", "x", "y", "tors"]
+    for param, values in base_osci.items():
+        motion, axes = param.split("_")
+        if motion not in implemented_motion:
+            raise ValueError("Keys of 'base_osci' must be named 'motion_axes', where 'motion' must be one of "
+                             f"'{implemented_motion}' but was {motion}.")
+        if axes not in implemented_axes:
+            raise ValueError("Keys of 'base_osci' must be named 'motion_axes', where 'motion' must be one of "
+                             f"'{implemented_axes}' but was {axes}.")
+        
+        if motion == "pos":
+            mean_pos[axes_name_to_axes_idx[axes]] = mean[param]
+            base_pos[axes_name_to_axes_idx[axes]] = values
+        elif motion == "vel":
+            mean_vel[axes_name_to_axes_idx[axes]] = mean[param]
+            base_vel[axes_name_to_axes_idx[axes]] = values
+        # elif motion == "accel":
+        #     mean_accel[axes_name_to_axes_idx[axes]] = mean[param]
+        #     base_accel[axes_name_to_axes_idx[axes]] = values
+
+    _run_forced_parallel(
+        dir_airfoil,
+        root,
+        aero_scheme,
+        structure_data,
+        n_processes,
+        coordinate_system,
+        amplitude,
+        angle_of_attack,
+        osci_time,
+        base_pos,
+        base_vel,
+        # base_accel,
+        mean_pos,
+        mean_vel,
+        # mean_accel,
+    )
     
 
 def post_calc(
