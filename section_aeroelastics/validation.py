@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from os import listdir
 from os.path import join, isfile
-from calculations import ThreeDOFsAirfoil, AeroForce, TimeIntegration, StructForce
+from calculations import ThreeDOFsAirfoil, AeroForce, TimeIntegration, StructForce, Rotations
 from post_calculations import PostCaluculations, PostHHT_alpha
 from utils_plot import MosaicHandler
 import numpy as np
@@ -12,6 +12,7 @@ from defaults import DefaultPlot, DefaultStructure
 from helper_functions import Helper
 import json
 import matplotlib.pyplot as plt
+from plotting import Plotter
 helper = Helper()
 
 
@@ -91,10 +92,11 @@ def run_BeddoesLeishman(
     airfoil.inflow_angle = np.zeros_like(t)
     airfoil.dt = np.r_[t[1:]-t[:-1], t[1]]
     airfoil.density = 1
-
-    # airfoil.set_aero_calc(BL_scheme, A1=A1, A2=A2, b1=b1, b2=b2, pitching_around=0.25, alpha_at=0.75)
-    airfoil.set_aero_calc(BL_scheme, A1=A1, A2=A2, b1=b1, b2=b2, pitching_around=0.5, alpha_at=0.75)
-    airfoil._init_aero_force(airfoil, pitching_around=0.5, A1=A1, A2=A2)
+    
+    pitch_around = 0.5
+    # airfoil.set_aero_calc(BL_scheme, A1=A1, A2=A2, b1=b1, b2=b2, pitching_around=pitch_around, alpha_at=0.75)
+    airfoil.set_aero_calc(BL_scheme, A1=A1, A2=A2, b1=b1, b2=b2, pitching_around=pitch_around, alpha_at=0.75)
+    airfoil._init_aero_force(airfoil, pitching_around=pitch_around, A1=A1, A2=A2)
     coeffs = np.zeros((t.size, 3))
     for i in range(overall_res):
         coeffs[i, :] = airfoil._aero_force(airfoil, i, A1=A1, A2=A2, b1=b1, b2=b2)
@@ -111,7 +113,7 @@ def run_BeddoesLeishman(
     df.to_csv(f_f_aero, index=None)
     
 
-class HHTalphaValidator(DefaultPlot, DefaultStructure):
+class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
     def __init__(self, dir_polar: str, dir_root_results: str) -> None:
         DefaultPlot.__init__(self)
         self.dir_polar = dir_polar
@@ -149,6 +151,7 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure):
         self._struc_params = struc_params|{"chord": chord, 
                                            "mass": mass if mass is not None else 1, 
                                            "mom_inertia": mom_inertia if mom_inertia is not None else 1}
+        self._inertia = np.asarray([mass, mass, mom_inertia])
         self._struct_force = StructForce()
 
     def simulate_case(
@@ -204,7 +207,7 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure):
                 t = np.linspace(0, n_oscillations*2*np.pi/omega_n, n_dt*n_oscillations+1)
                 self.set_structure(1, 1, stiffness_edge=omega_n**2)
                 results = self._simulate(time=t, f_external=np.zeros((t.size, 3)), init_pos=[x_0, 0, 0], 
-                                         init_vel=0, init_accel=[-x_0*omega_n**2, 0 ,0], scheme=scheme)
+                                         init_vel=0, scheme=scheme)
 
                 dir_save = helper.create_dir(join(self.dir_root_results, scheme, f"{counter}"))[0]
                 results._save(dir_save)
@@ -371,45 +374,36 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure):
 
     def simulate_rotation(
             self,
-            natural_frequencies: list[np.ndarray],
-            damping_coefficients: list[np.ndarray],
-            n_steps_per_oscillation: list|np.ndarray,
-            n_oscillations: float,
-            inertia: np.ndarray=np.ones(3),
+            case_info: str,
+            inertia: np.ndarray,
+            stiffness: np.ndarray,
+            damping: np.ndarray,
+            t: np.ndarray,
+            force: np.ndarray,
+            x_0: np.ndarray=np.zeros(3),
+            v_0: np.ndarray=np.zeros(3),
+            case_id: int=None,
             scheme: str="HHT-alpha"
             ):
-        counter = 0
-        x_0 = [1, 0, -np.pi/2]
-        v_0 = [0, 0, 0]
-        a_0 = [0, 0, 0]
-        for n_dt in n_steps_per_oscillation:
-            for omega_n in natural_frequencies:
-                for damping_coeff in damping_coefficients:
-                    K = omega_n**2*inertia
-                    C = damping_coeff*2*np.sqrt(inertia*K)
-                    omega_d = omega_n*np.sqrt(1-damping_coeff**2)
-                    t = np.linspace(0, n_oscillations*2*np.pi/omega_d.min(), n_dt*n_oscillations+1)
-                    self.set_structure(1, mass=inertia[0], mom_inertia=inertia[2], 
-                                       stiffness_edge=K[0], stiffness_flap=K[1], stiffness_tors=K[2],
-                                       damping_edge=C[0], damping_flap=C[1], damping_tors=C[2])
+            self.set_structure(1, mass=inertia[0], mom_inertia=inertia[2], 
+                               stiffness_edge=stiffness[0], stiffness_flap=stiffness[1], stiffness_tors=stiffness[2],
+                               damping_edge=damping[0], damping_flap=damping[1], damping_tors=damping[2])
 
-                    f = np.c_[np.ones_like(t), np.zeros((t.size, 2))]
-                    results = self._simulate(time=t, f_external=f, init_pos=x_0, init_vel=v_0, init_accel=a_0,
-                                             scheme=scheme)
+            results = self._simulate(time=t, f_external=force, init_pos=x_0, init_vel=v_0, scheme=scheme)
+            ids = [int(index) for index in listdir(join(self.dir_root_results, scheme))]
+            case_id = max(ids)+1 if case_id is None else case_id
+            dir_save = helper.create_dir(join(self.dir_root_results, scheme, str(case_id)))[0]
+            with open(join(dir_save, case_info+".txt"), "w") as f:
+                f.write(case_info)
+            results._save(dir_save)
 
-                    dir_save = helper.create_dir(join(self.dir_root_results, scheme, f"{counter}"))[0]
-                    results._save(dir_save)
-                    # with open(join(dir_save, "info.json"), "w") as f:
-                    #     json.dump({"omega_n": omega_n, "n_dt": n_dt, "damping_coeff": damping_coeff, 
-                    #                "step_amplitude": 1}, f)
+            osci = Oscillations(inertia, stiffness=stiffness, damping=damping)
+            t_sim, pos, vel, accel = osci.rotation(t[-1], t[1], force, x_0, v_0)
 
-                    osci = Oscillations(1, omega_n, damping_coeff)
-                    force = [1, 0, 0]
-                    t_sim, pos, _, _ = osci.rotation(t[-1], 0.01, force, x_0, v_0, a_0)
-                    df_analytical = pd.DataFrame({"time": t_sim, "solution_x": pos[:, 0], "solution_y": pos[:, 1],
-                                                   "solution_tors": pos[:, 2]})
-                    df_analytical.to_csv(join(dir_save, "analytical_sol.dat"), index=None)
-                    counter += 1
+            df_analytical = pd.DataFrame({"time": t_sim, 
+                                          "pos_x": pos[:, 0], "pos_y": pos[:, 1], "pos_tors": pos[:, 2],
+                                          "vel_x": vel[:, 0], "vel_y": vel[:, 1], "vel_tors": vel[:, 2]})
+            df_analytical.to_csv(join(dir_save, "analytical_sol.dat"), index=None)
 
     def _simulate(
         self,
@@ -417,23 +411,26 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure):
         f_external: np.ndarray,
         init_pos: np.ndarray,
         init_vel: np.ndarray,
-        init_accel: np.ndarray,
-        scheme: str="HHT-alpha",
+        scheme: str="HHT-alpha-adapted",
         alpha_HHT: float=0.1,
         ) -> ThreeDOFsAirfoil:
         airfoil = ThreeDOFsAirfoil(dir_polar=self.dir_polar, time=time)
         airfoil.pos[0, :] = init_pos
         airfoil.vel[0, :] = init_vel
-        airfoil.accel[0, :] = init_accel
         
         airfoil.aero = f_external
         time_integrator = TimeIntegration()
         time_integrator._init_HHT_alpha(airfoil, alpha_HHT, time[1], **self._struc_params)
-        self._struct_force._init_linear(airfoil, **self._struc_params)
         integration_func = time_integrator.get_scheme_method(scheme)
+
+        self._struct_force._init_linear(airfoil, **self._struc_params)
+        rot = self.passive_3D_planar(init_pos[2])
+        init_stiff = rot.T@self._struct_force.stiffness@rot
+        airfoil.accel[0] = (f_external[0]-init_stiff@init_pos)/self._inertia
+        
         airfoil.damp = np.zeros((time.size, 3))
         airfoil.stiff = np.zeros((time.size, 3))
-
+        dt = time[1]
         for i in range(time.size-1):
             pos, vel, accel = integration_func(airfoil, i, time[1])
             airfoil.pos[i+1, :] = pos
@@ -442,6 +439,8 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure):
 
             #todo check coordinate sytsem under rotation (also check for force)
             airfoil.damp[i, :], airfoil.stiff[i, :] = self._struct_force._linear(airfoil, i)
+            # if not dt*(i+1)%10:
+            #     print(dt*i)
             
         i = time.size-1
         airfoil.damp[i, :], airfoil.stiff[i, :] = self._struct_force._linear(airfoil, i)
@@ -453,9 +452,9 @@ if __name__ == "__main__":
     do = {
         "separation_point_calculation": False,
         "separation_point_plots": False,
-        "BL": True,
+        "BL": False,
         "plot_BL_results_meas": False,
-        "plot_BL_results_polar": True,
+        "plot_BL_results_polar": False,
         "calc_HHT_alpha_response": False,
         "plot_HHT_alpha_response": False,
         "HHT_alpha_undamped": False,
@@ -463,7 +462,7 @@ if __name__ == "__main__":
         "HHT_alpha_forced": False,
         "HHT_alpha_forced_composite": False,
         "HHT_alpha_step": False,
-        "HHT_alpha_rotation": False
+        "HHT_alpha_rotation": True,
     }
     dir_airfoil = "data/FFA_WA3_221"
     dir_HHT_alpha_validation = "data/HHT_alpha_validation"
@@ -480,10 +479,10 @@ if __name__ == "__main__":
         plot_sep_points(join(dir_airfoil, "sep_point_tests", str(sep_point_test_res)), alpha_limits=(-30, 30))
 
     if do["BL"]:
-        # validation_against = "measurement"
-        # cases_defined_in = "cases.dat"
-        validation_against = "polar"
-        cases_defined_in = "cases_polar.dat"
+        validation_against = "measurement"
+        cases_defined_in = "cases.dat"
+        # validation_against = "polar"
+        # cases_defined_in = "cases_polar.dat"
         df_cases = pd.read_csv(join(dir_airfoil, "unsteady", cases_defined_in))
         for i, row in df_cases.iterrows():
             run_BeddoesLeishman(dir_airfoil, BL_scheme, validation_against, index_unsteady_data=i,
@@ -514,7 +513,7 @@ if __name__ == "__main__":
             plotter.plot_over_polar(file_polar, dir_case, period_res, df_cases.iloc[int(case_name)])
   
     if do["calc_HHT_alpha_response"] or do["plot_HHT_alpha_response"]:
-        T = 10
+        T = 1
         dt = 0.1
         t = dt*np.arange(T/dt+1)
         alpha_HHT = 0.1
@@ -554,7 +553,7 @@ if __name__ == "__main__":
 
     if do["HHT_alpha_undamped"]:
         n_oscillations = 10
-        n_t_per_oscillation = [8]  # should be a multiple of 4 to get the analytical peaks right
+        n_t_per_oscillation = [80]  # should be a multiple of 4 to get the analytical peaks right
         omega_n = [1, 2, 3, 4]
         root_dir = join(dir_HHT_alpha_validation, "undamped")
         validator = HHTalphaValidator(dir_airfoil, root_dir)
@@ -618,11 +617,80 @@ if __name__ == "__main__":
         HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
 
     if do["HHT_alpha_rotation"]:
-        n_oscillations = 10
-        n_t_per_oscillation = [128]  # should be a multiple of 4 to get the analytical peaks right
-        omega_n = [np.asarray([np.sqrt(2), 1, 1])]
-        damping_coeffs = [0.2*np.ones(3)]
         root_dir = join(dir_HHT_alpha_validation, "rotation")
         validator = HHTalphaValidator(dir_airfoil, root_dir)
-        validator.simulate_rotation(omega_n, damping_coeffs, n_t_per_oscillation, n_oscillations, scheme="HHT-alpha")
-        HHTalphaPlotter().rotation(root_dir)
+        scheme = "HHT-alpha"
+        alpha_lift = "alpha_steady"
+        case_info = "[0,0,0]_to_[1,0,0]_to_[1,0,90]_to_[0,1,0]"
+        # case_info = "[0,0,0]_to_[1,0,0]_to_[2,0,0]_to_[-1,0,0]_to[0,0,0]"
+        case_id = 5
+
+        x_0 = [1, 0, 0.5*np.pi]
+        # x_0 = [1, 0, 0.*np.pi]
+        # x_0 = np.zeros(3)
+        inertia = np.ones(3)
+        # stiffness = np.asarray([2, 0.5, 1])
+        stiffness = np.asarray([2, 1., 1])
+        # damping = 1*np.ones_like(inertia)
+        # damping = np.asarray([1, 1, 1.])
+        damping = np.zeros(3)
+        dt = 0.01
+        # T = 100
+        T = 20
+        t = np.linspace(0, T, int(T/dt)+1)
+
+        # f = np.repeat(np.c_[2, 0, 0], repeats=int(20/dt), axis=0)
+        # f = np.r_[f, np.repeat(np.c_[0.5, 0, np.pi/2], repeats=int(20/dt), axis=0)]
+        # t_change = np.linspace(0, np.pi/2, int(20/dt))
+        # f_change = np.c_[0.5*np.cos(t_change), np.sin(t_change), np.pi/2*np.cos(t_change)]
+        # f = np.r_[f, f_change]
+        # f = np.r_[f, np.repeat(np.c_[0, 1, 0], repeats=int(20/dt), axis=0)]
+        # f = np.r_[f, np.zeros((int(20/dt)+1, 3))]  # the +1 is needed if scheme="HHT-alpha"
+
+        # f = np.repeat(np.c_[0.5, 0, 0.5*np.pi], repeats=int(20/dt), axis=0)
+        # # print(f.shape)
+        # # print(int(20/dt)-1)
+        # f = np.r_[f, np.repeat(np.c_[2, 0, 0], repeats=int(20/dt), axis=0)]
+        # f = np.r_[f, np.repeat(np.c_[-1, 0, 0], repeats=int(20/dt), axis=0)]
+        # f = np.r_[f, np.repeat(np.c_[0, 0, 0], repeats=int(20/dt), axis=0)]
+
+        f = np.c_[0.*np.ones_like(t), 0*np.ones_like(t), 0.*np.pi*np.ones_like(t)]
+        # f_ramp = np.r_[np.linspace(0, 1, 500), np.ones(1501)]
+        # f_ramp = np.r_[np.zeros(500), np.ones(1501)]
+        # f = np.c_[f_ramp, 0*np.ones_like(t), 0*np.pi*np.ones_like(t)]
+        
+        validator.simulate_rotation(case_info, inertia, stiffness, damping, t, f, x_0, case_id=case_id, scheme=scheme)
+        HHTalphaPlotter().rotation(root_dir, case_id)
+
+        # do postcalc?  
+        post_calc = True
+        if post_calc:
+            dir_case = join(root_dir, scheme, str(case_id))
+            with open(join(dir_case, "section_data.json"), "w") as f:
+                section_data = {
+                    "chord": 1,
+                    "mass": inertia[0],
+                    "mom_inertia": inertia[2],
+                    "damping_edge": damping[0],
+                    "damping_flap": damping[1],
+                    "damping_tors": damping[2],
+                    "stiffness_edge": stiffness[0],
+                    "stiffness_flap": stiffness[1],
+                    "stiffness_tors": stiffness[2],
+                }
+                json.dump(section_data, f)
+            
+            post_calc = PostCaluculations(dir_case, alpha_lift)
+            post_calc.project_data()
+            post_calc.power() 
+            post_calc.kinetic_energy() 
+            post_calc.potential_energy()  
+            # ids_cycles = [0, int(20/dt)-1, int(40/dt)-1, int(60/dt)-1, int(80/dt)-1, int(100/dt)-1]
+            # # ids_cycles = [0, int(20/dt)-1, int(40/dt)-1, int(60/dt)-1, int(80/dt)-1]
+            ids_cycles = [0, t.size-1]
+            post_calc.work_per_cycle(ids_cycles)
+
+            plotter = Plotter("data/FFA_WA3_221/profile.dat", dir_case, join(dir_case, "plots")) 
+            plotter.force()  # plot various forces of the simulation
+            plotter.energy()  # plot various energies and work done by forces of the simulation
+
