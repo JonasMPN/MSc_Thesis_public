@@ -56,7 +56,6 @@ class PowerAndEnergy(Rotations):
         self.alpha_lift = alpha_lift
         self.f_damp_efm = f_damp_efm
 
-
     def power(self) -> dict[str: dict[str: np.ndarray]]:
         """Calculates the power done by the aerodynamic and structural damping forces.
 
@@ -64,12 +63,32 @@ class PowerAndEnergy(Rotations):
         damping forces (key: "damp").
         :rtype: dict[str: dict[str: np.ndarray]]
         """
+        # power_drag = (sep_f_aero[:, :2]*self.velocity_xyz[:, :2]).sum(axis=1)
+        # power_lift = (sep_f_aero[:, 2:4]*self.velocity_xyz[:, :2]).sum(axis=1)
+        # power_moment = (sep_f_aero[:, 4]*self.velocity_xyz[:, 2])
+
+        # power_damp = self.f_damp_efm*self.velocity_efz
+
         sep_f_aero = self.project_separate(self.f_aero_dlm, -self.alpha_lift-self.position_xyz[:, 2])
-        power_drag = (sep_f_aero[:, :2]*self.velocity_xyz[:, :2]).sum(axis=1)
-        power_lift = (sep_f_aero[:, 2:4]*self.velocity_xyz[:, :2]).sum(axis=1)
-        power_moment = (sep_f_aero[:, 4]*self.velocity_xyz[:, 2])
+        sep_f_aero = (sep_f_aero[:-1]+sep_f_aero[1:])/2
+        mean_vel_xyz = (self.velocity_xyz[:-1, :]+self.velocity_xyz[1:, :])/2
+        power_drag = (sep_f_aero[:, :2]*mean_vel_xyz[:, :2]).sum(axis=1)
+        power_lift = (sep_f_aero[:, 2:4]*mean_vel_xyz[:, :2]).sum(axis=1)
+        power_moment = (sep_f_aero[:, 4]*mean_vel_xyz[:, 2])
+
+        mean_vel_efz = self.project(mean_vel_xyz, self.position_xyz[:-1, 2])
+        # mean_vel_efz_test = self.project((self.position_xyz[1:, :]-self.position_xyz[:-1, :])/0.01, 
+        #                                  self.position_xyz[:-1, 2])
+        # print(mean_vel_efz-mean_vel_efz_test) 
+        # print((mean_vel_efz-mean_vel_efz_test).sum(axis=0)) 
+
+
+        f_damp_xyz = self.project(self.f_damp_efm, -self.position_xyz[:, 2])
+        mean_f_damp_xyz = (f_damp_xyz[:-1, :]+f_damp_xyz[1:, :])/2
+        mean_f_damp_efz = self.project(mean_f_damp_xyz, self.position_xyz[:-1, 2])
+        power_damp = mean_f_damp_efz*mean_vel_efz
+        # power_damp = mean_f_damp_efz*mean_vel_efz_test
         
-        power_damp = self.f_damp_efm[:, :]*self.velocity_efz
         return {
             "aero": {
                 "drag": power_drag,
@@ -80,7 +99,8 @@ class PowerAndEnergy(Rotations):
                 "edge": power_damp[:, 0],
                 "flap": power_damp[:, 1],
                 "tors": power_damp[:, 2]
-            }}
+            }
+        }
     
     def kinetic_energy(self) -> dict[str: np.ndarray]:
         """Calculates the kinetic energy of the moving airfoil in the edgewise, flapwise, and torsional direction.
@@ -146,14 +166,17 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         # transform dataframes into numpy arrays
         position = np.asarray([self.df_general[col].to_numpy() for col in self._get_split("pos")]).T
         velocity = np.asarray([self.df_general[col].to_numpy() for col in self._get_split("vel")]).T
+        acceleration = np.asarray([self.df_general[col].to_numpy() for col in self._get_split("accel")]).T
+
         f_aero = np.asarray([self.df_f_aero[col].to_numpy() for col in self._get_split("aero")]).T
         alpha_lift = self.df_f_aero[self.name_alpha_lift].to_numpy()
         f_damp = np.asarray([self.df_f_structural[col].to_numpy() for col in self._get_split("damp")]).T
         f_stiff = np.asarray([self.df_f_structural[col].to_numpy() for col in self._get_split("stiff")]).T
 
         # projection
-        projected_pos = self.project(position, position[:, 2])  # is now (edge, flap, rot z)
-        projected_vel = self.project(velocity, position[:, 2])  # is now (edge, flap, rot z)
+        pos_efz = self.project(position, position[:, 2])  # is now (edge, flap, rot z)
+        vel_efz = self.project(velocity, position[:, 2])  # is now (edge, flap, rot z)
+        accel_efz = self.project(acceleration, position[:, 2])  # is now (edge, flap, rot z)
 
         f_aero_dlm = self.project(f_aero, alpha_lift+position[:, 2])  # is now (drag, lift, mom)
         f_aero_efm = self.project(f_aero, position[:, 2])  # is now (edge, flap, mom)
@@ -162,10 +185,13 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         
         # define new column names
         for i in range(2):
-            self.df_general["pos_"+self._dfl_split["pos_projected"][i]] = projected_pos[:, i]
-            self.df_general["vel_"+self._dfl_split["vel_projected"][i]] = projected_vel[:, i]
+            self.df_general["pos_"+self._dfl_split["pos_projected"][i]] = pos_efz[:, i]
+            self.df_general["vel_"+self._dfl_split["vel_projected"][i]] = vel_efz[:, i]
+            self.df_general["accel_"+self._dfl_split["accel_projected"][i]] = accel_efz[:, i]
+
             self.df_f_aero["aero_"+self._dfl_split["aero_projected"][i]] = f_aero_dlm[:, i]
             self.df_f_aero["aero_"+self._dfl_split["damp_projected"][i]] = f_aero_efm[:, i]
+
             self.df_f_structural["damp_"+self._dfl_split["damp_projected"][i]] = f_damp_efm[:, i]
             self.df_f_structural["stiff_"+self._dfl_split["stiff_projected"][i]] = f_stiff_efm[:, i]
 
@@ -186,8 +212,7 @@ class PostCaluculations(Rotations, DefaultsSimulation):
             if self._calc is not None:  # if self._calc is already initialised
                 func(self)
                 return
-            # prepare inputs for constructor of PowerAndEnergy
-            time = self.df_general["time"].to_numpy()
+            # prepare inputs for __init__ of PowerAndEnergy
             inertia = np.asarray([self.section_data["mass"], 
                                   self.section_data["mass"],
                                   self.section_data["mom_inertia"]])
@@ -274,6 +299,7 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         data =  {"cycle_no": np.arange(len(peaks)-1), "T": t[peaks[1:]]-t[peaks[:-1]]} | period_power
         df = pd.DataFrame(data)
         df.to_csv(join(self.dir_in, "period_work.dat"), index=None)
+        
 
 class PostHHT_alpha:
     @staticmethod
@@ -321,9 +347,9 @@ class PostHHT_alpha:
 
                 res = {
                     "err_freq": np.r_[err_freq, np.nan],
-                    "rel_err_freq": np.r_[rel_err_freq, np.nan],
+                    "rel_err_freq": np.r_[rel_err_freq/1e2, np.nan],
                     "err_ampl": err_ampl,
-                    "rel_err_ampl": rel_err_ampl,
+                    "rel_err_ampl": rel_err_ampl/1e2,
                 }
                 pd.DataFrame(res).to_csv(join(current_dir, "errors.dat"), index=None)
 
