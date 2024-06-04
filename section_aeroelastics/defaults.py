@@ -593,7 +593,8 @@ class DefaultsSimulation(DefaultStructure):
         "damp_projected": ["edge", "flap"],
         "stiff_projected": ["edge", "flap"],
         "pos_projected": ["edge", "flap"],
-        "vel_projected": ["edge", "flap"]
+        "vel_projected": ["edge", "flap"],
+        "accel_projected": ["edge", "flap"],
     }
 
     def _get_split(self, param: str, without_param: bool=False):
