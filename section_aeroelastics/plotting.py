@@ -1,4 +1,4 @@
-from utils_plot import Shapes, PlotPreparation, AnimationPreparation, MosaicHandler
+from utils_plot import Shapes, PlotPreparation, AnimationPreparation, MosaicHandler, get_colourbar
 from calculations import Rotations
 from defaults import DefaultPlot, DefaultStructure
 import pandas as pd
@@ -174,10 +174,9 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                     self.plt_settings[map_column_to_settings(col)]
                 except KeyError:
                     raise NotImplementedError(f"Default plot styles for '{col}' are missing.")
-                if ax in apply_to_axs:
-                    axes[ax].plot(self.time, apply[ax](data[ax][col]), **self.plt_settings[map_column_to_settings(col)])
-                else:
-                    axes[ax].plot(self.time, data[ax][col], **self.plt_settings[map_column_to_settings(col)])
+                vals = data[ax][col] if ax not in apply_to_axs else apply[ax](data[ax][col])
+                time = self.time if ax != "power" else self.time[:-1]
+                axes[ax].plot(time, vals, **self.plt_settings[map_column_to_settings(col)])
         return axes
 
 
@@ -224,8 +223,8 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
             arrow_scale_moment: float=1,
             plot_qc_trailing_every: int=2,
             keep_qc_trailing: int=40,
-            time_steps: int=0,
-            frame_skip_timesteps: int=1):
+            until: float=None,
+            dt_per_frame: float=None):
         qc_pos = self.df_general[["pos_x", "pos_y"]].to_numpy()
         profile = np.zeros((self.time.size, *self.profile.shape))
         norm_moments = self.df_f_aero["aero_mom"]/np.abs(self.df_f_aero["aero_mom"]).max()
@@ -244,24 +243,31 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
         trailing_idx_from = ids-(keep_qc_trailing+ids%plot_qc_trailing_every)
         trailing_idx_from[trailing_idx_from < 0] = 0
         
-        angle_aero_to_xyz = (self.df_general["pos_tors"]-self.df_f_aero[angle_lift]).to_numpy()
+        angle_aero_to_xyz = -(self.df_general["pos_tors"]+self.df_f_aero[angle_lift]).to_numpy()
         aero_force = np.c_[self.df_f_aero["aero_drag"], self.df_f_aero["aero_lift"], np.zeros(self.time.size)]
         force_arrows = self._rot.project_separate(aero_force, angle_aero_to_xyz)*arrow_scale_forces
         
         dfs = {"general": self.df_general, "f_aero": self.df_f_aero, "f_structural": self.df_f_structural}
-        fig, plt_lines, plt_arrows, aoas = self._prepare_force_animation(dfs)
+        until = self.time[-1] if until is None else until
+        fig, plt_lines, plt_arrows, aoas = self._prepare_force_animation(dfs, until)
 
+        #todo code rad2deg conversion nicer (also in _prepare_force_animation()!)
         data_lines = {linename: self.df_f_aero[linename] for linename in ["aero_edge", "aero_flap", "aero_mom"]} |\
-                     {linename: self.df_f_aero[linename] for linename in aoas} |\
+                     {linename: np.rad2deg(self.df_f_aero[linename]) for linename in aoas} |\
                      {linename: self.df_f_structural[linename] for linename in ["damp_edge", "damp_flap", "damp_tors"]+
                                                                             ["stiff_edge", "stiff_flap", "stiff_tors"]}
         data_lines = data_lines | {"qc_trail": qc_pos,
                                    "profile": profile, # data with dict[line: data_for_line]
                                    "mom": mom_arrow}
         data_arrows = {"drag": force_arrows[:, :2], "lift": force_arrows[:, 2:4]}
+
+        dt_sim = self.time[1]
+        dt_per_frame = dt_sim if dt_per_frame is None else dt_per_frame
+        n_frames = int(until/dt_per_frame)
+        ids_frames = [int(i*dt_per_frame/dt_sim) for i in range(n_frames)]
         
-        def update(i: int):
-            i = frame_skip_timesteps*i+1
+        def update(j: int):
+            i = ids_frames[j]
             for linename, data in data_lines.items():
                 match linename:
                     case "profile"|"mom":
@@ -277,8 +283,7 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
             rtrn = [*plt_lines.values()]+[*plt_arrows.values()]
             return tuple(rtrn)
         
-        frames = int((self.time.size-1)/frame_skip_timesteps) if time_steps==0 else int(time_steps/frame_skip_timesteps)
-        ani = animation.FuncAnimation(fig=fig, func=update, frames=frames, interval=15, blit=True)
+        ani = animation.FuncAnimation(fig=fig, func=update, frames=n_frames, interval=15, blit=True)
         writer = animation.FFMpegWriter(fps=30)
         ani.save(join(self.dir_plots, "animation_force.mp4"), writer=writer)
 
@@ -417,56 +422,64 @@ class HHTalphaPlotter(DefaultStructure):
         pd.DataFrame(info).to_csv(join(dir_plot, "info.dat"), index=None)
 
     @staticmethod
-    def rotation(root_dir: str):
+    def rotation(root_dir: str, case_id: int=None):
         dir_plot = helper.create_dir(join(root_dir, "plots"))[0]
         schemes = listdir(root_dir)
         schemes.pop(schemes.index("plots"))
-        case_numbers = []
-        for i, scheme in enumerate(schemes):
-            case_numbers.append(listdir(join(root_dir, scheme)))
-            if len(case_numbers) == 2:
-                if not case_numbers[0] == case_numbers[1]:
-                    raise ValueError(f"Scheme '{schemes[i-1]}' and '{scheme[i]}' do not have the same case numbers: \n"
-                                     f"Scheme '{schemes[i-1]}': {case_numbers[0]}\n"
-                                     f"Scheme '{schemes[i]}': {case_numbers[1]}\n")
-                case_numbers.pop(0)
+        if case_id is not None:
+            case_numbers = [[str(case_id)]]
+        else:
+            case_numbers = []
+            for i, scheme in enumerate(schemes):
+                case_numbers.append(listdir(join(root_dir, scheme)))
+                if len(case_numbers) == 2:
+                    if not case_numbers[0] == case_numbers[1]:
+                        raise ValueError(f"Scheme '{schemes[i-1]}' and '{scheme[i]}' do not have the same case "
+                                         f"numbers: \n "
+                                         f"Scheme '{schemes[i-1]}': {case_numbers[0]}\n"
+                                         f"Scheme '{schemes[i]}': {case_numbers[1]}\n")
+                    case_numbers.pop(0)
                 
         info = {}
         map_scheme_to_label = {
             "HHT-alpha": "o.g.",
             "HHT-alpha-adapted": "adpt."
         }
+        x_labels = {"pos": {"split": "time (s)", "joined": "x (m)"},
+                    "vel": {"split": "time (s)", "joined": "u (m/s)"}}
+        y_labels = {"pos": {"split": "position (m), (deg)", "joined": "y (m)"},
+                    "vel": {"split": "velocity (m/s), (deg/s)", "joined": "v (m/s)"}}
         for case_number in case_numbers[0]:
-            fig, axs = plt.subplots(1, 2, figsize=(10, 5), tight_layout=True)
-            axs = {"split": axs[0], "joined": axs[1]}
-            for i, scheme in enumerate(schemes):
-                current_dir = join(root_dir, scheme, case_number)
-                df_sol = pd.read_csv(join(current_dir, "analytical_sol.dat"))
-                df_sim = pd.read_csv(join(current_dir, "general.dat"))
+            for param in ["pos", "vel"]:
+                fig, axs = plt.subplots(1, 2, figsize=(10, 5), tight_layout=True)
+                axs = {"split": axs[0], "joined": axs[1]}
+                for i, scheme in enumerate(schemes):
+                    current_dir = join(root_dir, scheme, case_number)
+                    df_sol = pd.read_csv(join(current_dir, "analytical_sol.dat"))
+                    df_sim = pd.read_csv(join(current_dir, "general.dat"))
 
-                for direction in ["x", "y", "tors"]:
+                    for direction in ["x", "y", "tors"]:
+                        if i == 0:
+                            axs["split"].plot(df_sol["time"], df_sol[f"{param}_{direction}"], "k")
+                        axs["split"].plot(df_sim["time"], df_sim[f"{param}_{direction}"], "--", 
+                                          label=f"{param} {direction} {scheme}")
+                    
                     if i == 0:
-                        axs["split"].plot(df_sol["time"], df_sol[f"solution_{direction}"], "k")
-                    axs["split"].plot(df_sim["time"], df_sim[f"pos_{direction}"], "--", label=f"{direction} {scheme}")
-                
-                if i == 0:
-                    axs["joined"].plot(df_sol[f"solution_x"], df_sol[f"solution_y"], "ok", ms=0.5, label="eE")
-                axs["joined"].plot(df_sim["pos_x"], df_sim["pos_y"], "or", ms=0.5, label=f"{scheme}")
+                        axs["joined"].plot(df_sol[f"{param}_x"], df_sol[f"{param}_y"], "k", ms=0.5, label="eE")
+                    axs["joined"].plot(df_sim[f"{param}_x"], df_sim[f"{param}_y"], "or", ms=0.5, label=f"{scheme}")
 
-                # with open(join(current_dir, "info.json"), "r") as f:
-                #     tmp_info = json.load(f)|{"scheme": scheme}
+                    # with open(join(current_dir, "info.json"), "r") as f:
+                    #     tmp_info = json.load(f)|{"scheme": scheme}
+                    
+                    # if info == {}:
+                    #     info = {param: [] for param in tmp_info.keys()}
+                    # else:
+                    #     for param, value in tmp_info.items():
+                    #         info[param].append(value)
                 
-                # if info == {}:
-                #     info = {param: [] for param in tmp_info.keys()}
-                # else:
-                #     for param, value in tmp_info.items():
-                #         info[param].append(value)
-            
-            handler = MosaicHandler(fig, axs)
-            x_labels = {"split": "time (s)", "joined": "x (m)"}
-            y_labels = {"split": "position (m), (deg)", "joined": "x (m)"}
-            handler.update(x_labels=x_labels, y_labels=y_labels, legend=True)
-            handler.save(join(dir_plot, f"{case_number}.pdf"))
+                handler = MosaicHandler(fig, axs)
+                handler.update(x_labels=x_labels[param], y_labels=y_labels[param], legend=True)
+                handler.save(join(dir_plot, f"{case_number}_{param}.pdf"))
         # pd.DataFrame(info).to_csv(join(dir_plot, "info.dat"), index=None)
 
     def plot_case(
@@ -806,7 +819,7 @@ class BLValidationPlotter(DefaultPlot, Rotations):
     
 def combined_forced(root_dir: str):
     df_combinations = pd.read_csv(join(root_dir, "combinations.dat"))
-    amplitudes = np.sort(df_combinations["amplitude"].unique())
+    amplitudes = np.sort(df_combinations["amplitude"].unique())[::-1]
     aoas = np.sort(df_combinations["alpha"].unique())
 
     period_aero_work = np.zeros((amplitudes.size, aoas.size))
@@ -828,40 +841,104 @@ def combined_forced(root_dir: str):
 
         convergence_aero[ampl_to_ind[ampl], aoa_to_ind[aoa]] = (aero_work[-1]-aero_work[-2])/aero_work[-1]
         convergence_struct[ampl_to_ind[ampl], aoa_to_ind[aoa]] = (struct_work[-1]-struct_work[-2])/struct_work[-1]
-        
+
     dir_plots = helper.create_dir(join(root_dir, "plots"))[0]
     fig, ax = plt.subplots()
+    cmap, norm = get_colourbar(period_aero_work)
     ax = heatmap(period_aero_work, xticklabels=np.round(aoas, 3), ax=ax, yticklabels=np.round(amplitudes, 3),
-                 cbar_kws={"label": r"period work"}, cmap="RdYlGn", annot=True, fmt=".3g")
+                 cbar_kws={"label": r"period work"}, cmap=cmap, norm=norm, annot=True, fmt=".3g")
+    cbar = ax.collections[0].colorbar
+    stab_min = period_aero_work.min()
+    stab_max = period_aero_work.max()
+    if stab_max > 0:
+        cbar.set_ticks([stab_min, 0, stab_max])
+        cbar.set_ticklabels([np.round(stab_min, 3), 0, np.round(stab_max, 3)])
+    else:
+        cbar.set_ticks([stab_min, 0])
+        cbar.set_ticklabels([np.round(stab_min, 3), 0])
+    cbar.minorticks_off()
     handler = MosaicHandler(fig, ax)
-    handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude (m)")
+    handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude factor (-)")
     handler.save(join(dir_plots, "period_aero_work.pdf"))
 
     fig, ax = plt.subplots()
+    cmap, norm = get_colourbar(convergence_aero)
     ax = heatmap(convergence_aero, xticklabels=np.round(aoas, 3), ax=ax, yticklabels=np.round(amplitudes, 3),
-                 cbar_kws={"label": r"convergence"}, cmap="RdYlGn", annot=True, fmt=".3g")
+                 cbar_kws={"label": r"convergence"}, cmap=cmap, norm=norm, annot=True, fmt=".3g")
+    cbar = ax.collections[0].colorbar
+    stab_min = convergence_aero.min()
+    stab_max = convergence_aero.max()
+    cbar.set_ticks([stab_min, 0, stab_max])
+    cbar.set_ticklabels([np.round(stab_min, 3), 0, np.round(stab_max, 3)])
+    if stab_max > 0:
+        cbar.set_ticks([stab_min, 0, stab_max])
+        cbar.set_ticklabels([np.round(stab_min, 3), 0, np.round(stab_max, 3)])
+    else:
+        cbar.set_ticks([stab_min, 0])
+        cbar.set_ticklabels([np.round(stab_min, 3), 0])
+    cbar.minorticks_off()
     handler = MosaicHandler(fig, ax)
-    handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude (m)")
+    handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude factor (-)")
     handler.save(join(dir_plots, "convergence_aero.pdf"))
 
     fig, ax = plt.subplots()
+    cmap, norm = get_colourbar(period_struct_work)
     ax = heatmap(period_struct_work, xticklabels=np.round(aoas, 3), ax=ax, yticklabels=np.round(amplitudes, 3),
-                 cbar_kws={"label": r"period work"}, cmap="RdYlGn", annot=True, fmt=".3g")
+                 cbar_kws={"label": r"period work"}, cmap=cmap, norm=norm, annot=True, fmt=".3g")
+    cbar = ax.collections[0].colorbar
+    stab_min = period_struct_work.min()
+    stab_max = period_struct_work.max()
+    cbar.set_ticks([stab_min, 0, stab_max])
+    cbar.set_ticklabels([np.round(stab_min, 3), 0, np.round(stab_max, 3)])
+    if stab_max > 0:
+        cbar.set_ticks([stab_min, 0, stab_max])
+        cbar.set_ticklabels([np.round(stab_min, 3), 0, np.round(stab_max, 3)])
+    else:
+        cbar.set_ticks([stab_min, 0])
+        cbar.set_ticklabels([np.round(stab_min, 3), 0])
+    cbar.minorticks_off()
     handler = MosaicHandler(fig, ax)
-    handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude (m)")
+    handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude factor (-)")
     handler.save(join(dir_plots, "period_struct_work.pdf"))
 
     fig, ax = plt.subplots()
+    cmap, norm = get_colourbar(convergence_struct)
     ax = heatmap(convergence_struct, xticklabels=np.round(aoas, 3), ax=ax, yticklabels=np.round(amplitudes, 3),
-                 cbar_kws={"label": r"convergence"}, cmap="RdYlGn", annot=True, fmt=".3g")
+                 cbar_kws={"label": r"convergence"}, cmap=cmap, norm=norm, annot=True, fmt=".3g")
+    cbar = ax.collections[0].colorbar
+    stab_min = convergence_struct.min()
+    stab_max = convergence_struct.max()
+    cbar.set_ticks([stab_min, 0, stab_max])
+    cbar.set_ticklabels([np.round(stab_min, 3), 0, np.round(stab_max, 3)])
+    if stab_max > 0:
+        cbar.set_ticks([stab_min, 0, stab_max])
+        cbar.set_ticklabels([np.round(stab_min, 3), 0, np.round(stab_max, 3)])
+    else:
+        cbar.set_ticks([stab_min, 0])
+        cbar.set_ticklabels([np.round(stab_min, 3), 0])
+    cbar.minorticks_off()
     handler = MosaicHandler(fig, ax)
-    handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude (m)")
+    handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude factor (-)")
     handler.save(join(dir_plots, "convergence_struct.pdf"))
     
     fig, ax = plt.subplots()
-    ax = heatmap(period_aero_work+period_struct_work, xticklabels=np.round(aoas, 3), ax=ax, 
-                 yticklabels=np.round(amplitudes, 3), cbar_kws={"label": "total period work"}, cmap="RdYlGn", 
+    stability = period_aero_work+period_struct_work
+    cmap, norm = get_colourbar(stability)
+    ax = heatmap(stability, xticklabels=np.round(aoas, 3), ax=ax, 
+                 yticklabels=np.round(amplitudes, 3), cbar_kws={"label": "total period work"}, cmap=cmap, norm=norm,
                  annot=True, fmt=".3g")
+    cbar = ax.collections[0].colorbar
+    stab_min = stability.min()
+    stab_max = stability.max()
+    cbar.set_ticks([stab_min, 0, stab_max])
+    cbar.set_ticklabels([np.round(stab_min, 3), 0, np.round(stab_max, 3)])
+    if stab_max > 0:
+        cbar.set_ticks([stab_min, 0, stab_max])
+        cbar.set_ticklabels([np.round(stab_min, 3), 0, np.round(stab_max, 3)])
+    else:
+        cbar.set_ticks([stab_min, 0])
+        cbar.set_ticklabels([np.round(stab_min, 3), 0])
+    cbar.minorticks_off()
     handler = MosaicHandler(fig, ax)
-    handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude (m)")
+    handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude factor (-)")
     handler.save(join(dir_plots, "stability.pdf"))
