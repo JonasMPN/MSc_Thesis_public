@@ -5,6 +5,10 @@ import pandas as pd
 from os.path import join
 from copy import copy
 from typing import Callable
+import json
+from scipy.interpolate import interp1d
+from scipy.fft import rfft, rfftfreq, irfft
+from scipy.signal import find_peaks
 
 
 class SimulationResults(DefaultsSimulation):
@@ -91,6 +95,7 @@ class SimulationResults(DefaultsSimulation):
                         try:
                             df[param+"_"+split_name] = vars(self)[param][:, i]
                         except ValueError:
+                            #todo add original error message
                             raise ValueError(f"The above ValueError was caused for parameter {param}.")
                 else:
                     df[param] = vars(self)[param]
@@ -424,3 +429,170 @@ def get_inflow(
             inflow[i_end_current_ramp:, :] = inflow[i_end_current_ramp-1, :]
     return inflow
         
+
+def compress_oscillation(file_motion: str, 
+                         file_compressed: str,
+                         cols: str|list[str],
+                         col_time: str="time", 
+                         period_res: int=100,
+                         max_rmse: float=1e-4):
+    cols = cols if isinstance(cols, list) else [cols]
+    df = pd.read_csv(file_motion)
+    time = df[col_time].to_numpy()
+    compressed = {param: {"t_begin": None,
+                          "dt": None,
+                          "ampl": None,
+                          "freq": None, 
+                          "shift": None, 
+                          "overall_period": None,
+                          "overall_amplitude": None, 
+                          "peaks_mean": None,
+                          "fft_coeffs_ids": None,
+                          "fft_coeffs_re": None,
+                          "fft_coeffs_imag": None,
+                          "N": None,
+                          "rmse": None} 
+                          for param in cols}
+    for col in cols:
+        val = df[col].to_numpy()
+        peaks = find_peaks(val)[0]
+        n_peaks = find_peaks(-val)[0]
+
+        ids_period = np.arange(peaks[-2], peaks[-1])
+        n_interp = ids_period.size
+        t_period = time[ids_period]
+        val_period = val[ids_period]
+
+        compressed[col]["t_begin"] = float(t_period[0])
+        compressed[col]["overall_period"] = float(t_period[-1]-t_period[0])
+        compressed[col]["overall_amplitude"] = float((val[peaks[-1]]-val[n_peaks[-1]])/2)
+        compressed[col]["peaks_mean"] = float((val[peaks[-1]]+val[n_peaks[-1]])/2)
+
+        t_compression = np.linspace(t_period[0], t_period[-1], period_res)
+        v_compression = interp1d(t_period, val_period)(t_compression)
+
+        compressed[col]["dt"] = t_compression[1]-t_compression[0]
+
+        fourier_coeffs = rfft(v_compression)
+        amplitude = 2/period_res*np.abs(fourier_coeffs)
+        ids_sorted_ampl = np.argsort(amplitude)[::-1]
+        for use_up_to in range(1, period_res+1):
+            yf_subset = np.zeros_like(fourier_coeffs, dtype=complex)
+            ids_subset = ids_sorted_ampl[:use_up_to]
+            yf_subset[ids_subset] = fourier_coeffs[ids_subset] 
+            
+            base_reconstructed = interp1d(t_compression, irfft(yf_subset, n=period_res))(t_period)
+            rmse = np.sqrt(((val_period-base_reconstructed)**2).sum()/n_interp)
+            if rmse < max_rmse:
+                break
+            
+        if use_up_to == period_res:
+            print(f"Max error of '{max_rmse}' could not be reached for oscillation of '{col}'; "
+                  f"continuing with all ({period_res}) coefficients and an rmse='{rmse}'.")
+
+        round_at = 5
+        freq = np.round(rfftfreq(period_res, compressed[col]["dt"])[ids_subset], round_at)
+        amplitudes = amplitude[ids_subset]
+        try:
+            freq_0 = freq == 0
+            if freq_0.sum() > 1:
+                raise ValueError(f"More than one zero-frequency fft coefficient found. This is likely due to "
+                                 f"rounding the frequencys at the {round_at}th decimal point.")
+            idx_mean = freq_0.argmax()
+            amplitudes[idx_mean] /= 2
+        except ValueError:
+            pass
+        
+        compressed[col]["fft_coeffs_ids"] = ids_subset.tolist()
+        compressed[col]["fft_coeffs_re"] = [tmp_yf.real for tmp_yf in fourier_coeffs[ids_subset].tolist()]
+        compressed[col]["fft_coeffs_imag"] = [tmp_yf.imag for tmp_yf in fourier_coeffs[ids_subset].tolist()]
+        compressed[col]["N"] = period_res
+        compressed[col]["ampl"] = amplitudes.tolist()
+        compressed[col]["freq"] = freq.tolist()
+        compressed[col]["shift"] = np.angle(fourier_coeffs)[ids_subset].tolist()
+        compressed[col]["rmse"] = float(rmse)
+
+    with open(file_compressed, "w") as f:
+        json.dump(compressed, f, indent=4)
+    return compressed
+
+
+def reconstruct_from_coefficients(N, FFT_coeffs: list[tuple[float, float]]):
+    yf = np.zeros(N, dtype=complex)
+    for idx, coeff_value in FFT_coeffs:
+        yf[idx] = coeff_value
+    return irfft(yf, n=N)
+
+
+def reconstruct_from_file(file: str, separate_mean: bool=False):
+    with open(file, "r") as f:
+        compressed = json.load(f)
+    
+    reconstructed = {}
+    mean = {}
+    for param, info in compressed.items():
+        ids = info["fft_coeffs_ids"]
+        real_parts = info["fft_coeffs_re"]
+        imag_parts = info["fft_coeffs_imag"]
+        N = info["N"]
+        dt = info["dt"]
+        t_begin = info["t_begin"]
+        time = t_begin+dt*np.arange(N)
+        coeffs = [(idx, re+1j*imag) for idx, re, imag in zip(ids, real_parts, imag_parts)]
+        vals = reconstruct_from_coefficients(N, coeffs)
+        
+        if separate_mean:
+            ids_zero = np.asarray(info["freq"])==0
+            if ids_zero.sum() > 1:
+                raise ValueError(f"More than one frequency=0 found for {param} from {file}.")
+            elif ids_zero.sum() == 0:
+                mean[param] = 0
+            else:
+                idx = ids_zero.argmax()
+                mean[param] = info["ampl"][idx]*np.cos(info["shift"][idx])
+            vals -= mean[param]
+        reconstructed[param] = {"time": time, "vals": vals}
+    if not separate_mean:
+        return reconstructed
+    else:
+        return reconstructed, mean
+
+
+def zero_oscillations(time: np.ndarray, periods: int, **kwargs):
+    """Takes one-period oscillations that happen at different times and extends (not just shift!) and cuts them such
+      that all oscillations start at the same time. If x is an array containing the values of the period and 
+      x[0]==x[-1], then x[:-1] has to be given. In other words, the period is not fully closed but the last (the same
+      as the first value) must be missing.
+
+    :param time: _description_
+    :type time: np.ndarray
+    :param periods: _description_
+    :type periods: int
+    :return: _description_
+    :rtype: _type_
+    """
+    # each kwarg is dict with keys "time" and "vals"
+    base_param = [*kwargs.keys()][0]
+    base_time = kwargs[base_param]["time"]
+    dt = np.round(base_time[1]-base_time[0], 5)  # if dt<e-5 then this fails!
+    oscillations = {}
+    oscillations[base_param] = kwargs[base_param]["vals"]
+    time = time-time[0]
+    dt = time[1]
+    full_time = time
+    for i in range(1, periods):
+        full_time = np.r_[full_time, dt+time+full_time[-1]]
+    for i, (param, osci_data) in enumerate(kwargs.items()):
+        osc_val = osci_data["vals"]
+        if i==0:
+            oscillations[param] = np.tile(osc_val, periods)
+            continue
+        osc_time = osci_data["time"]
+        dt = osc_time[1]-osc_time[0]
+        osc_val = np.r_[osc_val, osc_val]
+        if osc_time[0] < base_time[0]:
+            osc_time = np.r_[osc_time, osc_time[-1]+dt*np.arange(1, osc_time.size+1)]
+        else:
+            osc_time = np.r_[osc_time[0]-dt*np.arange(1, osc_time.size+1)[::-1], osc_time]
+        oscillations[param] = np.tile(interp1d(osc_time, osc_val)(base_time), periods)
+    return full_time, oscillations
