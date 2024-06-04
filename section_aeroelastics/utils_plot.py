@@ -6,6 +6,7 @@ from numpy.typing import ArrayLike
 from typing import Callable
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, to_rgba
 from copy import deepcopy, copy
 
 class MosaicHandler:
@@ -245,7 +246,7 @@ class MosaicHandler:
         for ax_label, param_values in limits_from.items():
             try:
                 param_values[0][0]
-            except IndexError:
+            except (IndexError, TypeError):
                 param_values = [param_values]
             lim_max = param_values[0][0]
             lim_min = param_values[0][0]
@@ -456,19 +457,19 @@ class AnimationPreparation(PlotPreparation, DefaultPlot):
         DefaultPlot.__init__(self)
         
     
-    def _prepare_force_animation(self, dfs: pd.DataFrame, equal_y: tuple[str]=None):
+    def _prepare_force_animation(self, dfs: pd.DataFrame, until: float, equal_y: tuple[str]=None):
         fig, axs, handler = self._prepare_force_plot(equal_y)
         aoas = self._get_aoas(dfs["f_aero"])
         x_lims_from = {
             "profile": [dfs["general"]["pos_x"]-.4, dfs["general"]["pos_x"]+1],
-            "aoa": dfs["general"]["time"],
-            "aero": dfs["general"]["time"],
-            "damp": dfs["general"]["time"],
-            "stiff": dfs["general"]["time"],
+            "aoa": [0, until],
+            "aero": [0, until],
+            "damp": [0, until],
+            "stiff": [0, until],
         }
         y_lims_from = {
             "profile": [dfs["general"]["pos_y"]-.4, dfs["general"]["pos_y"]+0.3],
-            "aoa": [dfs["f_aero"][col] for col in aoas],
+            "aoa": [np.rad2deg(dfs["f_aero"][col]) for col in aoas],
             "aero": [dfs["f_aero"]["aero_edge"], dfs["f_aero"]["aero_flap"], self.df_f_aero["aero_mom"]],
             "damp": [dfs["f_structural"]["damp_edge"], dfs["f_structural"]["damp_flap"], 
                      dfs["f_structural"]["damp_tors"]],
@@ -546,3 +547,24 @@ class AnimationPreparation(PlotPreparation, DefaultPlot):
                 else:
                     lines[col] = axes[ax].plot(0, 0, **self.plt_settings[map_column_to_settings(col)])[0]
         return lines, force_arrows
+    
+
+def get_colourbar(values: np.ndarray):
+    ncolors = 256
+
+    min_val = values.min()
+    max_val = values.max()
+    val_range = abs(max_val-min_val)
+
+    scale_GrYl = abs(min_val/val_range)
+    if max_val > 0:
+        colors = [(0.0, "green"), (scale_GrYl, "yellow"), (1.0, "red")]
+        bounds = np.r_[np.linspace(min_val, 0, int(ncolors*scale_GrYl), endpoint=False), 
+                       np.linspace(0, max_val, int(ncolors*(1-scale_GrYl)))]
+    else:
+        colors = [to_rgba("green"), to_rgba("yellow")]
+        bounds = np.linspace(min_val, 0, ncolors)
+
+    cmap = LinearSegmentedColormap.from_list("custom_cmap", colors, N=ncolors)    
+    norm = BoundaryNorm(boundaries=bounds, ncolors=ncolors)
+    return cmap, norm
