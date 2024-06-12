@@ -110,9 +110,9 @@ class SimulationSubRoutine(ABC):
             "_scheme_settings_can": self._scheme_settings_can.keys(),
             "_sim_params_required": self._sim_params_required.keys()
         }
-        if "_copy_scheme" in vars(self).keys():
+        if "_copy_schemes" in vars(self.__class__).keys():  # self.__class__ neded because 'self' isn't initialised yet
             copy_params = {new_scheme: from_scheme for from_scheme, copy_to in self._copy_schemes.items() 
-                           for new_scheme in copy_to }
+                           for new_scheme in copy_to}
         else:
             copy_params = {}
         copied_params = copy_params.keys()
@@ -122,7 +122,7 @@ class SimulationSubRoutine(ABC):
                     assert scheme not in has_keys, (f"Settings for scheme '{scheme}' is tried to be set directly and "
                                                     f"by copying from scheme '{copy_params[scheme]}' simultaneously. "
                                                     "Only one at a time is allowed.")
-                    defined[scheme] = vars(self, attribute)[copy_params[scheme]]
+                    getattr(self, attribute)[scheme] = getattr(self, attribute)[copy_params[scheme]]
                     continue
                 assert scheme in has_keys, (f"Attribute '{attribute}' of class '{type(self).__name__}' is missing "
                                             f"a key-value pair for scheme '{scheme}'.")
@@ -529,7 +529,7 @@ def reconstruct_from_file(file: str, separate_mean: bool=False):
         compressed = json.load(f)
     
     reconstructed = {}
-    mean = {}
+    mean = {param: 0 for param in compressed.keys()}
     for param, info in compressed.items():
         ids = info["fft_coeffs_ids"]
         real_parts = info["fft_coeffs_re"]
@@ -552,10 +552,7 @@ def reconstruct_from_file(file: str, separate_mean: bool=False):
                 mean[param] = info["ampl"][idx]*np.cos(info["shift"][idx])
             vals -= mean[param]
         reconstructed[param] = {"time": time, "vals": vals}
-    if not separate_mean:
-        return reconstructed
-    else:
-        return reconstructed, mean
+    return reconstructed, mean
 
 
 def zero_oscillations(time: np.ndarray, periods: int, **kwargs):
