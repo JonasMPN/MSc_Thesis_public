@@ -299,6 +299,12 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         data =  {"cycle_no": np.arange(len(peaks)-1), "T": t[peaks[1:]]-t[peaks[:-1]]} | period_power
         df = pd.DataFrame(data)
         df.to_csv(join(self.dir_in, "period_work.dat"), index=None)
+
+    @staticmethod
+    def v_ef(v_0, v_1, v_2, x_0, x_1, x_2):
+        c = np.cos(x_2)
+        s = np.sin(x_2)
+        return np.c_[c*v_0+s*v_1+(-s*x_0+c*x_1)*v_2, -s*v_0+c*v_1+(-c*x_0-s*x_1)*v_2, np.zeros_like(v_0)]
         
 
 class PostHHT_alpha:
