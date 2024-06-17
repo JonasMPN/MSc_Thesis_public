@@ -29,7 +29,7 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
         self, 
         dir_polar: str,
         time: np.ndarray,
-        file_polar: str="polars.dat",
+        file_polar: str="polars_new.dat",
         verbose: bool=True
         ) -> None:
         """Initialises instance object.
@@ -879,16 +879,16 @@ class AeroForce(SimulationSubRoutine, Rotations):
         coeffs = np.asarray([C_d, C_l, C_m])
 
         # # for return of [C_d, C_l, C_m]
-        # return coeffs
+        return coeffs
 
         # for return of [f_x, f_y, mom]
-        coeffs = np.asarray([C_d, C_l, -C_m*chord])
-        rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
-                            (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
-        dynamic_pressure = density/2*rel_speed
-        rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])
-        # print( rel_speed, dynamic_pressure*chord*rot@coeffs)
-        return dynamic_pressure*chord*rot@coeffs
+        # coeffs = np.asarray([C_d, C_l, -C_m*chord])
+        # rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
+        #                     (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
+        # dynamic_pressure = density/2*rel_speed
+        # rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])
+        # # print( rel_speed, dynamic_pressure*chord*rot@coeffs)
+        # return dynamic_pressure*chord*rot@coeffs
         
 
     def _init_BL_chinese(
@@ -1159,6 +1159,7 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
             **kwargs):  # the kwargs are needed because of the call in simulate():
         rot = self.passive_3D_planar(sim_res.pos[i, 2])
         rot_t = rot.T
+        
         M_last = rot_t@self._M_last@rot
         C_last = rot_t@self._C_last@rot
         K_last = rot_t@self._K_last@rot 
