@@ -117,7 +117,7 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
     def __init__(self, dir_polar: str, dir_root_results: str) -> None:
         DefaultPlot.__init__(self)
         self.dir_polar = dir_polar
-        self.dir_root_results = dir_root_results
+        self.dir_root_results = helper.create_dir(dir_root_results)[0]
         self._struc_params = None
         self._response_wanted = None
 
@@ -390,7 +390,8 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
                                damping_edge=damping[0], damping_flap=damping[1], damping_tors=damping[2])
 
             results = self._simulate(time=t, f_external=force, init_pos=x_0, init_vel=v_0, scheme=scheme)
-            ids = [int(index) for index in listdir(join(self.dir_root_results, scheme))]
+            res_dir = helper.create_dir(join(self.dir_root_results, scheme))[0]
+            ids = [int(index) for index in listdir(res_dir)]
             case_id = max(ids)+1 if case_id is None else case_id
             dir_save = helper.create_dir(join(self.dir_root_results, scheme, str(case_id)))[0]
             with open(join(dir_save, case_info+".txt"), "w") as f:
@@ -470,7 +471,7 @@ if __name__ == "__main__":
     # BL_scheme = "BL_chinese"
     HHT_alpha_case = "test"
     sep_point_test_res = 202
-    period_res = 200
+    period_res = 400
 
     if do["separation_point_calculation"]:
         sep_point_calc(dir_airfoil, BL_scheme, resolution=sep_point_test_res)
@@ -491,16 +492,16 @@ if __name__ == "__main__":
 
     if do["plot_BL_results_meas"]:
         plotter = BLValidationPlotter()
-        # plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), join(dir_airfoil, "polars.dat"))
-        dir_validations = join(dir_airfoil, "validation", BL_scheme, "measurement")
-        dir_unsteady = join(dir_airfoil, "unsteady")
-        df_cases = pd.read_csv(join(dir_unsteady, "cases.dat"))
-        df_meas_files = pd.read_csv(join(dir_unsteady, "cases_results.dat"))
-        for case_id, row in df_meas_files.iterrows():
-            dir_case = join(dir_validations, str(case_id))
-            # plotter.plot_model_comparison(dir_case)
-            plotter.plot_meas_comparison(join(dir_unsteady, "unsteady_data"), row.to_dict(), dir_case, 
-                                         period_res=period_res)
+        plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), join(dir_airfoil, "polars_new.dat"))
+        # dir_validations = join(dir_airfoil, "validation", BL_scheme, "measurement")
+        # dir_unsteady = join(dir_airfoil, "unsteady")
+        # df_cases = pd.read_csv(join(dir_unsteady, "cases.dat"))
+        # df_meas_files = pd.read_csv(join(dir_unsteady, "cases_results.dat"))
+        # for case_id, row in df_meas_files.iterrows():
+        #     dir_case = join(dir_validations, str(case_id))
+        #     # plotter.plot_model_comparison(dir_case)
+        #     plotter.plot_meas_comparison(join(dir_unsteady, "unsteady_data"), row.to_dict(), dir_case, 
+        #                                  period_res=period_res)
             
     if do["plot_BL_results_polar"]:
         file_polar = join(dir_airfoil, "polars.dat")
