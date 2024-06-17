@@ -1067,7 +1067,7 @@ class StructForce(SimulationSubRoutine, Rotations):
         if stiffness.shape != damping.shape:
             raise ValueError("Initialising the structural force calculation 'linear' failed because there are "
                              f"a different number of stiffness {stiffness.shape} and damping {damping.shape} values "
-                             "givne.")
+                             "given.")
         self.stiffness = stiffness if len(stiffness.shape) > 1 else np.diag(stiffness.flatten())
         self.damping = damping if len(damping.shape) > 1 else np.diag(damping.flatten())
 
@@ -1123,8 +1123,8 @@ class StructForce(SimulationSubRoutine, Rotations):
         C_app = np.zeros((3, 3))
         C_app[0, 2] = c_0*c*tmp_2-c_1*s*tmp_1
         C_app[1, 2] = c_0*s*tmp_2+c_1*c*tmp_1
-        C_app[2, 0] = c_0*c*tmp_2-c_1*s*tmp_1
-        C_app[2, 1] = c_0*s*tmp_2+c_1*c*tmp_1
+        C_app[2, 0] = C_app[0, 2]
+        C_app[2, 1] = C_app[1, 2]
         C_app[2, 2] = c_0*tmp_2**2+c_1*tmp_1**2
         return C_app
 
@@ -1134,14 +1134,13 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
      next time step.
     """
     
-    _implemented_schemes = ["eE", "HHT-alpha-xy", "HHT-alpha-ef", "HHT-alpha-adapted-xy", "HHT-alpha-adapted-ef"]    
+    _implemented_schemes = ["eE", "HHT-alpha-xy", "HHT-alpha-adapted-xy"]    
     # eE: explicit Euler
     # HHT_alpha: algorithm as given in #todo add paper
 
     _scheme_settings_must = {
         "eE": [],
-        "HHT-alpha-xy": ["dt", "alpha", "stiffness_edge", "stiffness_flap", "stiffness_tors", "damping_edge",
-                         "damping_flap", "damping_tors", "mass", "mom_inertia"],
+        "HHT-alpha-xy": ["dt", "alpha", "inertia", "damping", "stiffness"],
     }
 
     _scheme_settings_can = {
@@ -1155,7 +1154,7 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
     } 
 
     _copy_schemes = {
-        "HHT-alpha-xy": ["HHT-alpha-ef", "HHT-alpha-adapted-xy", "HHT-alpha-adapted-ef"]
+        "HHT-alpha-xy": ["HHT-alpha-adapted-xy"]
     }
 
     def __init__(self, verbose: bool=True) -> None:
@@ -1164,24 +1163,21 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
 
         self._inertia = None
 
+        self._M_next = None
         self._M_current = None
-        self._M_last = None
-        self._C_last = None
-        self._K_last = None
+        self._C_current = None
+        self._K_current = None
+        self._external_next = None
         self._external_current = None
-        self._external_last = None
         self._beta = None
         self._gamma = None
         self._dt = None
         
     def get_scheme_method(self, scheme: str) -> Callable:
-
         scheme_methods = {
             "eE": self._eE,
             "HHT-alpha-xy": self._HHT_alpha_xy,
-            "HHT-alpha-ef": self._HHT_alpha_xy,
-            "HHT-alpha-adapted-xy": self._HHT_alpha_adapated,
-            "HHT-alpha-adapted-ef": self._HHT_alpha_adapated,
+            "HHT-alpha-adapted-xy": self._HHT_alpha_adapated_xy,
             "HHT-alpha-increment": self._HHT_alpha_increment,
         }
         return scheme_methods[scheme]
@@ -1190,9 +1186,7 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
         scheme_methods = {
             "eE": self._init_eE,
             "HHT-alpha-xy": self._init_HHT_alpha,
-            "HHT-alpha-ef": self._init_HHT_alpha,
             "HHT-alpha-adapted-xy": self._init_HHT_alpha,
-            "HHT-alpha-adapted-ef": self._init_HHT_alpha,
             "HHT-alpha-increment": self._init_HHT_alpha,
         }
         return scheme_methods[scheme]
@@ -1228,52 +1222,24 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
             i: int,
             dt: float,
             **kwargs):  # the kwargs are needed because of the call in simulate():
-        rhs = -self._M_last@sim_res.accel[i, :]-self._C_last@sim_res.vel[i, :]-self._K_last@sim_res.pos[i, :]
-        rhs += self._external_current*sim_res.aero[i+1, :]+self._external_last*sim_res.aero[i, :]
+        rhs = -self._M_current@sim_res.accel[i, :]-self._C_current@sim_res.vel[i, :]-self._K_current@sim_res.pos[i, :]
+        rhs += self._external_next*sim_res.aero[i+1, :]+self._external_current*sim_res.aero[i, :]
         
-        accel = solve(self._M_current, rhs, assume_a="sym") 
+        accel = solve(self._M_next, rhs, assume_a="sym") 
         vel = sim_res.vel[i, :]+dt*((1-self._gamma)*sim_res.accel[i, :]+self._gamma*accel)
         pos = sim_res.pos[i, :]+dt*sim_res.vel[i, :]+dt**2*((0.5-self._beta)*sim_res.accel[i, :]+self._beta*accel)
         return pos, vel, accel
-    
-    def _HHT_alpha_ef(
+
+    def _HHT_alpha_adapated_xy(
             self,
             sim_res: SimulationResults, 
             i: int,
             dt: float,
             **kwargs):  # the kwargs are needed because of the call in simulate():
-        rot = self.passive_3D_planar(sim_res.pos[i, 2])
-        rot_t = rot.T
-        M_last = rot_t@self._M_last@rot
-        C_last = rot_t@self._C_last@rot
-        K_last = rot_t@self._K_last@rot 
-        M_current = rot_t@self._M_current@rot 
-
-        rhs = -M_last@sim_res.accel[i, :]-C_last@sim_res.vel[i, :]-K_last@sim_res.pos[i, :]
-        rhs += self._external_current*sim_res.aero[i+1, :]+self._external_last*sim_res.aero[i, :]
+        rhs = -self._M_current@sim_res.accel[i, :]-self._C_current@sim_res.vel[i, :]-self._K_current@sim_res.pos[i, :]
+        rhs += self._external_next*sim_res.aero[i, :]+self._external_current*sim_res.aero[i-1, :]
         
-        accel = solve(M_current, rhs, assume_a="sym") 
-        vel = sim_res.vel[i, :]+dt*((1-self._gamma)*sim_res.accel[i, :]+self._gamma*accel)
-        pos = sim_res.pos[i, :]+dt*sim_res.vel[i, :]+dt**2*((0.5-self._beta)*sim_res.accel[i, :]+self._beta*accel)
-        return pos, vel, accel
-
-    def _HHT_alpha_adapated(
-            self,
-            sim_res: SimulationResults, 
-            i: int,
-            dt: float,
-            **kwargs):  # the kwargs are needed because of the call in simulate():
-        rot = self.passive_3D_planar(sim_res.pos[i, 2])
-        rot_t = rot.T
-        M_last = rot_t@self._M_last@rot
-        C_last = rot_t@self._C_last@rot
-        K_last = rot_t@self._K_last@rot
-        M_current = rot_t@self._M_current@rot 
-
-        rhs = -M_last@sim_res.accel[i, :]-C_last@sim_res.vel[i, :]-K_last@sim_res.pos[i, :]
-        rhs += self._external_current*sim_res.aero[i, :]+self._external_last*sim_res.aero[i-1, :]
-        
-        accel = solve(M_current, rhs, assume_a="sym") 
+        accel = solve(self._M_next, rhs, assume_a="sym") 
         vel = sim_res.vel[i, :]+dt*((1-self._gamma)*sim_res.accel[i, :]+self._gamma*accel)
         pos = sim_res.pos[i, :]+dt*sim_res.vel[i, :]+dt**2*((0.5-self._beta)*sim_res.accel[i, :]+self._beta*accel)
         return pos, vel, accel
@@ -1290,11 +1256,11 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
         rot_last = self.passive_3D_planar(sim_res.pos[i-1, 2])
         rot_t_last = rot.T
 
-        M_current = 1/(2*self._beta)*self.M-(1-self._alpha)*self.dt*(1-self._gamma/(2*self._beta))*self.C
-        M_current = rot_t@M_current@rot
+        self._M_current = 1/(2*self._beta)*self.M-(1-self._alpha)*self.dt*(1-self._gamma/(2*self._beta))*self.C
+        self._M_current = rot_t@self._M_current@rot
 
-        C_current = 1/(self._beta*self._dt)*self.M+(1-self._alpha)*self._gamma/self._beta*self.C
-        C_current = rot_t@C_current@rot
+        self._C_current = 1/(self._beta*self._dt)*self.M+(1-self._alpha)*self._gamma/self._beta*self.C
+        self._C_current = rot_t@self._C_current@rot
 
         M_last = self._alpha*self.dt*(1-self._gamma/(2*self._beta))*self.C
         M_last = rot_t_last@M_last@rot_last
@@ -1304,14 +1270,14 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
 
         K_step = self._alpha*(self._gamma/(self._beta*self.dt)*self.C+self.K)
         
-        d_external_current = sim_res.aero[i+1, :]-sim_res.aero[i, :]
-        d_external_last = sim_res.aero[i, :]-sim_res.aero[i-1, :]
+        d_external_next = sim_res.aero[i+1, :]-sim_res.aero[i, :]
+        d_external_current = sim_res.aero[i, :]-sim_res.aero[i-1, :]
 
         A = 1/(self._dt**2*self._beta)*self.M+(1-self._alpha)*self._gamma/(self._dt*self._beta)*self.C
         A += (1-self._alpha)*self.K
-        rhs = M_current@sim_res.accel[i, :]+C_current@sim_res.vel[i, :]-M_last@sim_res.accel[i-1, :]
+        rhs = self._M_current@sim_res.accel[i, :]+self._C_current@sim_res.vel[i, :]-M_last@sim_res.accel[i-1, :]
         rhs += C_last@sim_res.vel[i, :]-K_step@(sim_res.pos[i, :]-sim_res.pos[i-1, :])
-        rhs += self._external_current*d_external_current+self._external_last*d_external_last
+        rhs += self._external_next*d_external_next+self._external_current*d_external_current
 
         d_x = solve(A, rhs)
         pos = sim_res.pos[i, :]+d_x
@@ -1328,34 +1294,45 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
             sim_res: ThreeDOFsAirfoil,
             alpha: float,
             dt: float,
-            mass: float,
-            mom_inertia: float,
-            stiffness_edge: float,
-            stiffness_flap: float,
-            stiffness_tors: float,
-            damping_edge: float,
-            damping_flap: float,
-            damping_tors: float,
+            inertia: np.ndarray|list[float],
+            damping: np.ndarray|list[float],
+            stiffness: np.ndarray|list[float],
             **kwargs): #todo implies constant dt!!!
         self._alpha = alpha
         self._dt = dt
         self._beta = (1+alpha)**2/4
         self._gamma = 0.5+alpha
+
+        inertia = inertia if isinstance(inertia, np.ndarray) else np.asarray(inertia)
+        damping = damping if isinstance(damping, np.ndarray) else np.asarray(damping)
+        stiffness = stiffness if isinstance(stiffness, np.ndarray) else np.asarray(stiffness)
         
-        M = np.diag([mass, mass, mom_inertia])
-        C = np.diag([damping_edge, damping_flap, damping_tors])
-        K = np.diag([stiffness_edge, stiffness_flap, stiffness_tors])
+        self.damping = damping if len(damping.shape) > 1 else np.diag(damping.flatten())
+        self.stiffness = stiffness if len(stiffness.shape) > 1 else np.diag(stiffness.flatten())
+
+        if stiffness.shape != damping.shape:
+            raise ValueError("Initialising the time integration 'HHT-alpha' failed because there are "
+                             f"a different number of stiffness {stiffness.shape} and damping {damping.shape} values "
+                             "given.")
+        if inertia.shape != damping.shape:
+                raise ValueError("Initialising the time integration 'HHT-alpha' failed because there are "
+                             f"a different number of inertia {inertia.shape} and damping {damping.shape} values "
+                             "given.")
+        
+        M = inertia
+        C = self.damping
+        K = self.stiffness
         
         self.M = M
         self.C = C
         self.K = K
 
-        self._M_current = M+dt*(1-alpha)*self._gamma*C+dt**2*(1-alpha)*self._beta*K
-        self._M_last = dt*(1-alpha)*(1-self._gamma)*C+dt**2*(1-alpha)*(0.5-self._beta)*K
-        self._C_last = C+dt*(1-alpha)*K
-        self._K_last = K
-        self._external_current = 1-alpha
-        self._external_last = alpha
+        self._M_next = M+dt*(1-alpha)*self._gamma*C+dt**2*(1-alpha)*self._beta*K
+        self._M_current = dt*(1-alpha)*(1-self._gamma)*C+dt**2*(1-alpha)*(0.5-self._beta)*K
+        self._C_current = C+dt*(1-alpha)*K
+        self._K_current = K
+        self._external_next = 1-alpha
+        self._external_current = alpha
     
     def _get_accel(self, sim_res: ThreeDOFsAirfoil, i: int) -> np.ndarray:
         """Calculates the acceleration for the current time step based on the forces acting on the system.
@@ -1368,54 +1345,6 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
         :rtype: np.ndarray
         """
         return (sim_res.aero[i, :]-sim_res.damp[i, :]-sim_res.stiff[i, :])/self._inertia
-    
-    @staticmethod
-    def _k_tors_apparent(k_0: float, k_1: float, x_0: float, x_1: float, x_tors: float) -> float:
-        """Calculates the apparent stiffness moment that the is felt in the inertial x-y coordinate system when rotating
-        a body that has its stiffnesses given w.r.t. its rotated coordiante system. The apparent moment is calculated as
-        being an external force.
-
-        :param k_0: The stiffness of the first translational degree of freedom in the body-fixed coordinate system. 
-        "First" refers to the axis that corresponds to the coordinate of the first entry in a position array.  
-        :param k_1: The stiffness of the second translational degree of freedom in the body-fixed coordinate system. 
-        "Second" refers to the axis that corresponds to the coordinate of the second entry in a position array. 
-        :param x_0: Coordinate on first axis in the inertial x-y coordinate system of where the body is.
-        :type x_0: float
-        :param x_1: Coordinate on first axis in the inertial x-y coordinate system of where the body is.
-        :type x_1: float
-        :param x_tors: Coordinate on rotational axis in the inertial x-y coordinate system of where the body is.
-        :type x_tors: float
-        :return: Apparent stiffness moment
-        :rtype: float
-        """
-        c = np.cos(x_tors)
-        s = np.sin(x_tors)
-        return (k_1-k_0)*(x_0*(-c*s*x_0+x_1*(c**2-s**2))+x_1**2*c*s)
-
-    @staticmethod
-    def _c_tors_apparent(c_0, c_1, x_0: float, x_1: float, x_tors: float, tors_rate: float) -> float:
-        """Calculates the apparent damping moment that the is felt in the inertial x-y coordinate system when rotating
-        a body that has its damping given w.r.t. its rotated coordiante system. The apparent moment is calculated as
-        being an external force.
-
-        :param c_0: The damping of the first translational degree of freedom in the body-fixed coordinate system. 
-        "First" refers to the axis that corresponds to the coordinate of the first entry in a position array.  
-        :param c_1: The damping of the second translational degree of freedom in the body-fixed coordinate system. 
-        "Second" refers to the axis that corresponds to the coordinate of the second entry in a position array. 
-        :param x_0: Coordinate on first axis in the inertial x-y coordinate system of where the body is.
-        :type x_0: float
-        :param x_1: Coordinate on first axis in the inertial x-y coordinate system of where the body is.
-        :type x_1: float
-        :param x_tors: Coordinate on rotational axis in the inertial x-y coordinate system of where the body is.
-        :type x_tors: float
-        :param tors_rate: Rotational velocity of the body in the x-y coordinate system.
-        :type tors_rate: float
-        :return: Apparent damping moment
-        :rtype: float
-        """
-        c = np.cos(x_tors)
-        s = np.sin(x_tors)
-        return -tors_rate*(c_0*(c*x_0+s*x_1)**2+c_1*(-s*x_0+c*x_1)**2)
 
 
 class Oscillations:
