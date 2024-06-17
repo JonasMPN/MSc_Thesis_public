@@ -400,23 +400,27 @@ def get_inflow(
     :param t: time array for the simulation with equidistant time steps
     :type t: np.ndarray
     :param ramps: list of tuples of (time begin ramp, time end ramp, velocity, angle). 'time begin ramp' defines when
-     the ramp starts, 'time for ramp' how long the ramp takes, and 'velocity' and 'angle' what the velocity and angle 
-     are after the ramp.
+     the ramp starts, 'time for ramp' how long the ramp takes, and 'velocity' and 'angle' (in deg) what the velocity 
+     and angle are after the ramp.
     :type ramps: list[tuple[float, float, float, float]]
     :return: _description_
     :rtype: np.ndarray
     """
     n_ramps = len(ramps)
     inflow = np.zeros((t.size, 2))
-    init_inflow = init_velocity*np.c_[np.cos(np.deg2rad(init_angle)), np.sin(np.deg2rad(init_angle))]
-    inflow[0:(t<=ramps[0][0]).argmax(), :] = init_inflow
+    init_inflow = init_velocity*np.r_[np.cos(np.deg2rad(init_angle)), np.sin(np.deg2rad(init_angle))]
+    inflow[:np.logical_not(t<=ramps[0][0]).argmax(), :] = init_inflow
     last_velocity = init_velocity
     last_angle = init_angle
     for i_ramp, (t_begin, t_end, velocity, angle) in enumerate(ramps):
         ids = np.logical_and(t>=t_begin, t<=t_end)
         n_timesteps = ids.sum()
-        velocities = np.linspace(last_velocity, velocity, n_timesteps)
-        angles = np.linspace(np.deg2rad(last_angle), np.deg2rad(angle), n_timesteps)
+        if n_timesteps > 1:
+            velocities = np.linspace(last_velocity, velocity, n_timesteps) 
+            angles = np.linspace(np.deg2rad(last_angle), np.deg2rad(angle), n_timesteps)
+        else:
+            velocities = np.asarray([velocity])
+            angles = np.asarray([angle])
         inflow[ids] = velocities[:, np.newaxis]*np.c_[np.cos(angles), np.sin(angles)]
         last_velocity = velocity
         last_angle = angle
