@@ -656,11 +656,13 @@ class BLValidationPlotter(DefaultPlot, Rotations):
                 df_C_fs = pd.read_csv(join(dir_preparation, file))
             elif "sep_points" in file:
                 df_f = pd.read_csv(join(dir_preparation, file))
+                cols = df_f.columns
+                alpha_f = [col for col in cols if "alpha" in col][0]
 
         dir_plots = helper.create_dir(join(dir_preparation, "plots"))[0]
 
         fig, ax = plt.subplots()
-        ax.plot(df_f["alpha"], df_f["f_l"], **self.plt_settings["section"])
+        ax.plot(df_f[alpha_f], df_f["f_l"], **self.plt_settings["section"])
         ax.plot(df_f_paper["alpha"], df_f_paper["f_l"], **self.plt_settings[model_of_paper])
         handler = MosaicHandler(fig, ax)
         handler.update(x_labels=r"$\alpha$ (°)", y_labels=r"$f$ (-)", x_lims=[-50, 50], y_lims=[-0.1, 1.1],
