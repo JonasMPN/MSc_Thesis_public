@@ -22,7 +22,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
     simulation. The name of these files is given in the parent class DefaultStructure.
     """
     
-    def __init__(self, file_profile: str, dir_data: str, dir_plots: str, dt_res: float=None) -> None:
+    def __init__(self, file_profile: str, dir_data: str, dir_plots: str, structure_coordinate_system: str,
+                 dt_res: float=500) -> None:
         """Initialises a plotter instance.
 
         :param file_profile: Path from the current working directory to a text file holding the profile coordinates. The
@@ -52,8 +53,12 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         helper.create_dir(self.dir_plots)
         self.dt_res = dt_res
         self._rot = Rotations()
+        if structure_coordinate_system not in ["ef", "xy"]:
+            raise ValueError(f"Unsupported 'structure_coordinate_system'={structure_coordinate_system}. Supported are "
+                             " 'ef' and 'xy'.")
+        self._cs_struc = structure_coordinate_system
 
-    def force(self, equal_y: tuple[str]=None, trailing_every: int=2):
+    def force(self, equal_y: tuple[str]=None, trailing_every: int=40):
         """Plots the history of the airfoil movement and different forces.
 
         :param equal_y: Whether the force axes should have equal y scaling, defaults to None
@@ -79,19 +84,27 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         dfs = {"aoa": self.df_f_aero, "aero": self.df_f_aero, "damp": self.df_f_structural, 
                "stiff": self.df_f_structural}
         
-        plot = {
-            "aoa": aoas,
-            "aero": ["aero_edge", "aero_flap", "aero_mom"],
-            "damp": ["damp_edge", "damp_flap", "damp_tors"],
-            "stiff": ["stiff_edge", "stiff_flap", "stiff_tors"]
-        }
+        plot = {"aoa": aoas}
+        # if self._cs_struc == "ef":
+        if True:
+            plot["aero"] = ["aero_edge", "aero_flap", "aero_mom"]
+            plot["damp"] = ["damp_edge", "damp_flap", "damp_tors"]
+            plot["stiff"] = ["stiff_edge", "stiff_flap", "stiff_tors"]
+        elif self._cs_struc == "xy":
+            plot["aero"] = ["aero_x", "aero_y", "aero_mom"]
+            plot["damp"] = ["damp_x", "damp_y", "damp_tors"]
+            plot["stiff"] = ["stiff_x", "stiff_y", "stiff_tors"]
+
         def param_name(param: str):
-            return param if "alpha" in param else param[param.rfind("_")+1:]  
-        axs = self._plot_to_mosaic(axs, plot, dfs, param_name)
+            return param
+        
+        n_data_points = pos.shape[0]
+        skip_points = max(int(n_data_points/self.dt_res), 1)
+        axs = self._plot_to_mosaic(axs, plot, dfs, param_name, skip_points=skip_points)
         handler.update(legend=True)
         fig.savefig(join(self.dir_plots, "forces.pdf"))
 
-    def energy(self, equal_y: tuple[str]=None, trailing_every: int=2):
+    def energy(self, equal_y: tuple[str]=None, trailing_every: int=40):
         """Plots the history of the airfoil movement and different energies/power.
 
         :param equal_y: Whether the force axes should have equal y scaling, defaults to None
@@ -118,17 +131,35 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         
         plot = {
             "total": ["e_total", "e_kin", "e_pot"],
-            "power": ["aero_drag", "aero_lift", "aero_mom", "damp_edge", "damp_flap", "damp_tors"],
-            "kinetic": ["edge", "flap", "tors"],
-            "potential": ["edge", "flap", "tors"]
-        }        
+            "power": ["aero_drag", "aero_lift", "aero_mom"]
+        }
+        # if self._cs_struc == "ef":
+        #     plot["power"] += ["damp_edge", "damp_flap", "damp_tors"]
+        #     plot["kinetic"] = ["edge", "flap", "tors"]
+        #     plot["potential"] = ["edge", "flap", "tors"]
+        # elif self._cs_struc == "xy":
+        #     plot["power"] += ["damp_x", "damp_y", "damp_tors"]
+        #     plot["kinetic"] = ["x", "y", "tors"]
+        #     plot["potential"] = ["x", "y", "tors"]
+
+        plot["power"] += ["damp_edge", "damp_flap", "damp_tors"]
+        plot["kinetic"] = ["edge", "flap", "tors"]
+        
+        if self._cs_struc == "ef":
+            plot["potential"] = ["edge", "flap", "tors"]
+        elif self._cs_struc == "xy":
+            plot["potential"] = ["x", "y", "tors"]
+
         def param_name(param: str):
-            return param if "damp" not in param and "stiff" not in param else param[param.rfind("_")+1:]
-        axs = self._plot_to_mosaic(axs, plot, dfs, param_name)
+            return param 
+        
+        n_data_points = pos.shape[0]
+        skip_points = max(int(n_data_points/self.dt_res), 1)
+        axs = self._plot_to_mosaic(axs, plot, dfs, param_name, skip_points=skip_points)
         handler.update(legend=True)
         fig.savefig(join(self.dir_plots, "energy.pdf"))
     
-    def Beddoes_Leishman(self, equal_y: tuple[str]=None, trailing_every: int=2):
+    def Beddoes_Leishman(self, equal_y: tuple[str]=None, trailing_every: int=40):
         """Plots the history of the airfoil movement and different BL parameters.
 
         :param equal_y: Whether the force axes should have equal y scaling, defaults to None
@@ -156,7 +187,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         dfs = {ax: self.df_f_aero for ax in plot.keys()}
         def param_name(param: str):
             return param
-        axs = self._plot_to_mosaic(axs, plot, dfs, param_name)
+        
+        n_data_points = pos.shape[0]
+        skip_points = max(int(n_data_points/self.dt_res), 1)
+        axs = self._plot_to_mosaic(axs, plot, dfs, param_name, skip_points=skip_points)
         handler.update(legend=True)
         fig.savefig(join(self.dir_plots, "BL.pdf"))
 
@@ -166,7 +200,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             plot: dict[str, list[str]],
             data: dict[str, pd.DataFrame|dict],
             map_column_to_settings: Callable,
-            apply: dict[str, Callable]={"aoa": np.rad2deg}) -> dict[str, matplotlib.axes.Axes]:
+            apply: dict[str, Callable]={"aoa": np.rad2deg},
+            skip_points: int=1) -> dict[str, matplotlib.axes.Axes]:
         apply_to_axs = apply.keys()
         for ax, cols in plot.items():
             for col in cols:
@@ -176,7 +211,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                     raise NotImplementedError(f"Default plot styles for '{col}' are missing.")
                 vals = data[ax][col] if ax not in apply_to_axs else apply[ax](data[ax][col])
                 time = self.time if ax != "power" else self.time[:-1]
-                axes[ax].plot(time, vals, **self.plt_settings[map_column_to_settings(col)])
+                axes[ax].plot(time[::skip_points], vals[::skip_points],
+                              **self.plt_settings[map_column_to_settings(col)])
         return axes
 
 

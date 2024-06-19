@@ -15,13 +15,15 @@ class PowerAndEnergy(Rotations):
             self,
             inertia: np.ndarray,
             stiffness: np.ndarray,
-            position_xyz: np.ndarray,
-            velocity_xyz: np.ndarray,
-            position_ef: np.ndarray,
-            velocity_ef: np.ndarray,
-            f_aero_dl: np.ndarray,
+            structural_rotation: np.ndarray,
             alpha_lift: np.ndarray,
-            f_damp_ef: np.ndarray) -> None:
+            position: np.ndarray,
+            velocity_xyrot: np.ndarray,
+            velocity_damp: np.ndarray,
+            velocity_e_kin: np.ndarray,
+            f_aero_dlm: np.ndarray,
+            f_damp: np.ndarray,
+            ) -> None:
         """Class to calculate the energy of a system and the power done by various forces.
 
         :param time: (n, ) array with the time
@@ -49,40 +51,38 @@ class PowerAndEnergy(Rotations):
         self.inertia = inertia
         self.stiffness = stiffness
 
-        self.position_xyz = position_xyz
-        self.velocity_xyz = velocity_xyz
-        self.position_ef = position_ef
-        self.velocity_ef = velocity_ef
-        
-        self.f_aero_dl = f_aero_dl
+        self.position = position
+        self.velocity_xyrot = velocity_xyrot
+        self.velocity_damp = velocity_damp
+        self.velocity_e_kin = velocity_e_kin
+
         self.alpha_lift = alpha_lift
-        self.f_damp_ef = f_damp_ef
+        self.structural_rotation = structural_rotation
+        
+        self.f_aero_dlm = f_aero_dlm
+        self.f_damp = f_damp
 
     def power(self) -> dict[str: dict[str: np.ndarray]]:
-        """Calculates the power done by the aerodynamic and structural damping forces.
+        """Calculates the power done by the aerodynamic and structural damping forces. The powers are calculated by 
+        means of dot products. Thus, the coordinate system of the velocities and the forces must be the same!
 
         :return: Dictionary containing the power done by the aerodynamic forces (key: "aero") and the structural
         damping forces (key: "damp").
         :rtype: dict[str: dict[str: np.ndarray]]
         """
-        sep_f_aero = self.project_separate(self.f_aero_dlm, -self.alpha_lift-self.position_xyz[:, 2])
+        sep_f_aero = self.project_separate(self.f_aero_dlm, -self.alpha_lift-self.structural_rotation)
+        # sep_f_aero is now (drag_x, drag_y, lift_x, lift_y, aero torque)
         sep_f_aero_mean = (sep_f_aero[:-1]+sep_f_aero[1:])/2
-        vel_xyz_mean = (self.velocity_xyz[:-1, :]+self.velocity_xyz[1:, :])/2
-        power_drag = (sep_f_aero_mean[:, :2]*vel_xyz_mean[:, :2]).sum(axis=1)
-        power_lift = (sep_f_aero_mean[:, 2:4]*vel_xyz_mean[:, :2]).sum(axis=1)
-        power_moment = (sep_f_aero_mean[:, 4]*vel_xyz_mean[:, 2])
+        vel_aero_mean = (self.velocity_xyrot[:-1, :]+self.velocity_xyrot[1:, :])/2
+        # the following lines are dot products
+        power_drag = (sep_f_aero_mean[:, :2]*vel_aero_mean[:, :2]).sum(axis=1)
+        power_lift = (sep_f_aero_mean[:, 2:4]*vel_aero_mean[:, :2]).sum(axis=1)
+        power_moment = (sep_f_aero_mean[:, 4]*vel_aero_mean[:, 2])
 
-        mean_vel_efz = self.project(mean_vel_xyz, self.position_xyz[:-1, 2])
-        # mean_vel_efz_test = self.project((self.position_xyz[1:, :]-self.position_xyz[:-1, :])/0.01, 
-        #                                  self.position_xyz[:-1, 2])
-        # print(mean_vel_efz-mean_vel_efz_test) 
-        # print((mean_vel_efz-mean_vel_efz_test).sum(axis=0)) 
-
-        f_damp_xyz = self.project(self.f_damp_efm, -self.position_xyz[:, 2])
-        mean_f_damp_xyz = (f_damp_xyz[:-1, :]+f_damp_xyz[1:, :])/2
-        mean_f_damp_efz = self.project(mean_f_damp_xyz, self.position_xyz[:-1, 2])
-        power_damp = mean_f_damp_efz*mean_vel_efz
-        # power_damp = mean_f_damp_efz*mean_vel_efz_test
+        # here it is just the edgewise/flapwise damping force times the respective velocity
+        f_damp_mean = (self.f_damp[:-1, :]+self.f_damp[1:, :])/2
+        vel_damp_mean = (self.velocity_damp[:-1, :]+self.velocity_damp[1:, :])/2
+        power_damp = f_damp_mean*vel_damp_mean
         
         return {
             "aero": {
@@ -91,38 +91,37 @@ class PowerAndEnergy(Rotations):
                 "mom": power_moment
             },
             "damp": {
-                "edge": power_damp[:, 0],
-                "flap": power_damp[:, 1],
-                "tors": self.velocity_xyz[:, 2]*self.f_damp_ef
+                0: power_damp[:, 0],
+                1: power_damp[:, 1],
+                2: power_damp[:, 2]
             }
         }
     
     def kinetic_energy(self) -> dict[str: np.ndarray]:
-        """Calculates the kinetic energy of the moving airfoil in the edgewise, flapwise, and torsional direction.
+        """Calculates the kinetic energy of the moving airfoil in the edgewise, flapwise, and torsional direction. 
+        This is different from the kinetic energy seen in the edgewise-flapwise coordinate system!
 
         :return: Dictionary containing the kinetic energies.
         :rtype: dict[str: np.ndarray]
         """
-        # indices are (edge, flap, torsional)
-        e_kin = 0.5*self.inertia*self.velocity_efz**2
+        e_kin = 0.5*self.inertia*self.velocity_e_kin**2
         return {
-            "edge": e_kin[:, 0],
-            "flap": e_kin[:, 1],
-            "tors": e_kin[:, 2]
+            0: e_kin[:, 0],
+            1: e_kin[:, 1],
+            2: e_kin[:, 2]
         }
 
     def potential_energy(self) -> dict[str: np.ndarray]:
-        """Calculates the potential energy of the moving airfoil in the edgewise, flapwise, and torsional direction.
+        """Calculates the potential energy of the moving airfoil.
 
         :return: Dictionary containing the potential energies.
         :rtype: dict[str: np.ndarray]
         """
-        # indices are (edge, flap, torsional)
-        e_pot = 0.5*self.stiffness*self.position_efz**2
+        e_pot = 0.5*self.stiffness*self.position**2
         return {
-            "edge": e_pot[:, 0],
-            "flap": e_pot[:, 1],
-            "tors":e_pot[:, 2]
+            0: e_pot[:, 0],
+            1: e_pot[:, 1],
+            2: e_pot[:, 2]
      }
 
 
@@ -149,19 +148,21 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         with open(join(dir_sim_res, self._dfl_filenames["section_data"]), "r") as f:
             section_data = json.load(f)
             
-            self.inertia = np.asarray([section_data["mass"], 
-                                       section_data["mass"],
-                                       section_data["mom_inertia"]])
-            self.stiffness = np.asarray([section_data["stiffness_edge"], 
-                                         section_data["stiffness_flap"], 
-                                         section_data["stiffness_tors"]])
-            self.damping = np.asarray([section_data["damping_edge"], 
-                                       section_data["damping_flap"], 
-                                       section_data["damping_tors"]])
+        self.inertia = np.asarray(section_data["inertia"])
+        self.stiffness = np.asarray(section_data["stiffness"])
+        self.damping = np.asarray(section_data["damping"])
 
         self.name_alpha_lift = alpha_lift
         self._cs_struc = coordinate_system_structure
         self._calc = None
+
+        self._index_to_label = {0: "edge", 1: "flap", 2: "tors"}
+        if self._cs_struc == "ef":
+            self._index_to_label_pot = {0: "edge", 1: "flap", 2: "tors"}
+        elif self._cs_struc == "xy":
+            self._index_to_label_pot = {0: "x", 1: "y", 2: "tors"}
+        else:
+            raise ValueError(f"Unrecoginsed 'coordinate_system_structure'={self._cs_struc}")
 
     def project_data(self) -> None:
         """The simulation data saved is purely in the xyz coordinate system. This function projects
@@ -179,34 +180,35 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         f_damp = np.asarray([self.df_f_structural[col].to_numpy() for col in self._get_split("damp")]).T
         f_stiff = np.asarray([self.df_f_structural[col].to_numpy() for col in self._get_split("stiff")]).T
 
-        f_aero_dl = self.project_2D(f_aero, alpha_lift+position[:, 2])  # is now (drag, lift)
-        f_aero_ef = self.project_2D(f_aero, position[:, 2])  # is now (edge, flap)
+        f_aero_dl = self.project_2D(f_aero[:, :2], alpha_lift+position[:, 2])  # is now (drag, lift)
+        f_aero_ef = self.project_2D(f_aero[:, :2], position[:, 2])  # is now (edge, flap)
 
         # projection
         # The projection is different whether the structural CS (meaning in which coordinate system the structural
         # parameters are constant) is "xy" or "ef". For example, the velocity in the edgewise direction is generally
         # different from the velocity along the edgewise axis in the "ef" CS. The damping force is also different. 
         # The linear stiffness forces are the same but for coding consistency are separated nonetheless. External
-        # forces and positions are unaffected by different structural CS.
-        pos_ef = self.project_2D(position, position[:, 2])  # is now in (edge, flap)
-        if self._cs_struc == "ef":
-            # now vel_ef is the velocity along the edgewise and flapwise axis.
-            vel_ef = self._v_ef(velocity, position, self._cs_struc)  # is now in (x_edge, x_flap)
-            f_damp_ef = self.damping[:2]*vel_ef
-            f_stiff_ef = self.stiffness[:2]*pos_ef
-        if self._cs_struc == "xy":
-            # now vel_ef is the velocity in the edgewise and flapwise direction.
-            vel_ef = self._v_ef(velocity, position, self._cs_struc)  # is now in (edge, flap)
-            f_damp_ef = self.project_2D(f_damp, position[:, 2])  # is now (edge, flap)
-            f_stiff_ef = self.project_2D(f_stiff, position[:, 2])  # is now (edge, flap)
+        # forces and positions are unaffected by different structural CS. The different projections are needed 
+        # because the damping happens in the system the structural parameters are defined in.
+        pos_ef = self.project_2D(position[:, :2], position[:, 2])  # is now in (edge, flap)
+        vel_ef_xy = self.project_2D(velocity[:, :2], position[:, 2])  # vel (edge, flap) as seen in xy
+        vel_ef_ef = self._v_ef(velocity, position, "ef")  # vel (edge, flap) as seen in ef
+        # if self._cs_struc == "xy":
+        if True:
+            f_damp_ef = self.project_2D(f_damp[:, :2], position[:, 2])  # is now (edge, flap) in xy
+            f_stiff_ef = self.project_2D(f_stiff[:, :2], position[:, 2])  # is now (edge, flap) in xy
+        elif self._cs_struc == "ef":
+            f_damp_ef = self.damping[:2]*vel_ef_ef  # is now (edge, flap) in ef
+            f_stiff_ef = self.stiffness[:2]*pos_ef  # is now (edge, flap) in ef
         
         # define new column names
         for i in range(2):
             self.df_general["pos_"+self._dfl_split["pos_projected"][i]] = pos_ef[:, i]
-            self.df_general["vel_"+self._dfl_split["vel_projected"][i]] = vel_ef[:, i]
+            self.df_general["vel_"+self._dfl_split["vel_projected_xy"][i]] = vel_ef_xy[:, i]
+            self.df_general["vel_"+self._dfl_split["vel_projected_ef"][i]] = vel_ef_ef[:, i]
 
-            self.df_f_aero["aero_"+self._dfl_split["aero_projected"][i]] = f_aero_dl[:, i]
-            self.df_f_aero["aero_"+self._dfl_split["damp_projected"][i]] = f_aero_ef[:, i]
+            self.df_f_aero["aero_"+self._dfl_split["aero_projected_dl"][i]] = f_aero_dl[:, i]
+            self.df_f_aero["aero_"+self._dfl_split["aero_projected_ef"][i]] = f_aero_ef[:, i]
 
             self.df_f_structural["damp_"+self._dfl_split["damp_projected"][i]] = f_damp_ef[:, i]
             self.df_f_structural["stiff_"+self._dfl_split["stiff_projected"][i]] = f_stiff_ef[:, i]
@@ -230,13 +232,12 @@ class PostCaluculations(Rotations, DefaultsSimulation):
                 return
             # prepare inputs for __init__ of PowerAndEnergy
             position_xyz = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
-            velocity_xyz = self.df_general[["vel_x", "vel_y", "vel_tors"]].to_numpy()
             previously_projected_data = [
-                (self.df_general, ["pos_edge", "pos_flap", "pos_tors", "vel_edge", "vel_flap", "vel_tors"]),
-                (self.df_f_aero, ["aero_drag", "aero_lift", "aero_mom"]),
-                (self.df_f_structural, ["damp_edge", "damp_flap", "damp_tors"])
+                (self.df_general, ["pos_edge", "pos_flap", "vel_edge_ef", "vel_flap_ef", "vel_edge_xy", "vel_flap_xy"]),
+                (self.df_f_aero, ["aero_drag", "aero_lift"]),
+                (self.df_f_structural, ["damp_edge", "damp_flap"])
             ]
-            # check wether project() was called already.
+            # check whether project() was called already.
             for df, must_haves in previously_projected_data:
                 has_columns = df.columns
                 for must_have in must_haves:
@@ -244,13 +245,29 @@ class PostCaluculations(Rotations, DefaultsSimulation):
                         raise ValueError(f"Results dataframe with columns {has_columns} does not have a column "
                                          f"{must_have} but it must. This likely results from forgetting to call "
                                          f"'project()' before {func.__name__}.")
-            position_efz = self.df_general[["pos_edge", "pos_flap", "pos_tors"]].to_numpy()
-            velocity_efz = self.df_general[["vel_edge", "vel_flap", "vel_tors"]].to_numpy()
+            vel_xyrot = self.df_general[["vel_x", "vel_y", "vel_tors"]].to_numpy()
+            # if self._cs_struc == "xy":
+            #     pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
+            #     vel_damp = vel_xyrot
+            #     vel_e_kin = vel_xyrot
+            #     f_damp = self.df_f_structural[["damp_x", "damp_y", "damp_tors"]].to_numpy()
+            # elif self._cs_struc == "ef":
+            #     pos = self.df_general[["pos_edge", "pos_flap", "pos_tors"]].to_numpy()
+            #     vel_damp = self.df_general[["vel_edge_ef", "vel_flap_ef", "vel_tors"]].to_numpy()
+            #     vel_e_kin = self.df_general[["vel_edge_xy", "vel_flap_xy", "vel_tors"]].to_numpy()
+            #     f_damp = self.df_f_structural[["damp_edge", "damp_flap", "damp_tors"]].to_numpy()
+            if self._cs_struc == "xy":
+                pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
+            elif self._cs_struc == "ef":
+                pos = self.df_general[["pos_edge", "pos_flap", "pos_tors"]].to_numpy()
+            vel_e_kin = self.df_general[["vel_edge_xy", "vel_flap_xy", "vel_tors"]].to_numpy()
+            vel_damp = vel_e_kin
+            f_damp = self.df_f_structural[["damp_edge", "damp_flap", "damp_tors"]].to_numpy()
+
             f_aero_dlm = self.df_f_aero[["aero_drag", "aero_lift", "aero_mom"]].to_numpy()
             alpha_lift = self.df_f_aero[self.name_alpha_lift].to_numpy()
-            f_damp_efm = self.df_f_structural[["damp_edge", "damp_flap", "damp_tors"]].to_numpy()
-            self._calc = PowerAndEnergy(self.inertia, self.stiffness, position_xyz, velocity_xyz, position_efz,
-                                        velocity_efz, f_aero_dlm, alpha_lift, f_damp_efm)
+            self._calc = PowerAndEnergy(self.inertia, self.stiffness, position_xyz[:, 2], alpha_lift,
+                                        pos, vel_xyrot, vel_damp, vel_e_kin, f_aero_dlm, f_damp)
             func(self)
         return wrapper
     
@@ -263,6 +280,8 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         df = pd.DataFrame()
         for category, forces in power_res.items():
             for force, values in forces.items():
+                if category == "damp":
+                    force = self._index_to_label[force]
                 df[category+"_"+force] = values
         df.to_csv(join(self.dir_in, self._dfl_filenames["power"]), index=None)
     
@@ -271,12 +290,9 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         """Wrapper for PowerAndEnergy.kinetic_energy(). See details of the implementation there. "project()" needs to be 
         called before kinetic_energy().
         """
-        if self._calc is None:
-            self._init_calc()
         e_kin_res = self._calc.kinetic_energy()
-        df = pd.DataFrame()
-        for category, values in e_kin_res.items():
-            df[category] = values
+        e_kin_res = {self._index_to_label[axis]: values for axis, values in e_kin_res.items()}
+        df = pd.DataFrame(e_kin_res)
         df.to_csv(join(self.dir_in, self._dfl_filenames["e_kin"]), index=None)
     
     @_init_calc
@@ -284,12 +300,9 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         """Wrapper for PowerAndEnergy.potential_energy(). See details of the implementation there. "project()" needs to 
         be called before potential_energy().
         """
-        if self._calc is None:
-            self._init_calc()
         e_pot_res = self._calc.potential_energy()
-        df = pd.DataFrame()
-        for category, values in e_pot_res.items():
-            df[category] = values
+        e_pot_res = {self._index_to_label_pot[axis]: values for axis, values in e_pot_res.items()}
+        df = pd.DataFrame(e_pot_res)
         df.to_csv(join(self.dir_in, self._dfl_filenames["e_pot"]), index=None)
 
     def work_per_cycle(self, peaks: np.ndarray=None):

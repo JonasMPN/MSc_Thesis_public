@@ -983,7 +983,7 @@ class StructForce(SimulationSubRoutine, Rotations):
     state of the system.
     """
     
-    _implemented_schemes = ["linear_xy", "linear_ef"]
+    _implemented_schemes = ["linear_xy"]
 
     _scheme_settings_must = {
         "linear_xy": ["stiffness", "damping", "coordinate_system"],
@@ -1134,7 +1134,7 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
      next time step.
     """
     
-    _implemented_schemes = ["eE", "HHT-alpha-xy", "HHT-alpha-adapted-xy"]    
+    _implemented_schemes = ["eE", "HHT-alpha-xy"]    
     # eE: explicit Euler
     # HHT_alpha: algorithm as given in #todo add paper
 
@@ -1212,6 +1212,7 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
         :rtype: np.ndarray
         """
         sim_res.accel[i, :] = self._get_accel(sim_res, i)  # the
+        # sim_res.accel[i, :] = [0, 0, sim_res.accel[i, 2]]  # to keep airfoil at a certain (x, y)
         next_vel = sim_res.vel[i, :]+sim_res.accel[i, :]*sim_res.dt[i]
         next_pos = sim_res.pos[i, :]+sim_res.vel[i, :]*sim_res.dt[i]+sim_res.accel[i, :]/2*sim_res.dt[i]**2
         return next_pos, next_vel, np.nan
@@ -1311,29 +1312,29 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
         self.stiffness = stiffness if len(stiffness.shape) > 1 else np.diag(stiffness.flatten())
 
         if stiffness.shape != damping.shape:
-            raise ValueError("Initialising the time integration 'HHT-alpha' failed because there are "
-                             f"a different number of stiffness {stiffness.shape} and damping {damping.shape} values "
-                             "given.")
+            raise ValueError("Initialising the time integration for a subclass of an HHT-alpha failed because there "
+                             f"are a different number of stiffness {stiffness.shape} and damping {damping.shape} "
+                             "values given.")
         if inertia.shape != damping.shape:
-                raise ValueError("Initialising the time integration 'HHT-alpha' failed because there are "
-                             f"a different number of inertia {inertia.shape} and damping {damping.shape} values "
-                             "given.")
+            raise ValueError("Initialising the time integration for a subclass of an HHT-alpha failed because there "
+                             f"are a different number of stiffness {inertia.shape} and damping {damping.shape} "
+                             "values given.")
         
-        M = inertia
+        M = inertia if len(inertia.shape) > 1 else np.diag(inertia.flatten())
         C = self.damping
         K = self.stiffness
         
         self.M = M
         self.C = C
         self.K = K
-
+        
         self._M_next = M+dt*(1-alpha)*self._gamma*C+dt**2*(1-alpha)*self._beta*K
         self._M_current = dt*(1-alpha)*(1-self._gamma)*C+dt**2*(1-alpha)*(0.5-self._beta)*K
         self._C_current = C+dt*(1-alpha)*K
         self._K_current = K
         self._external_next = 1-alpha
         self._external_current = alpha
-    
+        
     def _get_accel(self, sim_res: ThreeDOFsAirfoil, i: int) -> np.ndarray:
         """Calculates the acceleration for the current time step based on the forces acting on the system.
 
@@ -1401,15 +1402,6 @@ class Oscillations:
         return amplitude/self._K*(1-transient_ampl*transient_shape)
 
     def rotation(self, T:float, dt: float, force: np.ndarray, x_0: np.ndarray, v_0: np.ndarray):
-        def param_matrix(angle, param_edge, param_flap, param_tors):
-            pe = param_edge
-            pf = param_flap
-            pt = param_tors
-            c = np.cos(angle)
-            s = np.sin(angle)
-            return np.asarray([[pe*c**2+pf*s**2, c*s*(pe-pf), 0],
-                               [c*s*(pe-pf), pe*s**2+pf*c**2, 0],
-                               [0, 0, pt]])
         t_sim = np.linspace(0, T, 10*int(T/dt))
         pos = np.zeros((t_sim.size, 3))
         vel = np.zeros((t_sim.size, 3))
@@ -1421,8 +1413,8 @@ class Oscillations:
         vel[0, :] = v_0
         dt = t_sim[1]
         for i in range(int(t_sim.size-1)):
-            f_stiffness = param_matrix(pos[i, 2], *self._K)@pos[i, :]
-            f_damping = param_matrix(pos[i, 2], *self._C)@vel[i, :]
+            f_stiffness = self._K@pos[i, :]
+            f_damping = self._C@vel[i, :]
             accel[i, :] = (force[i, :]-f_stiffness-f_damping)/self._M
             vel[i+1, :] = vel[i, :]+accel[i, :]*dt
             pos[i+1, :] = pos[i, :]+(vel[i, :]+vel[i+1, :])/2*dt

@@ -25,7 +25,7 @@ class _BaseDefaultPltSettings(ABC):
         for param, copy_from in self._copy_params.items():
             for setting in self._settings.keys():
                 getattr(self, setting)[param] = getattr(self, setting)[copy_from]
-
+                
         settings_set = self._settings.values()
         self.plt_settings = {}
         for param in self._params+[*self._copy_params.keys()]:
@@ -111,6 +111,39 @@ class _CombineDefaults(_BaseDefaultPltSettings):
                 if new_param in params_set:
                     raise ValueError(f"Settings for the paramter '{new_param}' are tried to be set multiple times.")
                 self.plt_settings[new_param] = settings
+
+
+class _Axes(_BaseDefaultPltSettings):
+    _copy_params = {}
+
+    _settings = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
+        "_colours": "color",
+        "_labels": "label"
+    }
+
+    _params = [  # parameters that are supported by default
+        "x",
+        "y",
+        # "tors"
+    ]
+
+    copy_from = {}
+
+    _colours = {  # line colour
+        "x": "darkgreen",
+        "y": "orangered",
+        # "tors": "royalblue",
+    }
+
+    _labels = {  # line label
+        "_dfl": None,
+        "x": r"$x$",
+        "y": r"$y$",
+        # "tors": r"$tors$"
+    }
+
+    def __init__(self) -> None:
+        _BaseDefaultPltSettings.__init__(self, "line")
 
 
 class _DefaultArrow(_BaseDefaultPltSettings):
@@ -201,7 +234,16 @@ class _DefaultForce(_BaseDefaultPltSettings):
         "aero_drag": "drag",
         "aero_lift": "lift",
         "aero_mom": "mom",
-    } | {f"{spec}_{direction}": direction for direction in ["edge", "flap", "tors"] for spec in ["damp", "kin", "pot"]} 
+        "aero_x": "drag",
+        "aero_y": "lift",
+        "damp_x": "edge",
+        "damp_y": "flap",
+        "damp_tors": "tors",
+        "stiff_x": "edge",
+        "stiff_y": "flap",
+        "stiff_tors": "tors",
+    } | {f"{spec}_{direction}": direction for direction in ["edge", "flap", "tors"] 
+         for spec in ["damp", "stiff", "kin", "pot", "aero"]} 
 
     _colours = {  # line colour
         "lift": "orangered",
@@ -520,7 +562,7 @@ class _DefaultGeneral(_BaseDefaultPltSettings):
 
 
 class DefaultPlot:
-    """C_lass to specify plot settings for parameters of this project. Example:
+    """Class to specify plot settings for parameters of this project. Example:
     Assume time, lift given.
     >>> dfl = DefaultsPlots()
     >>> fig, ax = plt.subplots()
@@ -531,6 +573,7 @@ class DefaultPlot:
     """
     plt_settings = {}
     def __init__(self) -> None:
+        axes = _Axes()
         arrow = _DefaultArrow()
         aoa = _DefaultAngleOfAttack()
         force = _DefaultForce()
@@ -539,7 +582,7 @@ class DefaultPlot:
         BL = _DefaultBL()
         measurement = _DefaultMeasurement()
         general = _DefaultGeneral()
-        _CombineDefaults.__init__(self, (arrow, "arrow_"), aoa, force, profile, energy, BL, measurement, general)
+        _CombineDefaults.__init__(self, axes, (arrow, "arrow_"), aoa, force, profile, energy, BL, measurement, general)
         
 
 class DefaultStructure:
@@ -589,11 +632,13 @@ class DefaultsSimulation(DefaultStructure):
         "damp": ["x", "y", "tors"],
         "stiff": ["x", "y", "tors"],
         # the following are for post caluclations
-        "aero_projected": ["drag", "lift"],
+        "aero_projected_dl": ["drag", "lift"],
+        "aero_projected_ef": ["edge", "flap"],
         "damp_projected": ["edge", "flap"],
         "stiff_projected": ["edge", "flap"],
         "pos_projected": ["edge", "flap"],
-        "vel_projected": ["edge", "flap"],
+        "vel_projected_xy": ["edge_xy", "flap_xy"],
+        "vel_projected_ef": ["edge_ef", "flap_ef"],
         "accel_projected": ["edge", "flap"],
     }
 

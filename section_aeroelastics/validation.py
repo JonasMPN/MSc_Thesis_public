@@ -1,9 +1,9 @@
-from calculations import AeroForce, Oscillations
+from calculations import ThreeDOFsAirfoil, AeroForce, TimeIntegration, StructForce, Rotations
+from calculation_utils import get_inflow
 import pandas as pd
 import numpy as np
 from os import listdir
 from os.path import join, isfile
-from calculations import ThreeDOFsAirfoil, AeroForce, TimeIntegration, StructForce, Rotations
 from post_calculations import PostCaluculations, PostHHT_alpha
 from utils_plot import MosaicHandler
 import numpy as np
@@ -390,8 +390,8 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
                                damping_edge=damping[0], damping_flap=damping[1], damping_tors=damping[2])
 
             results = self._simulate(time=t, f_external=force, init_pos=x_0, init_vel=v_0, scheme=scheme)
-            res_dir = helper.create_dir(join(self.dir_root_results, scheme))[0]
-            ids = [int(index) for index in listdir(res_dir)]
+            dir_res = helper.create_dir(join(self.dir_root_results, scheme))[0]
+            ids = [int(index) for index in listdir(dir_res)]
             case_id = max(ids)+1 if case_id is None else case_id
             dir_save = helper.create_dir(join(self.dir_root_results, scheme, str(case_id)))[0]
             with open(join(dir_save, case_info+".txt"), "w") as f:
@@ -412,7 +412,7 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
         f_external: np.ndarray,
         init_pos: np.ndarray,
         init_vel: np.ndarray,
-        scheme: str="HHT-alpha-adapted",
+        scheme: str="HHT-alpha-xy",
         alpha_HHT: float=0.1,
         ) -> ThreeDOFsAirfoil:
         airfoil = ThreeDOFsAirfoil(dir_polar=self.dir_polar, time=time)
@@ -421,34 +421,43 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
         
         airfoil.aero = f_external
         time_integrator = TimeIntegration()
-        time_integrator._init_HHT_alpha(airfoil, alpha_HHT, time[1], **self._struc_params)
+        inertia = [self._struc_params["mass"], self._struc_params["mass"], self._struc_params["mom_inertia"]]
+        damping = [self._struc_params["damping_edge"], self._struc_params["damping_flap"], 
+                   self._struc_params["damping_tors"]]
+        stiffness = [self._struc_params["stiffness_edge"], self._struc_params["stiffness_flap"], 
+                     self._struc_params["stiffness_tors"]]
+        time_integrator._init_HHT_alpha(airfoil, alpha_HHT, time[1], inertia=inertia, damping=damping, 
+                                        stiffness=stiffness)
         integration_func = time_integrator.get_scheme_method(scheme)
 
-        self._struct_force._init_linear(airfoil, **self._struc_params)
-        rot = self.passive_3D_planar(init_pos[2])
-        init_stiff = rot.T@self._struct_force.stiffness@rot
-        airfoil.accel[0] = (f_external[0]-init_stiff@init_pos)/self._inertia
+        self._struct_force._init_linear(airfoil, damping=damping, stiffness=stiffness)
+        if "xy" in scheme:
+            airfoil.accel[0, :] = (f_external[0]-self._struct_force.stiffness@init_pos)/self._inertia
+        elif "ef" in scheme:
+            rot = self.passive_3D_planar(init_pos[2])
+            init_stiff = rot.T@self._struct_force.stiffness@rot
+            airfoil.accel[0, :] = (f_external[0]-init_stiff@init_pos)/self._inertia
         
         airfoil.damp = np.zeros((time.size, 3))
         airfoil.stiff = np.zeros((time.size, 3))
         dt = time[1]
         for i in range(time.size-1):
-            pos, vel, accel = integration_func(airfoil, i, time[1])
+            pos, vel, accel = integration_func(airfoil, i, dt)
             airfoil.pos[i+1, :] = pos
             airfoil.vel[i+1, :] = vel
             airfoil.accel[i+1, :] = accel
 
             #todo check coordinate sytsem under rotation (also check for force)
-            airfoil.damp[i, :], airfoil.stiff[i, :] = self._struct_force._linear(airfoil, i)
+            airfoil.damp[i, :], airfoil.stiff[i, :] = self._struct_force._linear_xy(airfoil, i)
             # if not dt*(i+1)%10:
             #     print(dt*i)
             
         i = time.size-1
-        airfoil.damp[i, :], airfoil.stiff[i, :] = self._struct_force._linear(airfoil, i)
+        airfoil.damp[i, :], airfoil.stiff[i, :] = self._struct_force._linear_xy(airfoil, i)
         airfoil.inflow = np.zeros((time.size, 2))
         return airfoil
-    
   
+
 if __name__ == "__main__":
     do = {
         "separation_point_calculation": False,
@@ -463,7 +472,8 @@ if __name__ == "__main__":
         "HHT_alpha_forced": False,
         "HHT_alpha_forced_composite": False,
         "HHT_alpha_step": False,
-        "HHT_alpha_rotation": True,
+        "HHT_alpha_rotation": False,
+        "ef_vs_xy": True
     }
     dir_airfoil = "data/FFA_WA3_221"
     dir_HHT_alpha_validation = "data/HHT_alpha_validation"
@@ -606,7 +616,6 @@ if __name__ == "__main__":
         HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
 
     if do["HHT_alpha_step"]:
-
         n_oscillations = 10
         n_t_per_oscillation = [12]  # should be a multiple of 4 to get the analytical peaks right
         omega_n = [1, 2, 3, 4]
@@ -620,18 +629,19 @@ if __name__ == "__main__":
     if do["HHT_alpha_rotation"]:
         root_dir = join(dir_HHT_alpha_validation, "rotation")
         validator = HHTalphaValidator(dir_airfoil, root_dir)
-        scheme = "HHT-alpha"
+        coordinate_system = "xy"
+        scheme = f"HHT-alpha-{coordinate_system}"
         alpha_lift = "alpha_steady"
         case_info = "[0,0,0]_to_[1,0,0]_to_[1,0,90]_to_[0,1,0]"
         # case_info = "[0,0,0]_to_[1,0,0]_to_[2,0,0]_to_[-1,0,0]_to[0,0,0]"
         case_id = 5
 
-        x_0 = [1, 0, 0.5*np.pi]
+        x_0 = [1, 0.5, 2.*np.pi]
         # x_0 = [1, 0, 0.*np.pi]
         # x_0 = np.zeros(3)
         inertia = np.ones(3)
         # stiffness = np.asarray([2, 0.5, 1])
-        stiffness = np.asarray([2, 1., 1])
+        stiffness = np.asarray([1, 5., 1])
         # damping = 1*np.ones_like(inertia)
         # damping = np.asarray([1, 1, 1.])
         damping = np.zeros(3)
@@ -661,7 +671,7 @@ if __name__ == "__main__":
         # f = np.c_[f_ramp, 0*np.ones_like(t), 0*np.pi*np.ones_like(t)]
         
         validator.simulate_rotation(case_info, inertia, stiffness, damping, t, f, x_0, case_id=case_id, scheme=scheme)
-        HHTalphaPlotter().rotation(root_dir, case_id)
+        # HHTalphaPlotter().rotation(root_dir, case_id)
 
         # do postcalc?  
         post_calc = True
@@ -681,7 +691,7 @@ if __name__ == "__main__":
                 }
                 json.dump(section_data, f)
             
-            post_calc = PostCaluculations(dir_case, alpha_lift)
+            post_calc = PostCaluculations(dir_case, alpha_lift, coordinate_system)
             post_calc.project_data()
             post_calc.power() 
             post_calc.kinetic_energy() 
@@ -690,8 +700,167 @@ if __name__ == "__main__":
             # # ids_cycles = [0, int(20/dt)-1, int(40/dt)-1, int(60/dt)-1, int(80/dt)-1]
             ids_cycles = [0, t.size-1]
             post_calc.work_per_cycle(ids_cycles)
-
-            plotter = Plotter("data/FFA_WA3_221/profile.dat", dir_case, join(dir_case, "plots")) 
+            plotter = Plotter("data/FFA_WA3_221/profile.dat", dir_case, join(dir_case, "plots"), coordinate_system) 
             plotter.force()  # plot various forces of the simulation
             plotter.energy()  # plot various energies and work done by forces of the simulation
+    
+    if do["ef_vs_xy"]:
+        root_dir = helper.create_dir(join("data", "ef_vs_xy"))[0]
+        case_id = "[1,0,small]_stable_ef"
+        case_dir = helper.create_dir(join(root_dir, str(case_id)))[0]
 
+        get_rot = Rotations()
+
+        # x_0 = np.asarray([3, 4, 1*np.pi/2])  # in xy
+        x_0 = np.asarray([1, 0, 0.01*np.pi/2])  # in xy
+        # x_0 = np.asarray([0, 0, 0])  # in xy
+        v_0 = np.zeros(3)  # in xy
+        # v_0 = np.asarray([0, 0, 1])  # in xy
+        k = np.asarray([1, 4, 1])  # in ef
+        # c = np.asarray([2, 1, 1])  # in ef
+        c = np.asarray([0, 0, 0])  # in ef
+        inertia = np.asarray([1, 1, 1])
+
+        section_data = {
+            "inertia": inertia.tolist(),
+            "damping": c.tolist(),
+            "stiffness": k.tolist(),
+            "chord": 1
+        }
+
+        K = np.diag(k)
+        C = np.diag(c)
+        M = np.diag(inertia)
+
+        T = 20
+        dt = 0.0005
+        # dt = 0.01
+        t = np.linspace(0, T, int(T/dt)+1)
+        n_per_10 = (t<=10).sum()
+
+        f = np.c_[0.*np.ones_like(t), 0*np.ones_like(t), 0.*np.pi*np.ones_like(t)]
+        # f = np.c_[np.ones(n_per_10), np.zeros(n_per_10), np.zeros(n_per_10)]
+        # phi = np.linspace(0, 40, t.size)
+        # f = np.r_[f, np.c_[np.cos(phi), np.sin(phi), np.zeros_like(phi)]]
+        # f = np.r_[np.c_[np.cos(phi), np.sin(phi), np.zeros_like(phi)]]
+        # f = get_inflow(t, [(10, 10, 1, 0), (20, 20, 4, 45), (30, 30, 0, 0)], 1, 0)
+
+        # f = get_inflow(t, [(10, 10, 1, 0), (20, 20, 4, 45), (30, 30, 0, 0)], 1, 0)
+        # moment = np.r_[np.zeros(n_per_10-1), 3*np.pi/2*np.ones(n_per_10-1), np.zeros(n_per_10-1), np.zeros(n_per_10)]
+        # f = np.c_[f, moment]
+
+        sf = StructForce()
+        cs = "xy"
+        init = sf.get_scheme_init_method(f"linear_{cs}")
+        init(None, k, c)
+        f_struct = sf.get_scheme_method(f"linear_{cs}")
+
+        ti = TimeIntegration()
+        init = ti.get_scheme_init_method("eE")
+        init(None, inertia)
+        time_integrator = ti.get_scheme_method("eE")
+
+        time_integrator = TimeIntegration()
+        time_integrator._init_eE("_", inertia)
+        integration_func = time_integrator.get_scheme_method("eE")
+
+        sf = StructForce()
+        sf._init_linear("_", k, c)
+        sf_funcs = {"xy": sf._linear_xy, "ef": sf._linear_ef}
+        
+        for cs in ["xy", "ef"]:
+            dir_res = helper.create_dir(join(case_dir, cs))[0]
+
+            with open(join(dir_res, "section_data.json"), "w") as json_file:
+                json.dump(section_data, json_file, indent=4)
+
+            airfoil = ThreeDOFsAirfoil(dir_polar="data/FFA_WA3_221", time=t)
+            airfoil.dt = dt*np.ones(t.size)
+            airfoil.pos[0, :] = x_0
+            airfoil.vel[0, :] = v_0
+
+            airfoil.aero = f
+            airfoil.damp = np.zeros((t.size, 3))
+            airfoil.stiff = np.zeros((t.size, 3))
+
+            sf_func = sf_funcs[cs]   
+            full_rotations = 0
+            was_below_0 = False
+            for i in range(t.size-1):
+                current_angle = airfoil.pos[i, 2]
+                airfoil.damp[i, :], airfoil.stiff[i, :] = sf_func(airfoil, i)
+
+                # airfoil.aero[i, :] = [-np.sin(current_angle), np.cos(current_angle), 0]
+                pos, vel, accel = integration_func(airfoil, i)
+                # if pos[1] > 0 and was_below_0:
+                #     full_rotations += 1
+                #     was_below_0 = False
+                # if pos[1] < 0:
+                #     was_below_0 = True
+                # angle = np.arctan2(pos[1], pos[0])
+                # angle = angle if angle > 0 else angle+2*np.pi
+                # pos[2] = angle+full_rotations*2*np.pi
+                # vel[2] = (airfoil.pos[i, 2]-airfoil.pos[i-1, 2])/dt if i>0 else 1
+                airfoil.pos[i+1, :] = pos
+                airfoil.vel[i+1, :] = vel
+                airfoil.accel[i+1, :] = accel
+
+            i = t.size-1
+            airfoil.damp[i, :], airfoil.stiff[i, :] = sf_func(airfoil, i)
+            airfoil.inflow = np.zeros((t.size, 2))
+            airfoil._save(dir_res)
+
+            post_calc = PostCaluculations(dir_res, "alpha_steady", cs)
+            post_calc.project_data()
+            post_calc.power()
+            post_calc.kinetic_energy()
+            post_calc.potential_energy()
+
+            dir_plots = helper.create_dir(join(dir_res, "plots"))[0]
+            plotter = Plotter("data/FFA_WA3_221/profile.dat", dir_res, dir_plots, cs, dt_res=500)
+            plotter.force()
+            plotter.energy()
+
+        # # E_pot = E_pot[:, :2]
+        # # E_kin = E_kin[:, :2]
+        # E_tot = E_pot.sum(axis=1)+E_kin.sum(axis=1)
+        
+        # v_in_ef = _v_ef_calc(vel[:, 0], vel[:, 1], vel[:, 2], pos[:, 0], pos[:, 1], pos[:, 2])
+        # f_damp_ef = -c*v_in_ef
+        # p_damp_ef = f_damp_ef*v_in_ef
+
+        # f_stiff = -k*ef_poss
+        # p_stiff = f_stiff*v_in_ef
+        
+        # # p_damp_xy = (f_damps[1:]+f_damps[:-1])/2*(vel[1:]+vel[:-1])/2
+        # p_damp_xy = f_damps*vel
+
+        # w_damp_ef = (p_damp_ef*dt)
+        # w_damp_xy = (p_damp_xy*dt)
+
+        # # w_damp_ef = (p_damp_ef*dt).sum(axis=0).sum()
+        # # w_damp_xy = (p_damp_xy*dt).sum(axis=0).sum()
+        # # damping_errors[j] = np.abs((E_tot[0]+w_damp))/E_tot[0]
+        # # energy_errors[j] = np.abs((E_tot[0]-E_tot[-2]))/E_tot[0]
+
+        # w_stiff_ef = (p_stiff*dt)
+        # dpos = pos[1:, :]-pos[:-1, :]
+        # work_x = f_ext[:-1, 0]*dpos[:, 0]
+        # work_y = f_ext[:-1, 1]*dpos[:, 1]
+        # work_tors = f_ext[:-1, 2]*dpos[:, 2]
+        # work = np.c_[work_x, work_y, work_tors]
+
+        # work_e = (np.cos(pos[:-1, 2])*f_ext[:-1, 0]+np.sin(pos[:-1, 2])*f_ext[:-1, 1])
+        # work_e *= (np.cos(pos[:-1, 2])*dpos[:, 0]+np.sin(pos[:-1, 2])*dpos[:, 1])
+
+        # work_f = (-np.sin(pos[:-1, 2])*f_ext[:-1, 0]+np.cos(pos[:-1, 2])*f_ext[:-1, 1])
+        # work_f *= (-np.sin(pos[:-1, 2])*dpos[:, 0]+np.cos(pos[:-1, 2])*dpos[:, 1])
+
+        # work_ef = np.c_[work_e, work_f]
+
+        # print(E_tot[0], E_tot[-1], w_damp_xy.sum(axis=0).sum(), w_damp_ef.sum(axis=0).sum(), work.sum(axis=0).sum())
+        # print(E_pot[0, :])
+        # print(w_damp_xy.sum(axis=0))
+        # print(w_damp_ef.sum(axis=0))
+        # print(work.sum(axis=0))
+        # print(work_ef.sum(axis=0))

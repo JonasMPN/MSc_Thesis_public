@@ -45,12 +45,12 @@ struct_def = {  # definition of structural parameters
     "chord": 1,
     "mass": 1,
     "mom_inertia": 1,
-    "damping_edge": .568,
-    "damping_flap": .2,
-    "damping_tors": .5,
-    "stiffness_edge": 1,
-    "stiffness_flap": 1,
-    "stiffness_tors": 1,
+    "damping_0": .568,
+    "damping_1": .2,
+    "damping_2": .5,
+    "stiffness_0": 1,
+    "stiffness_1": 1,
+    "stiffness_2": 1,
 }
 
 def main(simulate, forced, post_calc, plot_results, animate_results, plot_combined_forced):
