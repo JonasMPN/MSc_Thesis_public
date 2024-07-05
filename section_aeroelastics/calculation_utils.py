@@ -51,7 +51,8 @@ class SimulationResults(DefaultsSimulation):
         root: str, 
         files: dict[str, list[str]]=None, 
         split: dict[str, list[str]]=None, 
-        use_default: bool=True):
+        use_default: bool=True,
+        apply: dict[Callable]=None):
         """Saves instance attributes to CSV .dat files.
 
         :param root: Root directory in relation to the current working directory into which the files are saved.
@@ -73,6 +74,7 @@ class SimulationResults(DefaultsSimulation):
         split = split if split is not None else {}
         user_defined_split = split.keys()
         user_defined_files = files.keys()
+        to_change = apply.keys() if apply is not None else []
 
         if use_default:
             for param, split_into in self._dfl_split.items():
@@ -93,7 +95,10 @@ class SimulationResults(DefaultsSimulation):
                 if param in split.keys():
                     for i, split_name in enumerate(split[param]):
                         try:
-                            df[param+"_"+split_name] = vars(self)[param][:, i]
+                            vals = vars(self)[param][:, i]
+                            if param in to_change:
+                                vals = apply[param](vals)
+                            df[param+"_"+split_name] = vals
                         except ValueError:
                             #todo add original error message
                             raise ValueError(f"The above ValueError was caused for parameter {param}.")
@@ -119,9 +124,9 @@ class SimulationSubRoutine(ABC):
         for scheme in self._implemented_schemes:
             for attribute, has_keys in copy(defined).items():
                 if scheme in copied_params:
-                    assert scheme not in has_keys, (f"Settings for scheme '{scheme}' is tried to be set directly and "
-                                                    f"by copying from scheme '{copy_params[scheme]}' simultaneously. "
-                                                    "Only one at a time is allowed.")
+                    # assert scheme not in has_keys, (f"Settings for scheme '{scheme}' are tried to be set directly and "
+                    #                                 f"by copying from scheme '{copy_params[scheme]}' simultaneously. "
+                    #                                 "Only one at a time is allowed.")
                     getattr(self, attribute)[scheme] = getattr(self, attribute)[copy_params[scheme]]
                     continue
                 assert scheme in has_keys, (f"Attribute '{attribute}' of class '{type(self).__name__}' is missing "
@@ -189,11 +194,11 @@ class SimulationSubRoutine(ABC):
                 
         if len(is_missing) != 0:
             raise ValueError(f"Using scheme '{scheme}' requires that {must_have} are given in function call "
-                             f"'{fnc_call}'()', but {is_missing} is/are missing.")
+                             f"'{fnc_call}()', but {is_missing} is/are missing.")
         
         if len(not_supported) != 0 and self.verbose:
-            print(f"Using scheme '{scheme}' in '{fnc_call}()' accepts kwrags '{can_have}', but {not_supported} "
-                  f"was/were additionally given. They have no influence on the execution.")
+            print(f"Using scheme '{scheme}' in '{fnc_call}()' accepts optional kwrags '{can_have}', but "
+                  f"{not_supported} was/were additionally given. They have no influence on the execution.")
   
     def _skip(*args, **kwargs):
         pass
@@ -411,13 +416,14 @@ def get_inflow(
     init_inflow = init_velocity*np.r_[np.cos(np.deg2rad(init_angle)), np.sin(np.deg2rad(init_angle))]
     inflow[:np.logical_not(t<=ramps[0][0]).argmax(), :] = init_inflow
     last_velocity = init_velocity
-    last_angle = init_angle
+    last_angle = np.deg2rad(init_angle)
     for i_ramp, (t_begin, t_end, velocity, angle) in enumerate(ramps):
+        angle = np.deg2rad(angle)
         ids = np.logical_and(t>=t_begin, t<=t_end)
         n_timesteps = ids.sum()
         if n_timesteps > 1:
             velocities = np.linspace(last_velocity, velocity, n_timesteps) 
-            angles = np.linspace(np.deg2rad(last_angle), np.deg2rad(angle), n_timesteps)
+            angles = np.linspace(last_angle, angle, n_timesteps)
         else:
             velocities = np.asarray([velocity])
             angles = np.asarray([angle])
@@ -434,90 +440,118 @@ def get_inflow(
     return inflow
         
 
-def compress_oscillation(file_motion: str, 
-                         file_compressed: str,
-                         cols: str|list[str],
-                         col_time: str="time", 
-                         period_res: int=100,
-                         max_rmse: float=1e-4):
+def compress_compound_oscillation(file_motion: str, 
+                                  file_compressed: str,
+                                  cols: str|list[str],
+                                  col_time: str="time", 
+                                  period_res: int=100,
+                                  max_rmse: float=1e-4,
+                                  round_coeffs: int=5,
+                                  verbose: bool=True):
     cols = cols if isinstance(cols, list) else [cols]
     df = pd.read_csv(file_motion)
-    time = df[col_time].to_numpy()
-    compressed = {param: {"t_begin": None,
-                          "dt": None,
-                          "ampl": None,
-                          "freq": None, 
-                          "shift": None, 
-                          "overall_period": None,
-                          "overall_amplitude": None, 
-                          "peaks_mean": None,
-                          "fft_coeffs_ids": None,
-                          "fft_coeffs_re": None,
-                          "fft_coeffs_imag": None,
-                          "N": None,
-                          "rmse": None} 
-                          for param in cols}
+    max_peaks = [0, 0]
+    min_peaks = [0]
+    all_timeseries = {}
     for col in cols:
-        val = df[col].to_numpy()
-        peaks = find_peaks(val)[0]
-        n_peaks = find_peaks(-val)[0]
-
-        ids_period = np.arange(peaks[-2], peaks[-1])
-        n_interp = ids_period.size
-        t_period = time[ids_period]
-        val_period = val[ids_period]
-
-        compressed[col]["t_begin"] = float(t_period[0])
-        compressed[col]["overall_period"] = float(t_period[-1]-t_period[0])
-        compressed[col]["overall_amplitude"] = float((val[peaks[-1]]-val[n_peaks[-1]])/2)
-        compressed[col]["peaks_mean"] = float((val[peaks[-1]]+val[n_peaks[-1]])/2)
-
-        t_compression = np.linspace(t_period[0], t_period[-1], period_res)
-        v_compression = interp1d(t_period, val_period)(t_compression)
-
-        compressed[col]["dt"] = t_compression[1]-t_compression[0]
-
-        fourier_coeffs = rfft(v_compression)
-        amplitude = 2/period_res*np.abs(fourier_coeffs)
-        ids_sorted_ampl = np.argsort(amplitude)[::-1]
-        for use_up_to in range(1, period_res+1):
-            yf_subset = np.zeros_like(fourier_coeffs, dtype=complex)
-            ids_subset = ids_sorted_ampl[:use_up_to]
-            yf_subset[ids_subset] = fourier_coeffs[ids_subset] 
-            
-            base_reconstructed = interp1d(t_compression, irfft(yf_subset, n=period_res))(t_period)
-            rmse = np.sqrt(((val_period-base_reconstructed)**2).sum()/n_interp)
-            if rmse < max_rmse:
-                break
-            
-        if use_up_to == period_res:
-            print(f"Max error of '{max_rmse}' could not be reached for oscillation of '{col}'; "
-                  f"continuing with all ({period_res}) coefficients and an rmse='{rmse}'.")
-
-        round_at = 5
-        freq = np.round(rfftfreq(period_res, compressed[col]["dt"])[ids_subset], round_at)
-        amplitudes = amplitude[ids_subset]
-        try:
-            freq_0 = freq == 0
-            if freq_0.sum() > 1:
-                raise ValueError(f"More than one zero-frequency fft coefficient found. This is likely due to "
-                                 f"rounding the frequencys at the {round_at}th decimal point.")
-            idx_mean = freq_0.argmax()
-            amplitudes[idx_mean] /= 2
-        except ValueError:
+        timeseries = df[col].to_numpy()
+        all_timeseries[col] = timeseries
+        peaks = find_peaks(timeseries)[0]
+        if peaks[-1]-peaks[-2] > max_peaks[-1]-max_peaks[-2]:
+            max_peaks = peaks
+            min_peaks = find_peaks(-timeseries)[0]
+        else:
             pass
-        
-        compressed[col]["fft_coeffs_ids"] = ids_subset.tolist()
-        compressed[col]["fft_coeffs_re"] = [tmp_yf.real for tmp_yf in fourier_coeffs[ids_subset].tolist()]
-        compressed[col]["fft_coeffs_imag"] = [tmp_yf.imag for tmp_yf in fourier_coeffs[ids_subset].tolist()]
-        compressed[col]["N"] = period_res
-        compressed[col]["ampl"] = amplitudes.tolist()
-        compressed[col]["freq"] = freq.tolist()
-        compressed[col]["shift"] = np.angle(fourier_coeffs)[ids_subset].tolist()
-        compressed[col]["rmse"] = float(rmse)
+    
+    time = df[col_time].to_numpy()
+    compressed = {param: {} for param in cols}
+    for col, timeseries in all_timeseries.items():
+        compressed[col] = compress_oscillation(time, timeseries, period_res, max_rmse, round_coeffs, max_peaks, 
+                                               min_peaks, verbose)
 
     with open(file_compressed, "w") as f:
         json.dump(compressed, f, indent=4)
+    return compressed
+
+
+def compress_oscillation(
+        time: np.ndarray, 
+        timeseries: np.ndarray,
+        period_res: int=100,
+        max_rmse: float=1e-4,
+        round_coeffs: int=5,
+        max_peaks: list[float]|np.ndarray=None,
+        min_peaks: list[float]|np.ndarray=None,
+        verbose: bool=True):
+    compressed = {"t_begin": None,
+                  "dt": None,
+                  "ampl": None,
+                  "freq": None, 
+                  "shift": None, 
+                  "overall_period": None,
+                  "overall_amplitude": None, 
+                  "peaks_mean": None,
+                  "fft_coeffs_ids": None,
+                  "fft_coeffs_re": None,
+                  "fft_coeffs_imag": None,
+                  "N": None,
+                  "rmse": None} 
+    peaks = find_peaks(timeseries)[0] if max_peaks is None else max_peaks
+    n_peaks = find_peaks(-timeseries)[0] if min_peaks is None else min_peaks
+
+    ids_period = np.arange(peaks[-2], peaks[-1])
+    n_interp = ids_period.size
+    t_period = time[ids_period]
+    val_period = timeseries[ids_period]
+
+    compressed["t_begin"] = float(t_period[0])
+    compressed["overall_period"] = float(t_period[-1]-t_period[0])
+    compressed["overall_amplitude"] = float((timeseries[peaks[-1]]-timeseries[n_peaks[-1]])/2)
+    compressed["peaks_mean"] = float((timeseries[peaks[-1]]+timeseries[n_peaks[-1]])/2)
+
+    t_compression = np.linspace(t_period[0], t_period[-1], period_res)
+    v_compression = interp1d(t_period, val_period)(t_compression)
+
+    compressed["dt"] = t_compression[1]-t_compression[0]
+
+    fourier_coeffs = rfft(v_compression)
+    amplitude = 2/period_res*np.abs(fourier_coeffs)
+    ids_sorted_ampl = np.argsort(amplitude)[::-1]
+    for use_up_to in range(1, period_res+1):
+        yf_subset = np.zeros_like(fourier_coeffs, dtype=complex)
+        ids_subset = ids_sorted_ampl[:use_up_to]
+        yf_subset[ids_subset] = fourier_coeffs[ids_subset] 
+        
+        base_reconstructed = interp1d(t_compression, irfft(yf_subset, n=period_res))(t_period)
+        rmse = np.sqrt(((val_period-base_reconstructed)**2).sum()/n_interp)
+        if rmse < max_rmse:
+            break
+        
+    if use_up_to == period_res and verbose:
+        print(f"Max error of '{max_rmse}' could not be reached; "
+              f"continuing with all {period_res} coefficients and an rmse='{rmse}'.")
+
+    round_coeffs = 5
+    freq = np.round(rfftfreq(period_res, compressed["dt"])[ids_subset], round_coeffs)
+    amplitudes = amplitude[ids_subset]
+    try:
+        freq_0 = freq == 0
+        if freq_0.sum() > 1:
+            raise ValueError(f"More than one zero-frequency fft coefficient found. This is likely due to "
+                                f"rounding the frequencys at the {round_coeffs}th decimal point.")
+        idx_mean = freq_0.argmax()
+        amplitudes[idx_mean] /= 2
+    except ValueError:
+        pass
+    
+    compressed["fft_coeffs_ids"] = ids_subset.tolist()
+    compressed["fft_coeffs_re"] = [tmp_yf.real for tmp_yf in fourier_coeffs[ids_subset].tolist()]
+    compressed["fft_coeffs_imag"] = [tmp_yf.imag for tmp_yf in fourier_coeffs[ids_subset].tolist()]
+    compressed["N"] = period_res
+    compressed["ampl"] = amplitudes.tolist()
+    compressed["freq"] = freq.tolist()
+    compressed["shift"] = np.angle(fourier_coeffs)[ids_subset].tolist()
+    compressed["rmse"] = float(rmse)
     return compressed
 
 
