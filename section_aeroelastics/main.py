@@ -3,6 +3,7 @@ from post_calculations import PostCaluculations
 from calculation_utils import get_inflow
 from calculation_wrappers import run_forced_parallel_from_free_case, post_calculations_parallel
 import numpy as np
+import pandas as pd
 import json
 from plotting import Plotter, Animator, combined_forced
 from os.path import join
@@ -12,11 +13,13 @@ from itertools import product
 helper = Helper()
 
 do = {
-    "simulate": False,  # run a simulation
+    "simulate": True,  # run a simulation
     "forced": False,
-    "post_calc": False,  # peform post calculations
-    "plot_results": False,  # plot results
-    "animate_results": True,
+    "post_calc": True,  # peform post calculations
+    "plot_results": True,  # plot results,
+    "plot_results_fill": False,
+    "plot_coupled_timeseries": False,
+    "animate_results": False,
     "plot_combined_forced": False
 }
 
@@ -26,91 +29,143 @@ root = "data/FFA_WA3_221"  # set which airfoil polars to use. Simulatenously def
 sim_type = "free"
 # sim_type = "forced"
 
-aero_scheme = "qs"
+# aero_scheme = "qs"
+aero_scheme = "BL_openFAST_Cl_disc"
 
-alpha_lift = "alpha_qs"
+alpha_lift = "alpha_qs" if aero_scheme == "qs" else "alpha_eff"
 
 # case_name = "test_BL_openFAST"
 # case_name = "test_qs"
-case_name = "aoa_20"
+# case_name = "initial_y_and_tors_set"
+# case_name = "initial_at_steady_state"
+case_name = "val_staeblein"
 
 # for forced
-motion_from_axes = ["edge", "flap", "tors"]  # adapt 'cs' for changes here
-coordinate_system = "ef"
-# motion_from_axes = ["x", "y", "tors"]  # adapt 'cs' for changes here
-# coordinate_system = "xy"
+# motion_from_axes = ["edge", "flap", "tors"]  # adapt 'cs' for changes here
+# coordinate_system = "ef"
+motion_from_axes = ["x", "y", "tors"]  # adapt 'cs' for changes here
+coordinate_system = "xy"
 
-#todo update to values from paper
-struct_def = {  # definition of structural parameters
-    "chord": 1,
-    "mass": 1,
-    "mom_inertia": 1,
-    "damping_0": .568,
-    "damping_1": .2,
-    "damping_2": .5,
-    "stiffness_0": 1,
-    "stiffness_1": 1,
-    "stiffness_2": 1,
+linear_inertia = 203  # aka mass
+e_cg = 0.304
+torsional_inertia = linear_inertia*(e_cg**2+0.785**2)
+nat_freq_0 = 0.93
+nat_freq_1 = 0.61
+nat_freq_2 = 6.66
+damping_ratio_0 = 0.0049
+damping_ratio_1 = 0.0047
+# damping_ratio_1 = 0.342
+damping_ratio_2 = 0.0093
+
+structure_def = {  # definition of structural parameters
+    "chord": 3.292,
+    "coordinate_system": "xy",
+    "inertia": [linear_inertia, linear_inertia, torsional_inertia], # [linear, linear, torsion]
+    "damping": [
+        # 2*damping_ratio_0*nat_freq_0, 
+        # 2*damping_ratio_1*nat_freq_1, 
+        # 2*damping_ratio_2*nat_freq_2
+        damping_ratio_0*2*linear_inertia*nat_freq_0, 
+        damping_ratio_1*2*linear_inertia*nat_freq_1, 
+        damping_ratio_2*2*linear_inertia*nat_freq_2, 
+        ],  # [x_0, x_1, torsion]
+    "stiffness": [linear_inertia*nat_freq_0**2, 
+                  linear_inertia*nat_freq_1**2, 
+                  torsional_inertia*nat_freq_2**2]  # [x_0, x_1, torsion]
 }
+freq = 0.61  # in Hz
+damp_ratio = 0.342
+damping_coeff = freq*damp_ratio
+damped_freq = freq*np.sqrt(1-damping_coeff**2)
+x0 = 0.01
+nat_freq = np.sqrt(structure_def["stiffness"][1]/structure_def["inertia"][1])
+from calculations import Oscillations
+osci = Oscillations(structure_def["inertia"][1], nat_freq, damp_ratio)
 
-def main(simulate, forced, post_calc, plot_results, animate_results, plot_combined_forced):
+def main(simulate, forced, post_calc, plot_results, plot_results_fill, plot_coupled_timeseries, 
+         animate_results, plot_combined_forced):
     if simulate:
         case_dir = helper.create_dir(join(root, "simulation", "free", aero_scheme, case_name))[0]
         with open(join(case_dir, "section_data.json"), "w") as f:
-            json.dump(struct_def, f, indent=4)
+            json.dump(structure_def, f, indent=4)
         dt = 0.01  # if dt<1e-5, the dt rounding in compress_oscillation() in calculation_utils.py needs to be adapted
-        t_end = 100        
+        t_end = 50
         t = dt*np.arange(int(t_end/dt))  # set the time array for the simulation
-        NACA_643_618 = ThreeDOFsAirfoil(root, t, verbose=True)
+        NACA_643_618 = ThreeDOFsAirfoil(root, t, verbose=False)
 
         # get inflow at each time step. The below line creates inflow that has magnitude 1 and changes from 0 deg to 40
         # deg in the first 3s.
-        inflow = get_inflow(t, [(0, 3, 1, 20)], init_velocity=1)
-        init_pos = np.zeros(3)  # initial conditions for the position in [x, y, rotation in rad]
+        # inflow = get_inflow(t, [(0, 3, 10, 20)], init_velocity=1)
+        inflow = get_inflow(t, [(0, 0, 50, 0)], init_velocity=0.1)
+        # init_pos = np.zeros(3)  # initial conditions for the position in [x, y, rotation in rad]
+        init_pos, f_init = NACA_643_618.approximate_steady_state(inflow[0, :], structure_def["chord"], 
+                                                                 structure_def["stiffness"], x=False, y=False, 
+                                                                 torsion=False)
+        # init_pos[1] += 10
+        NACA_643_618.aero[-1, :] = f_init  # if an HHT-alpha algorithm is used
         init_vel = np.zeros(3)  # initial conditions for the velocity in [x, y, rotation in rad/s]
 
         # set the calculation scheme for the aerodynamic forces
         if aero_scheme == "qs":
-            NACA_643_618.set_aero_calc()
+            NACA_643_618.set_aero_calc(chord=structure_def["chord"], pitching_around=0.25, alpha_at=0.75)
         elif aero_scheme == "BL_chinese":
-            NACA_643_618.set_aero_calc("BL_chinese", A1=0.3, A2=0.7, b1=0.14, b2=0.53, pitching_around=0.25, 
-                                       alpha_at=0.75, chord=struct_def["chord"])
+            NACA_643_618.set_aero_calc("BL_chinese", A1=0.3, A2=0.7, b1=0.14, b2=0.53, pitching_around=0.25+0.113, 
+                                       alpha_at=0.75, chord=structure_def["chord"])
         elif aero_scheme == "BL_openFAST_Cl_disc":
             NACA_643_618.set_aero_calc("BL_openFAST_Cl_disc", A1=0.165, A2=0.335, b1=0.0445, b2=0.3, 
-                                       pitching_around=0.25, alpha_at=0.75, chord=struct_def["chord"])
+                                       pitching_around=0.25, alpha_at=0.75, chord=structure_def["chord"])
         else:
             raise NotImplementedError(f"'aero_scheme'={aero_scheme} not implemented.")
         
         # set the calculation scheme for the structural damping and stiffness forces
-        NACA_643_618.set_struct_calc("linear", **struct_def)
-        # NACA_643_618.set_time_integration()
-        NACA_643_618.set_time_integration("HHT-alpha-adapted", alpha=0.1, dt=t[1], **struct_def)
-        NACA_643_618.simulate(inflow, init_pos, init_vel)  # perform simulation
+        structure_def["inertia"] = np.diag(structure_def["inertia"])
+        structure_def["inertia"][1, 2] = -linear_inertia*e_cg
+        structure_def["inertia"][2, 1] = -linear_inertia*e_cg
+        NACA_643_618.set_struct_calc("linear_xy", **structure_def)
+        # NACA_643_618.set_time_integration("eE", **structure_def)
+        NACA_643_618.set_time_integration("HHT-alpha-xy-adapted", alpha=0.1, dt=t[1]-t[0], **structure_def)
+        # NACA_643_618.simulate(inflow, init_pos, init_vel)  # perform simulation
+        # damped = osci.damped(t)
+        # vel = np.r_[0, (damped[1:]-damped[:-1])/t[1]]
+        NACA_643_618.simulate_along_path(inflow, "xy", init_pos, init_vel, 
+                                         {0: np.zeros_like(t), 
+                                        #  1: damped, 
+                                        #  2: np.zeros_like(t)
+                                         }, 
+                                         {0: np.zeros_like(t), 
+                                        #  1: vel, 
+                                        #  2: np.zeros_like(t)
+                                         }
+                                         )  # perform simulation
         NACA_643_618.save(case_dir)  # save simulation results
 
     if forced:
+        dir_free = join(root, "simulation", "free", aero_scheme, case_name)
+        ff_free_motion = join(dir_free, "general.dat")
+        
         n_parallel = 8
-        root_cases = join(root, "simulation", sim_type, aero_scheme, coordinate_system, case_name)
-        ff_free_motion = join(root, "simulation", "free", "qs", "base", "general.dat")
+        root_cases = join(root, "simulation", sim_type, aero_scheme, case_name)
+        df_gen = pd.read_csv(ff_free_motion)
         # motion_types = ["pos", "vel", "accel"]
         motion_types = ["pos", "vel"]
         motion_cols = ["_".join((motion, axes)) for motion, axes in product(motion_types, motion_from_axes)]
 
         # forced_amplitude = [0.2, 0.4, 0.6, 0.8, 1]
         forced_amplitude_fac = [0.1, 0.2, 0.5, 0.8, 0.9, 1, 1.1, 1.2, 2, 4]
-        forced_aoa = [0, 10, 20, 30, 40]
+        forced_aoa = [0, 10, 15, 20, 30]
         periods = 4
         period_res = 100
+        inflow_velocity = np.linalg.norm(df_gen[["inflow_x", "inflow_y"]].to_numpy()[-1, :])
         # forced_amplitude_fac = [0]
         # forced_aoa = [0]
         run_forced_parallel_from_free_case(root, ff_free_motion, motion_cols, coordinate_system, root_cases, 
-                                           n_parallel, aero_scheme, periods, period_res, struct_def, 
-                                           forced_amplitude_fac, forced_aoa)
+                                           n_parallel, aero_scheme, inflow_velocity, periods, period_res, 
+                                           structure_def, forced_amplitude_fac, forced_aoa)
 
     if post_calc:
         if sim_type == "free":
             post_calc = PostCaluculations(dir_sim_res=join(root, "simulation", "free", aero_scheme, case_name),
-                                          alpha_lift=alpha_lift)
+                                          alpha_lift=alpha_lift, coordinate_system_structure=coordinate_system)
             post_calc.project_data()  # projects the simulation's x-y-rot_z data into different coordinate systems such as
             # edgewise-flapwise-rot_z or drag-lift_rot_z.
             post_calc.power()  # calculate and save the work done by the aerodynamic and structural damping forces
@@ -120,7 +175,7 @@ def main(simulate, forced, post_calc, plot_results, animate_results, plot_combin
             
         if "forced" in sim_type:
             n_parallel = 8
-            root_cases = join(root, "simulation", sim_type, aero_scheme, coordinate_system, case_name)
+            root_cases = join(root, "simulation", sim_type, aero_scheme, case_name)
             post_calculations_parallel(root_cases, alpha_lift, n_parallel)
 
     if plot_results:
@@ -128,31 +183,58 @@ def main(simulate, forced, post_calc, plot_results, animate_results, plot_combin
         if sim_type == "free":
             dir_sim = join(root, "simulation", "free", aero_scheme, case_name)  # define path to the root of the simulation results
         elif "forced" in sim_type:
-            case_id = "44"
-            dir_sim = join(root, "simulation", sim_type, aero_scheme, coordinate_system, case_name, case_id)
+            case_id = "27"
+            dir_sim = join(root, "simulation", sim_type, aero_scheme, case_name, case_id)
         dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
-        plotter = Plotter(file_profile, dir_sim, dir_plots) 
+        plotter = Plotter(file_profile, dir_sim, dir_plots, structure_def["coordinate_system"]) 
         plotter.force()  # plot various forces of the simulation
         plotter.energy()  # plot various energies and work done by forces of the simulation
-        if "BL" in case_name:
+        if "BL" in aero_scheme:
             plotter.Beddoes_Leishman()
+    
+    if plot_results_fill:
+        file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
+        if sim_type == "free":
+            dir_sim = join(root, "simulation", "free", aero_scheme, case_name)  # define path to the root of the simulation results
+            peak_distance = 400
+        elif "forced" in sim_type:
+            case_id = "27"
+            dir_sim = join(root, "simulation", sim_type, aero_scheme, case_name, case_id)
+            peak_distance = 90
+        dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
+        plotter = Plotter(file_profile, dir_sim, dir_plots, structure_def["coordinate_system"]) 
+        alpha = 0.3
+        plotter.force_fill(alpha=alpha, peak_distance=peak_distance)  # plot various forces of the simulation
+        plotter.energy_fill(alpha=alpha, peak_distance=peak_distance)  # plot various energies and work done by forces of the simulation
+        if "BL" in aero_scheme:
+            plotter.Beddoes_Leishman_fill(alpha=alpha, peak_distance=peak_distance)
+
+    if plot_coupled_timeseries:
+        file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
+        if sim_type == "free":
+            dir_sim = join(root, "simulation", "free", aero_scheme, case_name)  # define path to the root of the simulation results
+        elif "forced" in sim_type:
+            case_id = "27"
+            dir_sim = join(root, "simulation", sim_type, aero_scheme, case_name, case_id)
+        dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
+        plotter = Plotter(file_profile, dir_sim, dir_plots, structure_def["coordinate_system"]) 
+        plotter.couple_timeseries()
 
     if animate_results:
         file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
-        # dir_sim = join(root, "simulation", sim_type, case_name)  # define path to the root of the simulation results
-        # dir_sim = "data/FFA_WA3_221/simulation/forced/qs/ef/e/"
-        dir_sim = "test"
+        dir_sim = join(root, "simulation", sim_type, aero_scheme, case_name)   # define path to the root of the simulation results
         dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
         animator = Animator(file_profile, dir_sim, dir_plots) 
-        alpha_lift = "alpha_steady"
+        # animate various forces of the simulation
         animator.force(angle_lift=alpha_lift, arrow_scale_forces=0.5, arrow_scale_moment=.1,
-                       plot_qc_trailing_every=2, keep_qc_trailing=200, until=30, dt_per_frame=0.1)  # plot various forces of the simulation
-        # animator.energy(angle_lift="alpha_qs", arrow_scale_forces=0.5, arrow_scale_moment=.1, 
-        #                plot_qc_trailing_every=2, keep_qc_trailing=200)  # plot various energies and work done by forces of
-        # the simulation
+                       plot_qc_trailing_every=2, keep_qc_trailing=200, until=30, dt_per_frame=0.1)
+        # plot various energies and work done by forces 
+        # animator.energy(angle_lift=alpha_lift, arrow_scale_forces=0.5, arrow_scale_moment=.1, 
+        #                plot_qc_trailing_every=2, keep_qc_trailing=200, until=30, dt_per_frame=0.1)  
+        # of the simulation
 
     if plot_combined_forced:
-        combined_forced(join(root, "simulation", sim_type, aero_scheme, coordinate_system, case_name))
+        combined_forced(join(root, "simulation", sim_type, aero_scheme, case_name))
 
 
 if __name__ == "__main__":
