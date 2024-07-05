@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.linalg import solve
-from scipy.optimize import brentq
+from scipy.optimize import brentq, newton
 import pandas as pd
 from os.path import join, isfile
 from typing import Callable
@@ -59,6 +59,40 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
         self._time_integration_scheme_settings = None
 
         self._added_sim_params = {filename: None for filename in self._dfl_files.keys()}
+
+    def approximate_steady_state(self, inflow: np.ndarray, chord: float, stiffness: np.ndarray,  
+                                 x: bool=False, y: bool=False, torsion: bool=False, density: float=1.225):
+        df_polars = pd.read_csv(join(self.dir_polar, self.file_polar_data), delim_whitespace=True)
+        # C_d = interpolate.interp1d(np.deg2rad(df_polars["alpha"]), df_polars["C_d"])
+        # C_l = interpolate.interp1d(np.deg2rad(df_polars["alpha"]), df_polars["C_l"])
+        # C_m = interpolate.interp1d(np.deg2rad(df_polars["alpha"]), df_polars["C_m"])
+
+        C_d = lambda x: 0.01
+        C_l = lambda x: 7.15*x
+        C_m = lambda x: -0.1
+
+        inflow_speed = np.linalg.norm(inflow)
+        inflow_angle = np.arctan(inflow[1]/inflow[0])
+        dynamic_pressure = 0.5*density*inflow_speed**2
+        base_force = dynamic_pressure*chord
+        if torsion:
+            def residue_moment(torsion_angle: float):
+                aero_mom = base_force*chord*C_m(inflow_angle-torsion_angle)
+                struct_mom = torsion_angle*stiffness[2]
+                return aero_mom+struct_mom  # from -aero_mom-struct_mom which would be correct for the coordinate system
+            tors_angle = newton(residue_moment, 0)
+        else:
+            tors_angle = 0
+        aoa = inflow_angle-tors_angle
+        # aero forces in x and y
+        f_aero_xy = (self.passive_2D(-inflow_angle)@np.c_[[base_force*C_d(aoa)], [base_force*C_l(aoa)]].T).flatten()
+        f_aero_xy[0] = f_aero_xy[0] if x else 0 
+        f_aero_xy[1] = f_aero_xy[1] if y else 0 
+        f_aero_tors = -base_force*chord*C_m(inflow_angle-tors_angle) if torsion else 0
+        f_aero = np.r_[f_aero_xy, f_aero_tors]
+        pos_x = f_aero_xy[0]/stiffness[0]
+        pos_y = f_aero_xy[1]/stiffness[1]
+        return np.asarray([pos_x, pos_y, tors_angle]), f_aero
   
     def set_aero_calc(self, scheme: str="quasi_steady", **kwargs):
         """Sets how the aerodynamic forces are calculated in the simulation. If the scheme is dependet on constants,
@@ -150,7 +184,7 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
             self.aero[i, :] = self._aero_force(self, i, **self._aero_scheme_settings)
             # get structural forces
             self.damp[i, :], self.stiff[i, :] = self._struct_force(self, i, **self._struct_scheme_settings)
-            # performe time integration
+            # perform time integration
             self.pos[i+1, :], self.vel[i+1, :], self.accel[i+1, :] = self._time_integration(self, i,
                                                                             **self._time_integration_scheme_settings)
             
@@ -163,6 +197,8 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
         self, 
         inflow: np.ndarray,
         coordinate_system: str,
+        init_position: np.ndarray,
+        init_velocity: np.ndarray,
         position: dict[str, np.ndarray],
         velocity: dict[str, np.ndarray],
         # acceleration: dict[str, np.ndarray]
@@ -199,6 +235,9 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
         init_funcs = [self._init_aero_force, self._init_struct_force, self._init_time_integration]
         scheme_settings = [self._aero_scheme_settings, self._struct_scheme_settings, 
                            self._time_integration_scheme_settings]
+        # the init funcs might depend on pos and vel, thus they need to be set before calling the init funcs
+        self.pos[0, :] = init_position
+        self.vel[0, :] = init_velocity
         for init_func, scheme_setting in zip(init_funcs, scheme_settings):
             init_func(self, **scheme_setting)
 
@@ -229,7 +268,7 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
             self.aero[i, :] = self._aero_force(self, i, **self._aero_scheme_settings)
             # get structural forces
             self.damp[i, :], self.stiff[i, :] = self._struct_force(self, i, **self._struct_scheme_settings)
-            # performe time integration
+            # perform time integration
             self.pos[i+1, :], self.vel[i+1, :], self.accel[i+1, :] = self._time_integration(self, i,
                                                                             **self._time_integration_scheme_settings)
 
@@ -266,7 +305,11 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
                     continue
                 files[filename] = list(set(files[filename]+params))
         #todo add error if use_default==False and files==None in method call
-        self._save(root, files, split, use_default)
+        apply = {
+            "damp": lambda vals: np.multiply(-1, vals),
+            "stiff": lambda vals: np.multiply(-1, vals),
+        }
+        self._save(root, files, split, use_default, apply)
 
     def _check_simulation_readiness(self, **kwargs):
         """Utility function checking whether all settings given in kwargs have been set.
@@ -675,7 +718,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         """
         sim_res.alpha_steady[i] = -sim_res.pos[i, 2]+sim_res.inflow_angle[i]
         qs_flow_angle, _, _ = self._quasi_steady_flow_angle(sim_res.vel[i, :], sim_res.pos[i, :], sim_res.inflow[i, :],
-                                                      chord, pitching_around, alpha_at)
+                                                            chord, pitching_around, alpha_at)
         
         rot = self.passive_3D_planar(-qs_flow_angle)
         sim_res.alpha_qs[i] = -sim_res.pos[i, 2]+qs_flow_angle
@@ -683,9 +726,9 @@ class AeroForce(SimulationSubRoutine, Rotations):
         rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
                             (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
 
-        dynamic_pressure = density/2*rel_speed
+        dynamic_pressure = density/2*rel_speed**2
         alpha_qs_deg = np.rad2deg(sim_res.alpha_qs[i])
-        coefficients = np.asarray([self.C_d(alpha_qs_deg), self.C_l(alpha_qs_deg), -self.C_m(alpha_qs_deg)])
+        coefficients = np.asarray([self.C_d(alpha_qs_deg), self.C_l(alpha_qs_deg), -self.C_m(alpha_qs_deg)*chord])
         return dynamic_pressure*chord*rot@coefficients
     
     @staticmethod
@@ -797,7 +840,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         # C_t and C_d point in opposite directions!
         coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], -C_m*chord])
         rot = self.passive_3D_planar(-sim_res.pos[i, 2]) 
-        dynamic_pressure = density/2*rel_speed
+        dynamic_pressure = density/2*rel_speed**2
         forces = dynamic_pressure*chord*rot@coefficients  # for [-f_x, f_y, mom]
         forces[0] *= -1
         return forces  # for [f_x, f_y, mom]
@@ -823,8 +866,10 @@ class AeroForce(SimulationSubRoutine, Rotations):
             T_p: float=1.5, T_f: float=6):
         #todo this is not really correct. It just switches Cl and Cn, but does that even work (looking at Cd and Ct).
         lcs = {param: value for param, value in locals().items() if param != "self"}
-        lcs["C_slope"] = self._C_n_slope
-        lcs["alpha_0"] = self._alpha_0n
+        # lcs["C_slope"] = self._C_n_slope
+        # lcs["alpha_0"] = self._alpha_0n
+        lcs["C_slope"] = 7.15
+        lcs["alpha_0"] = 0
         return self._BL_openFAST_disc(**lcs)
 
     def _BL_openFAST_disc(
@@ -859,21 +904,27 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.alpha_eq[i] = sim_res.x3[i]/C_slope+alpha_0
 
         tmp4 = np.exp(-sim_res.dt[i-1]/(T_u_last*T_f))
-        sim_res.f_steady[i] = self._f_l(np.rad2deg(sim_res.alpha_eq[i]))
+        # sim_res.f_steady[i] = self._f_l(np.rad2deg(sim_res.alpha_eq[i]))
+        sim_res.f_steady[i] = 1
         sim_res.x4[i] = sim_res.x4[i-1]*tmp4+0.5*(sim_res.f_steady[i-1]+sim_res.f_steady[i])*(1-tmp4)
 
-        sim_res.C_lc[i] = sim_res.x4[i]*C_slope*(sim_res.alpha_eff[i]-alpha_0)
-        sim_res.C_lc[i] += (1-sim_res.x4[i])*self._C_fs(np.rad2deg(sim_res.alpha_eff[i]))
+        # sim_res.C_lc[i] = sim_res.x4[i]*C_slope*(sim_res.alpha_eff[i]-alpha_0)
+        sim_res.C_lc[i] = C_slope*sim_res.alpha_eff[i]
+        # sim_res.C_lc[i] += (1-sim_res.x4[i])*self._C_fs(np.rad2deg(sim_res.alpha_eff[i]))
+        # sim_res.C_lc[i] += (1-sim_res.x4[i])*C_slope*sim_res.alpha_eff[i]
         sim_res.C_lnc[i] = -np.pi*T_u_current*sim_res.vel[i, 2]
         C_l = sim_res.C_lc[i]+sim_res.C_lnc[i]
 
-        sim_res.C_ds[i] = self.C_d(np.rad2deg(sim_res.alpha_eff[i]))
+        # sim_res.C_ds[i] = self.C_d(np.rad2deg(sim_res.alpha_eff[i]))
+        sim_res.C_ds[i] = 0.01
         sim_res.C_dc[i] = (sim_res.alpha_qs[i]-sim_res.alpha_eff[i]-T_u_current*sim_res.vel[i, 2])*sim_res.C_lc[i]
         tmp = (np.sqrt(sim_res.f_steady[i])-np.sqrt(sim_res.x4[i]))/2-(sim_res.f_steady[i]-sim_res.x4[i])/4
-        sim_res.C_dsep[i] = (sim_res.C_ds[i]-self._C_d_0)*tmp
+        # sim_res.C_dsep[i] = (sim_res.C_ds[i]-self._C_d_0)*tmp
+        sim_res.C_dsep[i] = sim_res.C_ds[i]*tmp
         C_d = sim_res.C_ds[i]+sim_res.C_dc[i]+sim_res.C_dsep[i]
 
-        sim_res.C_ms[i] = self.C_m(np.rad2deg(sim_res.alpha_eff[i]))
+        # sim_res.C_ms[i] = self.C_m(np.rad2deg(sim_res.alpha_eff[i]))
+        sim_res.C_ms[i] = -0.1
         sim_res.C_mnc[i] = 0.5*np.pi*T_u_current*sim_res.vel[i, 2]
         C_m = sim_res.C_ms[i]+sim_res.C_mnc[i]
 
@@ -881,17 +932,16 @@ class AeroForce(SimulationSubRoutine, Rotations):
         coeffs = np.asarray([C_d, C_l, C_m])
 
         # # for return of [C_d, C_l, C_m]
-        return coeffs
+        # return coeffs
 
         # for return of [f_x, f_y, mom]
-        # coeffs = np.asarray([C_d, C_l, -C_m*chord])
-        # rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
-        #                     (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
-        # dynamic_pressure = density/2*rel_speed
-        # rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])
-        # # print( rel_speed, dynamic_pressure*chord*rot@coeffs)
-        # return dynamic_pressure*chord*rot@coeffs
-        
+        coeffs = np.asarray([C_d, C_l, -C_m*chord])
+        rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
+                            (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
+        dynamic_pressure = density/2*rel_speed**2
+        rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])
+        # print( rel_speed, dynamic_pressure*chord*rot@coeffs)
+        return dynamic_pressure*chord*rot@coeffs
 
     def _init_BL_chinese(
             self,
@@ -922,14 +972,16 @@ class AeroForce(SimulationSubRoutine, Rotations):
             alpha_at: float=0.75,
             **kwargs
             ):
+        # currently does not support an initial non-zero velocity of the airfoil
         alpha_steady = -sim_res.pos[0, 2]+sim_res.inflow_angle[0]
         qs_flow_angle, v_x, v_y = self._quasi_steady_flow_angle(sim_res.vel[0, :], sim_res.pos[0, :], 
                                                                 sim_res.inflow[0, :], chord, pitching_around, alpha_at)
         alpha_qs = -sim_res.pos[0, 2]+qs_flow_angle
-
+        sim_res.alpha_qs[-1] = alpha_qs
         sim_res.x1[-1] = alpha_qs*kwargs["A1"]
         sim_res.x2[-1] = alpha_qs*kwargs["A2"]
-        sim_res.x3[-1] = alpha_qs
+        sim_res.C_lpot[-1] = self._C_l_slope*(alpha_qs-self._alpha_0L)
+        sim_res.x3[-1] = self._C_l_slope*(alpha_qs-self._alpha_0L)
         sim_res.x4[-1] = self._f_l(np.rad2deg(alpha_steady))
         sim_res.f_steady[-1] = self._f_l(np.rad2deg(alpha_steady))
     
@@ -1134,7 +1186,7 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
      next time step.
     """
     
-    _implemented_schemes = ["eE", "HHT-alpha-xy"]    
+    _implemented_schemes = ["eE", "HHT-alpha-xy", "HHT-alpha-xy-adapted"]    
     # eE: explicit Euler
     # HHT_alpha: algorithm as given in #todo add paper
 
@@ -1154,7 +1206,7 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
     } 
 
     _copy_schemes = {
-        "HHT-alpha-xy": ["HHT-alpha-adapted-xy"]
+        "HHT-alpha-xy": ["HHT-alpha-xy-adapted"]
     }
 
     def __init__(self, verbose: bool=True) -> None:
@@ -1177,7 +1229,7 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
         scheme_methods = {
             "eE": self._eE,
             "HHT-alpha-xy": self._HHT_alpha_xy,
-            "HHT-alpha-adapted-xy": self._HHT_alpha_adapated_xy,
+            "HHT-alpha-xy-adapted": self._HHT_alpha_xy_adapated,
             "HHT-alpha-increment": self._HHT_alpha_increment,
         }
         return scheme_methods[scheme]
@@ -1186,7 +1238,7 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
         scheme_methods = {
             "eE": self._init_eE,
             "HHT-alpha-xy": self._init_HHT_alpha,
-            "HHT-alpha-adapted-xy": self._init_HHT_alpha,
+            "HHT-alpha-xy-adapted": self._init_HHT_alpha,
             "HHT-alpha-increment": self._init_HHT_alpha,
         }
         return scheme_methods[scheme]
@@ -1231,7 +1283,7 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
         pos = sim_res.pos[i, :]+dt*sim_res.vel[i, :]+dt**2*((0.5-self._beta)*sim_res.accel[i, :]+self._beta*accel)
         return pos, vel, accel
 
-    def _HHT_alpha_adapated_xy(
+    def _HHT_alpha_xy_adapated(
             self,
             sim_res: SimulationResults, 
             i: int,
@@ -1287,7 +1339,8 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
     def _init_eE(
             self,
             sim_res: ThreeDOFsAirfoil,
-            inertia: np.ndarray|list):
+            inertia: np.ndarray|list,
+            **kwargs):
         self._inertia = inertia if isinstance(inertia, np.ndarray) else np.asarray(inertia)
         
     def _init_HHT_alpha(
@@ -1308,25 +1361,18 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
         damping = damping if isinstance(damping, np.ndarray) else np.asarray(damping)
         stiffness = stiffness if isinstance(stiffness, np.ndarray) else np.asarray(stiffness)
         
-        self.damping = damping if len(damping.shape) > 1 else np.diag(damping.flatten())
-        self.stiffness = stiffness if len(stiffness.shape) > 1 else np.diag(stiffness.flatten())
+        M = inertia if len(inertia.shape) > 1 else np.diag(inertia.flatten())
+        C = damping if len(damping.shape) > 1 else np.diag(damping.flatten())
+        K = stiffness if len(stiffness.shape) > 1 else np.diag(stiffness.flatten())
 
-        if stiffness.shape != damping.shape:
+        if K.shape != C.shape:
             raise ValueError("Initialising the time integration for a subclass of an HHT-alpha failed because there "
                              f"are a different number of stiffness {stiffness.shape} and damping {damping.shape} "
                              "values given.")
-        if inertia.shape != damping.shape:
+        if M.shape != C.shape:
             raise ValueError("Initialising the time integration for a subclass of an HHT-alpha failed because there "
-                             f"are a different number of stiffness {inertia.shape} and damping {damping.shape} "
+                             f"are a different number of inertial {inertia.shape} and damping {damping.shape} "
                              "values given.")
-        
-        M = inertia if len(inertia.shape) > 1 else np.diag(inertia.flatten())
-        C = self.damping
-        K = self.stiffness
-        
-        self.M = M
-        self.C = C
-        self.K = K
         
         self._M_next = M+dt*(1-alpha)*self._gamma*C+dt**2*(1-alpha)*self._beta*K
         self._M_current = dt*(1-alpha)*(1-self._gamma)*C+dt**2*(1-alpha)*(0.5-self._beta)*K
@@ -1334,6 +1380,10 @@ class TimeIntegration(SimulationSubRoutine, Rotations):
         self._K_current = K
         self._external_next = 1-alpha
         self._external_current = alpha
+
+        self.M = M
+        self.C = C
+        self.K = K
         
     def _get_accel(self, sim_res: ThreeDOFsAirfoil, i: int) -> np.ndarray:
         """Calculates the acceleration for the current time step based on the forces acting on the system.
