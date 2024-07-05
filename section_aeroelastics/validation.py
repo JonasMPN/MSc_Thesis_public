@@ -1,11 +1,10 @@
-from calculations import ThreeDOFsAirfoil, AeroForce, TimeIntegration, StructForce, Rotations
-from calculation_utils import get_inflow
+from calculations import ThreeDOFsAirfoil, AeroForce, TimeIntegration, StructForce, Rotations, Oscillations
 import pandas as pd
 import numpy as np
 from os import listdir
 from os.path import join, isfile
 from post_calculations import PostCaluculations, PostHHT_alpha
-from utils_plot import MosaicHandler
+from utils_plot import PlotHandler
 import numpy as np
 from plotting import HHTalphaPlotter, BLValidationPlotter
 from defaults import DefaultPlot, DefaultStructure
@@ -59,7 +58,7 @@ def plot_sep_points(dir_sep_points: str, alpha_limits: tuple=(-30, 30)):
 
     for direction in set(directions):
         for extend in ["full", "limited"]:
-            handler = MosaicHandler(figs[direction][extend], axs[direction][extend])
+            handler = PlotHandler(figs[direction][extend], axs[direction][extend])
             y_lims = [-1.2, 1.2] if extend == "full" else [-0.2, 1.2]
             handler.update(x_labels=r"$\alpha$ (°)", y_labels=rf"$f_{direction}$", legend=True, grid=True,
                            y_lims=y_lims)
@@ -165,7 +164,7 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
             f_edge: np.ndarray=None,
             f_flap: np.ndarray=None,
             f_tors: np.ndarray=None,
-            scheme: str="HHT-alpha"
+            scheme: str="HHT-alpha-xy"
     ):
         f_ext = np.zeros((time.size, 3))
         f_response_wanted = {i: True for i in range(3)}
@@ -199,7 +198,7 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
             nat_frequency: list|np.ndarray,
             n_oscillations: float,
             x_0: float = 1,
-            scheme: str="HHT-alpha"
+            scheme: str="HHT-alpha-xy"
             ):
         counter = 0
         for n_dt in n_steps_per_oscillation:
@@ -227,7 +226,7 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
             n_oscillations: float,
             x_0: float=1,
             v_0: float=1,
-            scheme: str="HHT-alpha"
+            scheme: str="HHT-alpha-xy"
             ):
         M = 1
         counter = 0
@@ -262,7 +261,7 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
             n_oscillations: float,
             x_0: float=1,
             v_0: float=1,
-            scheme: str="HHT-alpha"
+            scheme: str="HHT-alpha-xy"
             ):
         M = 1
         counter = 0
@@ -308,7 +307,7 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
             n_oscillations: list|np.ndarray,
             x_0: float = 1,
             v_0: float = 1,
-            scheme: str="HHT-alpha"
+            scheme: str="HHT-alpha-xy"
             ):
         if force_amplitude.size != force_frequencies.size:
             raise ValueError("The same number of amplitudes and frequencies for the external excitations have to be "
@@ -345,7 +344,7 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
             damping_coefficients: list|np.ndarray,
             n_steps_per_oscillation: list|np.ndarray,
             n_oscillations: float,
-            scheme: str="HHT-alpha"
+            scheme: str="HHT-alpha-xy"
             ):
         M = 1
         counter = 0
@@ -383,7 +382,7 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
             x_0: np.ndarray=np.zeros(3),
             v_0: np.ndarray=np.zeros(3),
             case_id: int=None,
-            scheme: str="HHT-alpha"
+            scheme: str="HHT-alpha-xy"
             ):
             self.set_structure(1, mass=inertia[0], mom_inertia=inertia[2], 
                                stiffness_edge=stiffness[0], stiffness_flap=stiffness[1], stiffness_tors=stiffness[2],
@@ -396,7 +395,7 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
             dir_save = helper.create_dir(join(self.dir_root_results, scheme, str(case_id)))[0]
             with open(join(dir_save, case_info+".txt"), "w") as f:
                 f.write(case_info)
-            results._save(dir_save)
+            results.save(dir_save)
 
             osci = Oscillations(inertia, stiffness=stiffness, damping=damping)
             t_sim, pos, vel, accel = osci.rotation(t[-1], t[1], force, x_0, v_0)
@@ -412,6 +411,7 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
         f_external: np.ndarray,
         init_pos: np.ndarray,
         init_vel: np.ndarray,
+        init_accel: np.ndarray=None,
         scheme: str="HHT-alpha-xy",
         alpha_HHT: float=0.1,
         ) -> ThreeDOFsAirfoil:
@@ -431,7 +431,9 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
         integration_func = time_integrator.get_scheme_method(scheme)
 
         self._struct_force._init_linear(airfoil, damping=damping, stiffness=stiffness)
-        if "xy" in scheme:
+        if init_accel is not None:
+            airfoil.accel[0, :] = init_accel
+        elif "xy" in scheme:
             airfoil.accel[0, :] = (f_external[0]-self._struct_force.stiffness@init_pos)/self._inertia
         elif "ef" in scheme:
             rot = self.passive_3D_planar(init_pos[2])
@@ -453,6 +455,7 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
             #     print(dt*i)
             
         i = time.size-1
+        airfoil.alpha_steady = -airfoil.pos[:, 2]
         airfoil.damp[i, :], airfoil.stiff[i, :] = self._struct_force._linear_xy(airfoil, i)
         airfoil.inflow = np.zeros((time.size, 2))
         return airfoil
@@ -472,8 +475,8 @@ if __name__ == "__main__":
         "HHT_alpha_forced": False,
         "HHT_alpha_forced_composite": False,
         "HHT_alpha_step": False,
-        "HHT_alpha_rotation": False,
-        "ef_vs_xy": True
+        "HHT_alpha_rotation": True,
+        "ef_vs_xy": False
     }
     dir_airfoil = "data/FFA_WA3_221"
     dir_HHT_alpha_validation = "data/HHT_alpha_validation"
@@ -568,7 +571,7 @@ if __name__ == "__main__":
         omega_n = [1, 2, 3, 4]
         root_dir = join(dir_HHT_alpha_validation, "undamped")
         validator = HHTalphaValidator(dir_airfoil, root_dir)
-        validator.simulate_undamped(n_t_per_oscillation, omega_n, n_oscillations, scheme="HHT-alpha")
+        validator.simulate_undamped(n_t_per_oscillation, omega_n, n_oscillations, scheme="HHT-alpha-xy")
         PostHHT_alpha().amplitude_and_period(root_dir)
         HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
 
@@ -579,7 +582,8 @@ if __name__ == "__main__":
         damping_coeffs = [0.1, 0.2, 0.3]
         root_dir = join(dir_HHT_alpha_validation, "damped")
         validator = HHTalphaValidator(dir_airfoil, root_dir)
-        validator.simulate_damped(omega_n, damping_coeffs, n_t_per_oscillation, n_oscillations, scheme="HHT-alpha")
+        validator.simulate_damped(omega_n, damping_coeffs, n_t_per_oscillation, n_oscillations, 
+                                  scheme="HHT-alpha-xy-adapted")
         PostHHT_alpha().amplitude_and_period(root_dir)
         HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
     
@@ -591,14 +595,15 @@ if __name__ == "__main__":
         root_dir = join(dir_HHT_alpha_validation, "forced")
         # root_dir = join(dir_HHT_alpha_validation, "forced_force_term_adapted")
         validator = HHTalphaValidator(dir_airfoil, root_dir)
-        validator.simulate_forced(damping_coeffs, n_t_per_oscillation, force_freq, n_oscillations, scheme="HHT-alpha")
+        validator.simulate_forced(damping_coeffs, n_t_per_oscillation, force_freq, n_oscillations, 
+                                  scheme="HHT-alpha-xy")
         validator.simulate_forced(damping_coeffs, n_t_per_oscillation, force_freq, n_oscillations,
-                                   scheme="HHT-alpha-adapted")
+                                   scheme="HHT-alpha-xy-adapted")
         PostHHT_alpha().amplitude_and_period(root_dir)
         HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
     
     if do["HHT_alpha_forced_composite"]:
-        n_oscillations = 4
+        n_oscillations = 10
         n_t_per_oscillation = [12, 24, 64]  # should be a multiple of 4 to get the analytical peaks right
         force_freq = np.asarray([0.6, 0.8, 1, 1.2, 1.4])  # natural frequency is 1
         force_ampl = np.asarray([1, 1, 1, 1, 1])
@@ -609,9 +614,9 @@ if __name__ == "__main__":
         # root_dir = join(dir_HHT_alpha_validation, "forced_force_term_adapted")
         validator = HHTalphaValidator(dir_airfoil, root_dir)
         validator.simulate_forced_composite(damping_coeff, n_t_per_oscillation, force_freq, force_ampl,
-                                            n_oscillations, x_0, v_0, scheme="HHT-alpha")
+                                            n_oscillations, x_0, v_0, scheme="HHT-alpha-xy")
         validator.simulate_forced_composite(damping_coeff, n_t_per_oscillation, force_freq, force_ampl,
-                                            n_oscillations, x_0, v_0, scheme="HHT-alpha-adapted")
+                                            n_oscillations, x_0, v_0, scheme="HHT-alpha-xy-adapted")
         PostHHT_alpha().amplitude_and_period(root_dir)
         HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
 
@@ -622,7 +627,7 @@ if __name__ == "__main__":
         damping_coeffs = [0.1, 0.2, 0.3]
         root_dir = join(dir_HHT_alpha_validation, "step")
         validator = HHTalphaValidator(dir_airfoil, root_dir)
-        validator.simulate_step(omega_n, damping_coeffs, n_t_per_oscillation, n_oscillations, scheme="HHT-alpha")
+        validator.simulate_step(omega_n, damping_coeffs, n_t_per_oscillation, n_oscillations, scheme="HHT-alpha-xy")
         PostHHT_alpha().amplitude_and_period(root_dir)
         HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
 
@@ -630,33 +635,34 @@ if __name__ == "__main__":
         root_dir = join(dir_HHT_alpha_validation, "rotation")
         validator = HHTalphaValidator(dir_airfoil, root_dir)
         coordinate_system = "xy"
-        scheme = f"HHT-alpha-{coordinate_system}"
+        scheme = f"HHT-alpha-{coordinate_system}-adapted"
         alpha_lift = "alpha_steady"
-        case_info = "[0,0,0]_to_[1,0,0]_to_[1,0,90]_to_[0,1,0]"
+        # case_info = "[0,0,0]_to_[1,0,0]_to_[1,0,90]_to_[0,1,0]_to_[0,0,0]"
+        case_info = "[0,0,0]_to_[1,1,0]"
         # case_info = "[0,0,0]_to_[1,0,0]_to_[2,0,0]_to_[-1,0,0]_to[0,0,0]"
-        case_id = 5
+        case_id = 1
 
-        x_0 = [1, 0.5, 2.*np.pi]
-        # x_0 = [1, 0, 0.*np.pi]
+        # x_0 = [1, 0.5, 2.*np.pi]
+        x_0 = [0, 0, 0.5*np.pi]
         # x_0 = np.zeros(3)
         inertia = np.ones(3)
         # stiffness = np.asarray([2, 0.5, 1])
-        stiffness = np.asarray([1, 5., 1])
+        stiffness = np.asarray([2, 5., 1])
         # damping = 1*np.ones_like(inertia)
-        # damping = np.asarray([1, 1, 1.])
-        damping = np.zeros(3)
+        damping = np.asarray([3, 1, 1.])
+        # damping = np.zeros(3)
         dt = 0.01
         # T = 100
         T = 20
         t = np.linspace(0, T, int(T/dt)+1)
 
-        # f = np.repeat(np.c_[2, 0, 0], repeats=int(20/dt), axis=0)
-        # f = np.r_[f, np.repeat(np.c_[0.5, 0, np.pi/2], repeats=int(20/dt), axis=0)]
+        f = np.repeat(np.c_[2, 5, 0.*np.pi], repeats=int(20/dt)+1, axis=0)
+        # f = np.r_[f, np.repeat(np.c_[5, 0, np.pi/2], repeats=int(20/dt), axis=0)]
         # t_change = np.linspace(0, np.pi/2, int(20/dt))
-        # f_change = np.c_[0.5*np.cos(t_change), np.sin(t_change), np.pi/2*np.cos(t_change)]
+        # f_change = np.c_[5*np.cos(t_change), 5*np.sin(t_change), np.pi/2*np.cos(t_change)]
         # f = np.r_[f, f_change]
-        # f = np.r_[f, np.repeat(np.c_[0, 1, 0], repeats=int(20/dt), axis=0)]
-        # f = np.r_[f, np.zeros((int(20/dt)+1, 3))]  # the +1 is needed if scheme="HHT-alpha"
+        # f = np.r_[f, np.repeat(np.c_[0, 5, 0], repeats=int(20/dt), axis=0)]
+        # f = np.r_[f, np.zeros((int(20/dt)+1, 3))]  # the +1 is needed if scheme="HHT-alpha-xy"
 
         # f = np.repeat(np.c_[0.5, 0, 0.5*np.pi], repeats=int(20/dt), axis=0)
         # # print(f.shape)
@@ -665,7 +671,7 @@ if __name__ == "__main__":
         # f = np.r_[f, np.repeat(np.c_[-1, 0, 0], repeats=int(20/dt), axis=0)]
         # f = np.r_[f, np.repeat(np.c_[0, 0, 0], repeats=int(20/dt), axis=0)]
 
-        f = np.c_[0.*np.ones_like(t), 0*np.ones_like(t), 0.*np.pi*np.ones_like(t)]
+        # f = np.c_[0.*np.ones_like(t), 0*np.ones_like(t), 0.*np.pi*np.ones_like(t)]
         # f_ramp = np.r_[np.linspace(0, 1, 500), np.ones(1501)]
         # f_ramp = np.r_[np.zeros(500), np.ones(1501)]
         # f = np.c_[f_ramp, 0*np.ones_like(t), 0*np.pi*np.ones_like(t)]
@@ -680,16 +686,11 @@ if __name__ == "__main__":
             with open(join(dir_case, "section_data.json"), "w") as f:
                 section_data = {
                     "chord": 1,
-                    "mass": inertia[0],
-                    "mom_inertia": inertia[2],
-                    "damping_edge": damping[0],
-                    "damping_flap": damping[1],
-                    "damping_tors": damping[2],
-                    "stiffness_edge": stiffness[0],
-                    "stiffness_flap": stiffness[1],
-                    "stiffness_tors": stiffness[2],
+                    "inertia": [inertia[0], inertia[1], inertia[2]],
+                    "damping": [damping[0], damping[1], damping[2]],
+                    "stiffness": [stiffness[0], stiffness[1], stiffness[2]],
                 }
-                json.dump(section_data, f)
+                json.dump(section_data, f, indent=4)
             
             post_calc = PostCaluculations(dir_case, alpha_lift, coordinate_system)
             post_calc.project_data()
