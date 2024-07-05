@@ -1,3 +1,4 @@
+import matplotlib.axes
 import matplotlib.figure
 from defaults import DefaultPlot
 import numpy as np
@@ -8,17 +9,29 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap, BoundaryNorm, to_rgba
 from copy import deepcopy, copy
+from helper_functions import Helper
+from os.path import join
 
-class MosaicHandler:
+class PlotHandler(Helper):
     _default = object()
 
     _empty_call = "empty_call"
     _skip_call = "skip_call"
     _special_calls = [_empty_call, _skip_call]
     
-    def __init__(self, mosaic_figure, mosaic_axes):
-        self.fig = mosaic_figure
-        self.axs = mosaic_axes if isinstance(mosaic_axes, dict) else {"_": mosaic_axes}
+    def __init__(self, figure, axes):
+        self.fig = figure
+        if isinstance(axes, dict):
+            pass
+        elif isinstance(axes, matplotlib.axes.Axes):
+            axes = {"_": axes}
+        elif isinstance(axes, np.ndarray):
+            axes = {i: ax for i, ax in enumerate(axes.flatten())}
+        else:
+            raise NotImplementedError(f"Handling of 'axes' of type '{type(axes)}' is not supported. Supported types "
+                                      "are 'dict', 'matplotlib.axes.Axes.', and 'np.ndarray'.")
+        
+        self.axs = axes 
         self._ax_labels = self.axs.keys()
 
     def update(
@@ -76,12 +89,12 @@ class MosaicHandler:
         if equal_y_lim != self._default:
             raise NotImplementedError
 
-        # self._check_mosaic_options_completeness(self._ax_labels, **lcs)  # not used/wanted
+        # self._check_options_completeness(self._ax_labels, **lcs)  # not used/wanted
         # filter for parameters that the user wants to update
         is_set = deepcopy({param: values for param, values in lcs.items() if values not in [self._default, None]})
         # deepcopy needed because of the mutable input parameters which are changed in the next two lines
         is_set = self._treat_special_options(**is_set)
-        filled = self._handle_mosaic_options(self._ax_labels, **is_set)
+        filled = self._handle_options(self._ax_labels, **is_set)
         map_params_to_axs_methods = {
             "x_labels": "set_xlabel",
             "y_labels": "set_ylabel",
@@ -91,14 +104,17 @@ class MosaicHandler:
             "aspect": "set_aspect",
             "grid": "grid"
         }
-        self._handle_mosaic(**{map_params_to_axs_methods[param]: values for param, values in filled.items()})
+        self._handle_axes(**{map_params_to_axs_methods[param]: values for param, values in filled.items()})
         return self.fig, self.axs
     
-    def save(self, save_as: str):
+    def save(self, save_as: str, close: bool=True):
+        save_as = save_as.replace("\\", "/")
+        self.create_dir(join(*save_as.split("/")[:-1]))
         self.fig.savefig(save_as)
-        plt.close(self.fig)
+        if close:
+            plt.close(self.fig)
         
-    def _handle_mosaic(
+    def _handle_axes(
             self,
             set_xlabel: dict[str]=_default,
             set_ylabel: dict[str]=_default,
@@ -133,7 +149,7 @@ class MosaicHandler:
                 update = getattr(self.axs[ax_label], method)
                 if update_to not in [self._empty_call, self._skip_call]:  # special calls are found as strings
                     update(*update_to)  # the ->*<-update_to is the reason for turning the values to tuples in 
-                    # _fill_mosaic_options()
+                    # _fill_options()
                 elif update_to == self._empty_call:
                     # some axes methods toggle a setting on by an empty call; example: ax.legend()
                     update()
@@ -169,7 +185,7 @@ class MosaicHandler:
         In the update() call, the user specifies whether they want the setting to be toggled by True or False. This is
         here converted from the boolean value into one of the special calls defined in the class attributes.
 
-        :raises ValueError: Error for coder; occurs when MosaicHandler is not updated sufficiently to handle new
+        :raises ValueError: Error for coder; occurs when PlotHandler is not updated sufficiently to handle new
         special cases.
         :return: Returns the treated settings.  
         :rtype: dict
@@ -191,10 +207,10 @@ class MosaicHandler:
                     kwargs[param][axs_label] = map_params[param][value]
         return kwargs  
 
-    def _handle_mosaic_options(self, ax_labels: tuple[str], **kwargs) -> dict:
+    def _handle_options(self, ax_labels: tuple[str], **kwargs) -> dict:
         """This method serves three functions:
         - if all axes should have the same value for a certain setting, define this setting for all axes
-        - turns setting values that are not a tuple into a tuple (needed for ._handle_mosaic(), read there)
+        - turns setting values that are not a tuple into a tuple (needed for ._handle_axes(), read there)
         - 
 
         :param ax_labels: _description_
@@ -210,11 +226,11 @@ class MosaicHandler:
                 values = {ax_label: values for ax_label in ax_labels}
             
             for ax_label, value in copy(values).items():  
-                if isinstance(value, tuple): # turn all values into tuples; needed for ._handle_mosaic()
+                if isinstance(value, tuple): # turn all values into tuples; needed for ._handle_axes()
                     continue  
                 if value in self._special_calls: 
                     # skip transformation of the special calls into tuples; they must remain strings. Needed for for 
-                    # ._handle_mosaic().
+                    # ._handle_axes().
                     continue
                 try:
                     if isinstance(value, str):  # because tuple() on a string separates each character
@@ -261,7 +277,7 @@ class MosaicHandler:
         pass
 
     @staticmethod
-    def _check_mosaic_options_completeness(ax_labels: tuple[str], **kwargs):
+    def _check_options_completeness(ax_labels: tuple[str], **kwargs):
         """Method that checks whether all axis have received a value for a certain setting. Loops over all available 
         settings.
 
@@ -319,17 +335,17 @@ class Shapes:
 class PlotPreparation:
     @staticmethod
     def _prepare_force_plot(
-        equal_y: tuple[str]=None) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]:
-        """Prepares the pyplot figure and axes and a MosaicHandler instance for a force plot.
+        equal_y: tuple[str]=None) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, PlotHandler]:
+        """Prepares the pyplot figure and axes and a PlotHandler instance for a force plot.
 
         :param equal_y: Sets the axes that will have the same y limits, defaults to None
         :type equal_y: tuple[str], optional
-        :return: A pyplot figure, axes and an instance of MosaicHandler for the same figure and axes
-        :rtype: tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]
+        :return: A pyplot figure, axes and an instance of PlotHandler for the same figure and axes
+        :rtype: tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, PlotHandler]
         """
         fig, axs = plt.subplot_mosaic([["profile", "aoa", "aero"], 
                                        ["profile", "stiff", "damp"]], figsize=(10, 5), tight_layout=True, dpi=300)
-        handler = MosaicHandler(fig, axs)
+        handler = PlotHandler(fig, axs)
         x_labels = {
             "profile": "normal (m)",
             "aoa": "t (s)",
@@ -352,18 +368,18 @@ class PlotPreparation:
     @staticmethod
     def _prepare_energy_plot(
             equal_y: tuple[str]=None
-            ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]:
-        """Prepares the pyplot figure and axes and a MosaicHandler instance for a energy plot.
+            ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, PlotHandler]:
+        """Prepares the pyplot figure and axes and a PlotHandler instance for a energy plot.
 
         :param equal_y: Sets the axes that will have the same y limits, defaults to None
         :type equal_y: tuple[str], optional
-        :return: A pyplot figure, axes and an instance of MosaicHandler for the same figure and axes
-        :rtype: tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]
+        :return: A pyplot figure, axes and an instance of PlotHandler for the same figure and axes
+        :rtype: tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, PlotHandler]
         """
         fig, axs = plt.subplot_mosaic([["profile", "total", "power"],
                                        ["profile", "kinetic", "potential"]], figsize=(10, 5), tight_layout=True,
                                       dpi=300)
-        handler = MosaicHandler(fig, axs)
+        handler = PlotHandler(fig, axs)
         x_labels = {
             "profile": "normal (m)",
             "total": "t (s)",
@@ -387,18 +403,18 @@ class PlotPreparation:
     def _prepare_BL_plot(
             coeffs: list[str],
             equal_y: tuple[str]=None,
-            ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]:
-        """Prepares the pyplot figure and axes and a MosaicHandler instance for a energy plot.
+            ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, PlotHandler]:
+        """Prepares the pyplot figure and axes and a PlotHandler instance for a energy plot.
 
         :param equal_y: Sets the axes that will have the same y limits, defaults to None
         :type equal_y: tuple[str], optional
-        :return: A pyplot figure, axes and an instance of MosaicHandler for the same figure and axes
-        :rtype: tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, MosaicHandler]
+        :return: A pyplot figure, axes and an instance of PlotHandler for the same figure and axes
+        :rtype: tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, PlotHandler]
         """
         fig, axs = plt.subplot_mosaic([["profile", "aoa", coeffs[0]],
                                        ["profile", coeffs[1], "C_m"]], figsize=(10, 5), tight_layout=True,
                                       dpi=300)
-        handler = MosaicHandler(fig, axs)
+        handler = PlotHandler(fig, axs)
         x_labels = {
             "profile": "normal (m)",
             "aoa": "t (s)",
