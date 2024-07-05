@@ -1,4 +1,4 @@
-from utils_plot import Shapes, PlotPreparation, AnimationPreparation, MosaicHandler, get_colourbar
+from utils_plot import Shapes, PlotPreparation, AnimationPreparation, PlotHandler, get_colourbar
 from calculations import Rotations
 from defaults import DefaultPlot, DefaultStructure
 import pandas as pd
@@ -6,14 +6,17 @@ import numpy as np
 import json
 import matplotlib.animation as animation
 import matplotlib.pyplot as plt
+from matplotlib.collections import LineCollection
 import matplotlib
 from os.path import join
 from os import listdir
 from scipy.signal import find_peaks
+from scipy.interpolate import interp1d
 from helper_functions import Helper
 from typing import Callable
 from ast import literal_eval
 from seaborn import heatmap
+from itertools import product
 helper = Helper()
 
 
@@ -48,6 +51,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         self.time = self.df_general["time"].to_numpy()
         with open(join(dir_data, self._dfl_filenames["section_data"]), "r") as f:
             self.section_data = json.load(f)
+        self.profile *= self.section_data["chord"]
 
         self.dir_plots = dir_plots
         helper.create_dir(self.dir_plots)
@@ -104,7 +108,141 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         handler.update(legend=True)
         fig.savefig(join(self.dir_plots, "forces.pdf"))
 
+    def couple_timeseries(self, cmap="viridis_r", linewidth: float=1.2, skip_points: int=1):
+        from_f_aero = [(self.df_f_aero, "f_aero", "aero_edge", r"$f_{\text{edge}}^{\text{aero}}$ (N)"), 
+                       (self.df_f_aero, "f_aero", "aero_flap", r"$f_{\text{flap}}^{\text{aero}}$ (N)"), 
+                       (self.df_f_aero, "f_aero", "aero_mom", r"$f_{\text{moment}}^{\text{aero}}$ (Nm)")]
+        from_power = [(self.df_power, "power", "aero_drag", r"$P_{\text{drag}}^{\text{aero}}$ (Nm/s)"),
+                      (self.df_power, "power", "aero_lift", r"$P_{\text{lift}}^{\text{aero}}$ (Nm/s)"),
+                      (self.df_power, "power", "aero_mom", r"$P_{\text{moment}}^{\text{aero}}$ (Nm/s)")]
+        from_energy = [(self.df_e_kin, "e_kin", "total", r"$E_{\text{total}}^{\text{kin}}$ (Nm)"),
+                       (self.df_e_pot, "e_pot", "total", r"$E_{\text{total}}^{\text{pot}}$ (Nm)")]
+        from_general = [(self.df_general, "general", "pos_edge", r"$x_{\text{edge}}$ (m)"),
+                        (self.df_general, "general", "pos_flap", r"$x_{\text{flap}}$ (m)"),
+                        (self.df_general, "general", "pos_tors", r"$x_{\text{torsion}}$ (deg)")]
+        couples = [p for p in product(from_f_aero, from_general)] + [p for p in product(from_power, from_general)]
+        couples += [(from_general[1], from_general[0]), (from_general[2], from_general[0]), 
+                    (from_general[2], from_general[1])]
+        couples += [(from_energy[0], from_energy[1])]
+        dir_plots_coupled_root = helper.create_dir(join(self.dir_plots, "coupled"))[0]
+        time = self.df_general["time"].to_numpy()
+        # because this column is used in the loop
+        self.df_general["pos_tors"]= np.rad2deg(self.df_general["pos_tors"])
+        for (df_specific, ds, col_specific, label_specific), (df_general, dg, col_general, label_general) in couples:
+            dir_plots = helper.create_dir(join(dir_plots_coupled_root, f"{dg}_{ds}"))[0]
+            save_to = join(dir_plots, f"{col_specific}_{col_general}.pdf")
+            val_general = df_general[col_general].to_numpy()
+            # because power values have one values fewer
+            val_general = val_general if "P_" not in label_specific else val_general[:-1]
+            self.coupled_timeseries(time, val_general, df_specific[col_specific].to_numpy(),
+                                    label_general, label_specific, cmap=cmap, linewidth=linewidth, save_to=save_to, 
+                                    skip_points=skip_points)
+        self.df_general["pos_tors"]= np.deg2rad(self.df_general["pos_tors"])  # change the column back to rad
+            
+        
+    def force_fill(self, equal_y: tuple[str]=None, trailing_every: int=40, alpha: int=0.2, peak_distance: int=400):
+        """Plots the history of the airfoil movement and different forces.
+
+        :param equal_y: Whether the force axes should have equal y scaling, defaults to None
+        :type equal_y: tuple[str], optional
+        :param trailing_every: How many quarter-chord points to skip while plotting, defaults to 2
+        :type trailing_every: int, optional
+        :return: None
+        :rtype: None
+        """
+        fig, axs, handler = self._prepare_force_plot(equal_y)
+        
+        # get final position of the profile. Displace it such that the qc is at (0, 0) at t=0.
+        pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
+        rot = self._rot.active_2D(pos[-1, 2])
+        rot_profile = rot@(self.profile[:, :2]-np.asarray([self.section_data["chord"]/4, 0])).T
+        rot_profile += np.asarray([[pos[-1, 0]], [pos[-1, 1]]])
+        axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plt_settings["profile"])
+        axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plt_settings["qc_trail"])
+        
+        # grab all angles of attack from the data
+        aoas = self._get_aoas(self.df_f_aero)
+        # prepare dictionary of dataframes to plot
+        dfs = {"aoa": self.df_f_aero, "aero": self.df_f_aero, "damp": self.df_f_structural, 
+               "stiff": self.df_f_structural}
+        
+        plot = {"aoa": aoas}
+        # if self._cs_struc == "ef":
+        if True:
+            plot["aero"] = ["aero_edge", "aero_flap", "aero_mom"]
+            plot["damp"] = ["damp_edge", "damp_flap", "damp_tors"]
+            plot["stiff"] = ["stiff_edge", "stiff_flap", "stiff_tors"]
+        elif self._cs_struc == "xy":
+            plot["aero"] = ["aero_x", "aero_y", "aero_mom"]
+            plot["damp"] = ["damp_x", "damp_y", "damp_tors"]
+            plot["stiff"] = ["stiff_x", "stiff_y", "stiff_tors"]
+
+        def param_name(param: str):
+            return param
+        
+        n_data_points = pos.shape[0]
+        skip_points = max(int(n_data_points/self.dt_res), 1)
+        axs = self._plot_and_fill_to_mosaic(axs, plot, dfs, param_name, skip_points=skip_points, alpha=alpha, 
+                                            peak_distance=peak_distance)
+        handler.update(legend=True)
+        fig.savefig(join(self.dir_plots, "forces_fill.pdf"))
+
     def energy(self, equal_y: tuple[str]=None, trailing_every: int=40):
+        """Plots the history of the airfoil movement and different energies/power.
+
+        :param equal_y: Whether the force axes should have equal y scaling, defaults to None
+        :type equal_y: tuple[str], optional
+        :param trailing_every: How many quarter-chord points to skip while plotting, defaults to 2
+        :type trailing_every: int, optional
+        :return: None
+        :rtype: None
+        """
+        fig, axs, handler = self._prepare_energy_plot(equal_y)
+        
+        # get final position of the profile. Displace it such that the qc is at (0, 0) at t=0.
+        pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
+        rot = self._rot.active_2D(pos[-1, 2])
+        rot_profile = rot@(self.profile[:, :2]-np.asarray([self.section_data["chord"]/4, 0])).T
+        rot_profile += np.asarray([[pos[-1, 0]], [pos[-1, 1]]])
+        axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plt_settings["profile"])
+        axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plt_settings["qc_trail"])
+        
+        df_total = pd.concat([self.df_e_kin["total"], self.df_e_pot["total"]], keys=["e_kin", "e_pot"], axis=1)
+        df_total["e_total"] = df_total.sum(axis=1)
+        dfs = {"total": df_total, "power": self.df_power, "kinetic": self.df_e_kin, 
+               "potential": self.df_e_pot}
+        
+        plot = {
+            "total": ["e_total", "e_kin", "e_pot"],
+            "power": ["aero_drag", "aero_lift", "aero_mom"]
+        }
+        # if self._cs_struc == "ef":
+        #     plot["power"] += ["damp_edge", "damp_flap", "damp_tors"]
+        #     plot["kinetic"] = ["edge", "flap", "tors"]
+        #     plot["potential"] = ["edge", "flap", "tors"]
+        # elif self._cs_struc == "xy":
+        #     plot["power"] += ["damp_x", "damp_y", "damp_tors"]
+        #     plot["kinetic"] = ["x", "y", "tors"]
+        #     plot["potential"] = ["x", "y", "tors"]
+
+        plot["power"] += ["damp_edge", "damp_flap", "damp_tors"]
+        plot["kinetic"] = ["edge", "flap", "tors"]
+        
+        if self._cs_struc == "ef":
+            plot["potential"] = ["edge", "flap", "tors"]
+        elif self._cs_struc == "xy":
+            plot["potential"] = ["x", "y", "tors"]
+
+        def param_name(param: str):
+            return param 
+        
+        n_data_points = pos.shape[0]
+        skip_points = max(int(n_data_points/self.dt_res), 1)
+        axs = self._plot_to_mosaic(axs, plot, dfs, param_name, skip_points=skip_points)
+        handler.update(legend=True)
+        fig.savefig(join(self.dir_plots, "energy.pdf"))
+    
+    def energy_fill(self, equal_y: tuple[str]=None, trailing_every: int=40, alpha: int=0.2, peak_distance: int=400):
         """Plots the history of the airfoil movement and different energies/power.
 
         :param equal_y: Whether the force axes should have equal y scaling, defaults to None
@@ -155,10 +293,11 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         
         n_data_points = pos.shape[0]
         skip_points = max(int(n_data_points/self.dt_res), 1)
-        axs = self._plot_to_mosaic(axs, plot, dfs, param_name, skip_points=skip_points)
+        axs = self._plot_and_fill_to_mosaic(axs, plot, dfs, param_name, skip_points=skip_points, alpha=alpha, 
+                                            peak_distance=peak_distance)
         handler.update(legend=True)
-        fig.savefig(join(self.dir_plots, "energy.pdf"))
-    
+        fig.savefig(join(self.dir_plots, "energy_fill.pdf"))
+
     def Beddoes_Leishman(self, equal_y: tuple[str]=None, trailing_every: int=40):
         """Plots the history of the airfoil movement and different BL parameters.
 
@@ -194,6 +333,71 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         handler.update(legend=True)
         fig.savefig(join(self.dir_plots, "BL.pdf"))
 
+    def Beddoes_Leishman_fill(self, equal_y: tuple[str]=None, trailing_every: int=40, alpha: int=0.2, 
+                              peak_distance: int=400):
+        """Plots the history of the airfoil movement and different BL parameters.
+
+        :param equal_y: Whether the force axes should have equal y scaling, defaults to None
+        :type equal_y: tuple[str], optional
+        :param trailing_every: How many quarter-chord points to skip while plotting, defaults to 2
+        :type trailing_every: int, optional
+        :return: None
+        :rtype: None
+        """
+        coeffs = self._get_force_and_moment_coeffs(self.df_f_aero)
+        fig, axs, handler = self._prepare_BL_plot([*coeffs.keys()], equal_y)
+        
+        # get final position of the profile. Displace it such that the qc is at (0, 0) at t=0.
+        pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
+        rot = self._rot.active_2D(pos[-1, 2])
+        rot_profile = rot@(self.profile[:, :2]-np.asarray([self.section_data["chord"]/4, 0])).T
+        rot_profile += np.asarray([[pos[-1, 0]], [pos[-1, 1]]])
+        axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plt_settings["profile"])
+        axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plt_settings["qc_trail"])
+        
+        # grab all angles of attack from the data
+        aoas = self._get_aoas(self.df_f_aero)
+        
+        plot = {"aoa": aoas}|coeffs
+        dfs = {ax: self.df_f_aero for ax in plot.keys()}
+        def param_name(param: str):
+            return param
+        
+        n_data_points = pos.shape[0]
+        skip_points = max(int(n_data_points/self.dt_res), 1)
+        axs = self._plot_and_fill_to_mosaic(axs, plot, dfs, param_name, skip_points=skip_points, alpha=alpha, 
+                                            peak_distance=peak_distance)
+        handler.update(legend=True)
+        fig.savefig(join(self.dir_plots, "BL_fill.pdf"))
+
+    @staticmethod
+    def coupled_timeseries(time: np.ndarray, val1: np.ndarray, val2: np.ndarray,
+                           x_label: str, y_label: str, grid: bool=False, cmap="viridis_r", linewidth: float=1.2,
+                           save_to: str=None, skip_points: int=1):
+        fig, ax = plt.subplots()
+
+        points = np.asarray([val1[::skip_points], val2[::skip_points]]).T.reshape(-1, 1, 2)
+        segments = np.concatenate([points[:-1], points[1:]], axis=1)
+
+        norm = plt.Normalize(0, time[-1])
+        lc = LineCollection(segments, cmap=cmap, norm=norm, linewidth=linewidth)
+        lc.set_array(time[::skip_points])
+        line = ax.add_collection(lc)
+        ax.autoscale()
+
+        cbar = fig.colorbar(line, ax=ax, label="time (s)")
+        ticks = cbar.get_ticks().tolist()
+        if time[-1] not in ticks:
+            ticks.append(time[-1])
+            ticks = sorted(ticks)
+        cbar.set_ticks(ticks)
+        
+        handler = PlotHandler(fig, ax)
+        handler.update(x_labels=x_label, y_labels=y_label, grid=grid)
+        if save_to is not None:
+            handler.save(save_to)
+        return fig, ax, handler
+
     def _plot_to_mosaic(
             self,
             axes: dict[str, matplotlib.axes.Axes],
@@ -214,7 +418,46 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                 axes[ax].plot(time[::skip_points], vals[::skip_points],
                               **self.plt_settings[map_column_to_settings(col)])
         return axes
+    
+    def _plot_and_fill_to_mosaic(
+            self,
+            axes: dict[str, matplotlib.axes.Axes],
+            plot: dict[str, list[str]],
+            data: dict[str, pd.DataFrame|dict],
+            map_column_to_settings: Callable,
+            apply: dict[str, Callable]={"aoa": np.rad2deg},
+            skip_points: int=1,
+            alpha: float=0.2,
+            peak_distance: int=400) -> dict[str, matplotlib.axes.Axes]:
+        apply_to_axs = apply.keys()
+        for ax, cols in plot.items():
+            for col in cols:
+                try: 
+                    self.plt_settings[map_column_to_settings(col)]
+                except KeyError:
+                    raise NotImplementedError(f"Default plot styles for '{col}' are missing.")
+                vals = data[ax][col] if ax not in apply_to_axs else apply[ax](data[ax][col])
+                time = self.time if ax != "power" else self.time[:-1]
 
+                ids_max = find_peaks(vals, distance=peak_distance)[0]
+                ids_min = find_peaks(-vals, distance=peak_distance)[0]
+
+                vals_max = vals[ids_max]
+                vals_min = vals[ids_min]
+                t_max = time[ids_max]
+                t_min = time[ids_min]
+
+                fill_time = np.unique(np.sort(np.r_[t_max, t_min]))
+                vals_max_interp = interp1d(t_max, vals_max, fill_value="extrapolate")
+                vals_min_interp = interp1d(t_min, vals_min, fill_value="extrapolate")
+                plt_settings_no_label = self.plt_settings[map_column_to_settings(col)].copy()
+                plt_settings_no_label.pop("label")
+                axes[ax].plot(t_max, vals_max, **self.plt_settings[map_column_to_settings(col)])
+                axes[ax].plot(t_min, vals_min, **plt_settings_no_label)
+                axes[ax].fill_between(fill_time, vals_max_interp(fill_time), vals_min_interp(fill_time), alpha=alpha, 
+                                      facecolor=plt_settings_no_label["color"])
+        return axes
+    
 
 class Animator(DefaultStructure, Shapes, AnimationPreparation):
     """Utility class that animates the results, meaning it creates an animation of the time series of the
@@ -413,8 +656,8 @@ class HHTalphaPlotter(DefaultStructure):
                 
         info = {}
         map_scheme_to_label = {
-            "HHT-alpha": "o.g.",
-            "HHT-alpha-adapted": "adpt."
+            "HHT-alpha-xy": "o.g.",
+            "HHT-alpha-xy-adapted": "adpt."
         }
         for case_number in case_numbers[0]:
             fig, axs = plt.subplots(1, 2, figsize=(10, 5), tight_layout=True)
@@ -450,7 +693,7 @@ class HHTalphaPlotter(DefaultStructure):
                 else:
                     for param, value in tmp_info.items():
                         info[param].append(value)
-            handler = MosaicHandler(fig, axs)
+            handler = PlotHandler(fig, axs)
             x_labels = {"response": "time (s)", "rel_err": "oscillation number (-)"}
             y_labels = {"response": "position (m)", "rel_err": "relative error (%)"}
             handler.update(x_labels=x_labels, y_labels=y_labels, legend=True)
@@ -478,8 +721,8 @@ class HHTalphaPlotter(DefaultStructure):
                 
         info = {}
         map_scheme_to_label = {
-            "HHT-alpha": "o.g.",
-            "HHT-alpha-adapted": "adpt."
+            "HHT-alpha-xy": "o.g.",
+            "HHT-alpha-xy-adapted": "adpt."
         }
         x_labels = {"pos": {"split": "time (s)", "joined": "x (m)"},
                     "vel": {"split": "time (s)", "joined": "u (m/s)"}}
@@ -513,7 +756,7 @@ class HHTalphaPlotter(DefaultStructure):
                     #     for param, value in tmp_info.items():
                     #         info[param].append(value)
                 
-                handler = MosaicHandler(fig, axs)
+                handler = PlotHandler(fig, axs)
                 handler.update(x_labels=x_labels[param], y_labels=y_labels[param], legend=True)
                 handler.save(join(dir_plot, f"{case_number}_{param}.pdf"))
         # pd.DataFrame(info).to_csv(join(dir_plot, "info.dat"), index=None)
@@ -544,11 +787,11 @@ class HHTalphaPlotter(DefaultStructure):
         helper.create_dir(dir_plots)
         dfs = {"pos": df_general, "aero": df_f_aero, "damp": df_f_struct, "stiff": df_f_struct}
         legend = self._plot(axs, axs_err, dfs, solution, time, directions_wanted, error_type)
-        handler = MosaicHandler(fig, axs)
+        handler = PlotHandler(fig, axs)
         handler.update(legend=legend, y_labels=y_labels, x_labels="time (s)")
         handler.save(join(dir_plots, "pos.pdf"))
         
-        handler_err = MosaicHandler(fig_err, axs_err)
+        handler_err = PlotHandler(fig_err, axs_err)
         handler_err.update(legend=legend, y_labels=y_labels_err, x_labels="time (s)")
         handler_err.save(join(dir_plots, "error_pos.pdf"))
 
@@ -563,11 +806,11 @@ class HHTalphaPlotter(DefaultStructure):
         directions_wanted += ["kin", "pot", "total"]
         legend = self._plot(axs, axs_err, dfs, solution, time, directions_wanted, error_type)
 
-        handler = MosaicHandler(fig, axs)
+        handler = PlotHandler(fig, axs)
         handler.update(legend=legend, y_labels=y_labels, x_labels="time (s)")
         handler.save(join(dir_plots, "energy.pdf"))
 
-        handler_err = MosaicHandler(fig_err, axs_err)
+        handler_err = PlotHandler(fig_err, axs_err)
         handler_err.update(legend=legend, y_labels=y_labels_err, x_labels="time (s)")
         handler_err.save(join(dir_plots, "error_energy.pdf"))
         
@@ -652,7 +895,7 @@ class BLValidationPlotter(DefaultPlot, Rotations):
 
             alpha[direction] = np.deg2rad(df["alpha"].to_numpy()) # np needed for later project_2D().
             f[direction] = df[f"f_{direction}"].to_numpy()
-        handler = MosaicHandler(fig, ax)
+        handler = PlotHandler(fig, ax)
         handler.update(x_labels=r"$\alpha$ (°)", y_labels="separation point (-)", legend=True, x_lims=[-50, 50], 
                        y_lims=[-0.1, 1.1])
         handler.save(join(dir_plots, "sep_points.pdf"))
@@ -672,7 +915,7 @@ class BLValidationPlotter(DefaultPlot, Rotations):
         ax.plot(df_polar["alpha"], df_polar["C_l"], **self.plt_settings["C_l_specify"])
         ax.plot(np.rad2deg(alpha), -rot_coeffs[:, 0]+df_polar["C_d"].min(), **self.plt_settings["C_d_rec"])
         ax.plot(np.rad2deg(alpha), rot_coeffs[:, 1], **self.plt_settings["C_l_rec"])
-        handler = MosaicHandler(fig, ax)
+        handler = PlotHandler(fig, ax)
         handler.update(x_labels=r"$\alpha$ (°)", y_labels="Force coefficient (-)", x_lims=[-180, 180], y_lims=[-3, 3],
                        legend=True)
         handler.save(join(dir_plots, "coeffs.pdf"))
@@ -700,7 +943,7 @@ class BLValidationPlotter(DefaultPlot, Rotations):
         fig, ax = plt.subplots()
         ax.plot(df_f[alpha_f], df_f["f_l"], **self.plt_settings["section"])
         ax.plot(df_f_paper["alpha"], df_f_paper["f_l"], **self.plt_settings[model_of_paper])
-        handler = MosaicHandler(fig, ax)
+        handler = PlotHandler(fig, ax)
         handler.update(x_labels=r"$\alpha$ (°)", y_labels=r"$f$ (-)", x_lims=[-50, 50], y_lims=[-0.1, 1.1],
                        grid=True, legend=True)
         handler.save(join(dir_plots, "sep_point.pdf"))
@@ -710,7 +953,7 @@ class BLValidationPlotter(DefaultPlot, Rotations):
         ax.plot(df_polar["alpha"], df_polar["C_l"], **self.plt_settings["C_l_specify"])
         ax.plot(df_C_fs["alpha"], df_C_fs["C_fs"], **self.plt_settings["section"])
         ax.plot(alpha_paper.values, df_C_fs_paper["C_lfs"].loc[alpha_paper.index], **self.plt_settings[model_of_paper])
-        handler = MosaicHandler(fig, ax)
+        handler = PlotHandler(fig, ax)
         handler.update(x_labels=r"$\alpha$ (°)", y_labels=r"$C_{l\text{,fs}}$ (-)", x_lims=[-50, 50], 
                        y_lims=[-1.5, 1.85], legend=True)
         handler.save(join(dir_plots, "C_fully_sep.pdf"))
@@ -737,7 +980,7 @@ class BLValidationPlotter(DefaultPlot, Rotations):
         dir_save = helper.create_dir(join(dir_results, "plots"))[0]
         for coeff in ["C_d", "C_l", "C_m"]:
             fig, ax = plt.subplots()
-            handler = MosaicHandler(fig, ax)
+            handler = PlotHandler(fig, ax)
             for tool, data in data_meas[coeff].items():
                 ax.plot(data[0], data[1], **self.plt_settings[coeff+f"_{tool}"])
             # if coef != "C_m":
@@ -768,7 +1011,7 @@ class BLValidationPlotter(DefaultPlot, Rotations):
         df_sliced = df_polar.loc[(df_polar["alpha"] >= alpha_min) & (df_polar["alpha"] <= alpha_max)]
         for coef in ["C_d", "C_l", "C_m"]:
             fig, ax = plt.subplots()
-            handler = MosaicHandler(fig, ax)
+            handler = PlotHandler(fig, ax)
             ax.plot(df_sliced["alpha"], df_sliced[coef], **self.plt_settings[coef])
             # if coef != "C_m":
             #     ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
@@ -819,7 +1062,7 @@ class BLValidationPlotter(DefaultPlot, Rotations):
         t_section = df_section_general["time"]
         for plot_param in plot_model_compare_params:
             fig, ax = plt.subplots()
-            handler = MosaicHandler(fig, ax)
+            handler = PlotHandler(fig, ax)
             ax.plot(t_aerohor, df_aerohor[plot_param], **plt_settings["aerohor"])
             ax.plot(t_section, df_section[plot_param], **plt_settings["section"])
             handler.update(x_labels="t (s)", y_labels=y_labels[plot_param], legend=True)
@@ -861,6 +1104,7 @@ def combined_forced(root_dir: str):
     aoas = np.sort(df_combinations["alpha"].unique())
 
     period_aero_work = np.zeros((amplitudes.size, aoas.size))
+    norm_period_aero_work = np.zeros((amplitudes.size, aoas.size))
     period_struct_work = np.zeros((amplitudes.size, aoas.size))
     convergence_aero = np.zeros((amplitudes.size, aoas.size))
     convergence_struct = np.zeros((amplitudes.size, aoas.size))
@@ -869,12 +1113,21 @@ def combined_forced(root_dir: str):
     aoa_to_ind = {aoa: i for i, aoa in enumerate(aoas)}
     for i, row in df_combinations.iterrows():
         ampl = row["amplitude"]
-        aoa = row["alpha"]
-        df = pd.read_csv(join(root_dir, str(i), "period_work.dat"))
+        aoa = row["alpha"] 
+        dir_current = join(root_dir, str(i))
+        df = pd.read_csv(join(dir_current, "period_work.dat"))
+
+        e_kin_total = pd.read_csv(join(dir_current, "e_kin.dat"), usecols=["total"]).to_numpy().flatten()
+        e_pot_total = pd.read_csv(join(dir_current, "e_kin.dat"), usecols=["total"]).to_numpy().flatten()
+        e_total = e_kin_total+e_pot_total
+        peaks_e = find_peaks(e_total)[0]
+        mean_e = e_total[peaks_e[-2]:peaks_e[-1]].mean()
+
         aero_work = df[["aero_drag", "aero_lift", "aero_mom"]].sum(axis=1).to_numpy()
         struct_work = df[["damp_edge", "damp_flap", "damp_tors"]].sum(axis=1).to_numpy()
 
         period_aero_work[ampl_to_ind[ampl], aoa_to_ind[aoa]] = aero_work[-1]
+        norm_period_aero_work[ampl_to_ind[ampl], aoa_to_ind[aoa]] = aero_work[-1]/mean_e
         period_struct_work[ampl_to_ind[ampl], aoa_to_ind[aoa]] = struct_work[-1]
 
         convergence_aero[ampl_to_ind[ampl], aoa_to_ind[aoa]] = (aero_work[-1]-aero_work[-2])/aero_work[-1]
@@ -884,7 +1137,8 @@ def combined_forced(root_dir: str):
     fig, ax = plt.subplots()
     cmap, norm = get_colourbar(period_aero_work)
     ax = heatmap(period_aero_work, xticklabels=np.round(aoas, 3), ax=ax, yticklabels=np.round(amplitudes, 3),
-                 cbar_kws={"label": r"period work"}, cmap=cmap, norm=norm, annot=True, fmt=".3g")
+                 cbar_kws={"label": r"$W_{\text{aero}}$ per period (Nm/s)"}, cmap=cmap, norm=norm, annot=True, 
+                 fmt=".3g")
     cbar = ax.collections[0].colorbar
     stab_min = period_aero_work.min()
     stab_max = period_aero_work.max()
@@ -895,9 +1149,29 @@ def combined_forced(root_dir: str):
         cbar.set_ticks([stab_min, 0])
         cbar.set_ticklabels([np.round(stab_min, 3), 0])
     cbar.minorticks_off()
-    handler = MosaicHandler(fig, ax)
+    handler = PlotHandler(fig, ax)
     handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude factor (-)")
     handler.save(join(dir_plots, "period_aero_work.pdf"))
+
+    dir_plots = helper.create_dir(join(root_dir, "plots"))[0]
+    fig, ax = plt.subplots()
+    cmap, norm = get_colourbar(norm_period_aero_work)
+    ax = heatmap(norm_period_aero_work, xticklabels=np.round(aoas, 3), ax=ax, yticklabels=np.round(amplitudes, 3),
+                 cbar_kws={"label": r"$W_{\text{aero}}/\bar{E}_{\text{total}}$ per period (-)"}, cmap=cmap, 
+                 norm=norm, annot=True, fmt=".3g")
+    cbar = ax.collections[0].colorbar
+    stab_min = norm_period_aero_work.min()
+    stab_max = norm_period_aero_work.max()
+    if stab_max > 0:
+        cbar.set_ticks([stab_min, 0, stab_max])
+        cbar.set_ticklabels([np.round(stab_min, 3), 0, np.round(stab_max, 3)])
+    else:
+        cbar.set_ticks([stab_min, 0])
+        cbar.set_ticklabels([np.round(stab_min, 3), 0])
+    cbar.minorticks_off()
+    handler = PlotHandler(fig, ax)
+    handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude factor (-)")
+    handler.save(join(dir_plots, "normalised_period_aero_work.pdf"))
 
     fig, ax = plt.subplots()
     cmap, norm = get_colourbar(convergence_aero)
@@ -915,14 +1189,15 @@ def combined_forced(root_dir: str):
         cbar.set_ticks([stab_min, 0])
         cbar.set_ticklabels([np.round(stab_min, 3), 0])
     cbar.minorticks_off()
-    handler = MosaicHandler(fig, ax)
+    handler = PlotHandler(fig, ax)
     handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude factor (-)")
     handler.save(join(dir_plots, "convergence_aero.pdf"))
 
     fig, ax = plt.subplots()
     cmap, norm = get_colourbar(period_struct_work)
     ax = heatmap(period_struct_work, xticklabels=np.round(aoas, 3), ax=ax, yticklabels=np.round(amplitudes, 3),
-                 cbar_kws={"label": r"period work"}, cmap=cmap, norm=norm, annot=True, fmt=".3g")
+                 cbar_kws={"label": r"$W_{\text{struct}}$ work per period (Nm/s)"}, cmap=cmap, norm=norm, annot=True, 
+                 fmt=".3g")
     cbar = ax.collections[0].colorbar
     stab_min = period_struct_work.min()
     stab_max = period_struct_work.max()
@@ -935,7 +1210,7 @@ def combined_forced(root_dir: str):
         cbar.set_ticks([stab_min, 0])
         cbar.set_ticklabels([np.round(stab_min, 3), 0])
     cbar.minorticks_off()
-    handler = MosaicHandler(fig, ax)
+    handler = PlotHandler(fig, ax)
     handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude factor (-)")
     handler.save(join(dir_plots, "period_struct_work.pdf"))
 
@@ -955,7 +1230,7 @@ def combined_forced(root_dir: str):
         cbar.set_ticks([stab_min, 0])
         cbar.set_ticklabels([np.round(stab_min, 3), 0])
     cbar.minorticks_off()
-    handler = MosaicHandler(fig, ax)
+    handler = PlotHandler(fig, ax)
     handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude factor (-)")
     handler.save(join(dir_plots, "convergence_struct.pdf"))
     
@@ -963,8 +1238,8 @@ def combined_forced(root_dir: str):
     stability = period_aero_work+period_struct_work
     cmap, norm = get_colourbar(stability)
     ax = heatmap(stability, xticklabels=np.round(aoas, 3), ax=ax, 
-                 yticklabels=np.round(amplitudes, 3), cbar_kws={"label": "total period work"}, cmap=cmap, norm=norm,
-                 annot=True, fmt=".3g")
+                 yticklabels=np.round(amplitudes, 3), cbar_kws={"label": "total period work (Nm/s)"}, cmap=cmap, 
+                 norm=norm, annot=True, fmt=".3g")
     cbar = ax.collections[0].colorbar
     stab_min = stability.min()
     stab_max = stability.max()
@@ -977,6 +1252,6 @@ def combined_forced(root_dir: str):
         cbar.set_ticks([stab_min, 0])
         cbar.set_ticklabels([np.round(stab_min, 3), 0])
     cbar.minorticks_off()
-    handler = MosaicHandler(fig, ax)
+    handler = PlotHandler(fig, ax)
     handler.update(x_labels="angle of attack (°)", y_labels="oscillation amplitude factor (-)")
     handler.save(join(dir_plots, "stability.pdf"))
