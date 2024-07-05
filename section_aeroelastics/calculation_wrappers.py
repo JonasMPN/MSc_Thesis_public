@@ -1,4 +1,4 @@
-from calculation_utils import get_inflow, compress_oscillation, reconstruct_from_file, zero_oscillations
+from calculation_utils import get_inflow, compress_compound_oscillation, reconstruct_from_file, zero_oscillations
 from calculations import ThreeDOFsAirfoil
 from post_calculations import PostCaluculations
 from helper_functions import Helper
@@ -44,6 +44,7 @@ def run_forced(
         aero_scheme: str,
         coordinate_system: str,
         time: np.ndarray,
+        inflow_velocity: np.ndarray,
         base_pos: dict[str, np.ndarray],
         base_vel: dict[str, np.ndarray],
         # base_accel: dict[str, np.ndarray],
@@ -67,9 +68,9 @@ def run_forced(
             pos[axes] = ampl*position+mean_pos[axes]
             vel[axes] = ampl*base_vel[axes]+mean_vel[axes]
             # accel[axes] = ampl*base_accel[axes]+mean_accel[axes]
-            
-        inflow = get_inflow(time, [(0, 3, 1, aoa)], init_velocity=1)
 
+        inflow = get_inflow(time, [(0, 0, inflow_velocity, aoa)], init_velocity=inflow_velocity)
+        
         NACA_643_618 = ThreeDOFsAirfoil(dir_airfoil, time, verbose=False)
         # set the calculation scheme for the aerodynamic forces
         if aero_scheme == "qs":
@@ -81,9 +82,9 @@ def run_forced(
             NACA_643_618.set_aero_calc("BL_openFAST_Cl_disc", A1=0.165, A2=0.335, b1=0.0445, b2=0.3, 
                                        pitching_around=0.25, alpha_at=0.75, chord=structure_data["chord"])
         # set the calculation scheme for the structural damping and stiffness forces
-        NACA_643_618.set_struct_calc("linear", **structure_data)
+        NACA_643_618.set_struct_calc("linear_xy", **structure_data)
         # set the time integration scheme
-        NACA_643_618.set_time_integration("HHT-alpha-adapted", alpha=0.1, dt=time[1], **structure_data)
+        NACA_643_618.set_time_integration("HHT-alpha-xy-adapted", alpha=0.1, dt=time[1], **structure_data)
         # NACA_643_618.simulate_along_path(inflow, coordinate_system, pos, vel, accel)  # perform simulation
         NACA_643_618.simulate_along_path(inflow, coordinate_system, pos, vel)  # perform simulation
         NACA_643_618.save(case_dir)  # save simulation results
@@ -99,6 +100,7 @@ def _run_forced_parallel(
         amplitude: dict[int, list[float]|float],
         angle_of_attack: list[float]|float,
         time: np.ndarray,
+        inflow_velocity: np.ndarray,
         base_pos: dict[str, np.ndarray],
         base_vel: dict[str, np.ndarray],
         # base_accel: dict[str, np.ndarray],
@@ -119,7 +121,7 @@ def _run_forced_parallel(
     pd.DataFrame(dict_combinations).to_csv(join(root_dir, "combinations.dat"), index=None)
 
     always_use = [dir_airfoil, root, aero_scheme, coordinate_system,
-                  time, base_pos, base_vel, mean_pos, mean_vel, 
+                  time, inflow_velocity, base_pos, base_vel, mean_pos, mean_vel, 
                 #   time, base_pos, base_vel, base_accel, mean_pos, mean_vel, mean_accel, 
                   structure_data, helper]
     input_args = prepare_multiprocessing_input(n_processes, always_use, amplitudes, alphas, add_call_number=True)
@@ -135,6 +137,7 @@ def run_forced_parallel_from_free_case(
         root: str,
         n_processes: int,
         aero_scheme: str,
+        inflow_velocity: np.ndarray,
         periods: int,
         period_resolution: int,
         structure_data: dict[str, float],
@@ -146,16 +149,15 @@ def run_forced_parallel_from_free_case(
     motion_filename = motion_file[:motion_file.rfind(".")]
     ffile_compressed_motion = join(dir_base_motion, f"{motion_filename}_compressed.json")
 
-    # if not isfile(ffile_compressed_motion):
-    if True:
-        compress_oscillation(ffile_free_motion, ffile_compressed_motion, motion_cols, period_res=period_resolution)
+    if not isfile(ffile_compressed_motion):
+        compress_compound_oscillation(ffile_free_motion, ffile_compressed_motion, motion_cols, period_res=period_resolution)
     else:
         with open(ffile_compressed_motion, "r") as f:
             compressed_data = json.load(f)
-            old_period_res = compressed_data.values()[0]["N"]
+            old_period_res = [*compressed_data.values()][0]["N"]
             if old_period_res != period_resolution:
-                compress_oscillation(ffile_free_motion, ffile_compressed_motion, motion_cols,
-                                     period_res=period_resolution)
+                compress_compound_oscillation(ffile_free_motion, ffile_compressed_motion, motion_cols,
+                                              period_res=period_resolution)
     base_motion, mean = reconstruct_from_file(ffile_compressed_motion, separate_mean=True)
     base_time = base_motion[motion_cols[0]]["time"]
     osci_time, base_osci = zero_oscillations(base_time, periods, **base_motion)
@@ -206,6 +208,7 @@ def run_forced_parallel_from_free_case(
         amplitude,
         angle_of_attack,
         osci_time,
+        inflow_velocity,
         base_pos,
         base_vel,
         # base_accel,
@@ -220,7 +223,8 @@ def post_calc(
         alpha_lift: str,
         ):
     for case_dir in case_dirs:
-        post_calc = PostCaluculations(dir_sim_res=case_dir, alpha_lift=alpha_lift)
+        #todo hardcoded CS
+        post_calc = PostCaluculations(dir_sim_res=case_dir, alpha_lift=alpha_lift, coordinate_system_structure="xy")
         post_calc.project_data()  # projects the simulation's x-y-rot_z data into different coordinate systems such as
         # edgewise-flapwise-rot_z or drag-lift_rot_z.
         post_calc.power()  # calculate and save the work done by the aerodynamic and structural damping forces
