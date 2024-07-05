@@ -70,6 +70,7 @@ class PowerAndEnergy(Rotations):
         damping forces (key: "damp").
         :rtype: dict[str: dict[str: np.ndarray]]
         """
+        # the structural rotation is included in alpha_lift so it has to be substracted
         sep_f_aero = self.project_separate(self.f_aero_dlm, -self.alpha_lift-self.structural_rotation)
         # sep_f_aero is now (drag_x, drag_y, lift_x, lift_y, aero torque)
         sep_f_aero_mean = (sep_f_aero[:-1]+sep_f_aero[1:])/2
@@ -293,6 +294,7 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         e_kin_res = self._calc.kinetic_energy()
         e_kin_res = {self._index_to_label[axis]: values for axis, values in e_kin_res.items()}
         df = pd.DataFrame(e_kin_res)
+        df["total"] = df.sum(axis=1)
         df.to_csv(join(self.dir_in, self._dfl_filenames["e_kin"]), index=None)
     
     @_init_calc
@@ -303,15 +305,16 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         e_pot_res = self._calc.potential_energy()
         e_pot_res = {self._index_to_label_pot[axis]: values for axis, values in e_pot_res.items()}
         df = pd.DataFrame(e_pot_res)
+        df["total"] = df.sum(axis=1)
         df.to_csv(join(self.dir_in, self._dfl_filenames["e_pot"]), index=None)
 
     def work_per_cycle(self, peaks: np.ndarray=None):
         t = self.df_general["time"].to_numpy()
         dt = t[1:]-t[:-1]
         if peaks is None:
-            pos_x = self.df_general["pos_x"].to_numpy()
-            peaks = find_peaks(pos_x)[0]
-        
+            pos_x = self.df_general["pos_y"].to_numpy()
+            peaks = np.r_[0, find_peaks(pos_x)[0]]
+
         df_power = pd.read_csv(join(self.dir_in, self._dfl_filenames["power"]))
         period_power = {}
         for col in df_power.columns:
