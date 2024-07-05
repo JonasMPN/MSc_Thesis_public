@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 from abc import ABC, abstractmethod
+from copy import copy
 plt.rcParams.update({"font.size": 10})
 
 
@@ -80,6 +81,9 @@ class _BaseDefaultPltSettings(ABC):
                 if setting in skip_setting:
                     continue
                 self.plt_settings[param][setting] = value
+    
+    def copy(self):
+        return copy(self)
 
     @property
     @abstractmethod
