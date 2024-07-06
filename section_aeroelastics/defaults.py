@@ -1,6 +1,7 @@
 import matplotlib.pyplot as plt
 from abc import ABC, abstractmethod
 from copy import copy
+import numpy as np
 plt.rcParams.update({"font.size": 10})
 
 
@@ -649,3 +650,26 @@ class DefaultsSimulation(DefaultStructure):
     def _get_split(self, param: str, without_param: bool=False):
         param = "" if without_param else param
         return [param+"_"+split for split in self._dfl_split[param]]
+
+
+class Staeblein:
+    def __init__(self) -> None:
+        # aero
+        self.C_l_alpha = 7.15
+        self.C_d = 0.01
+        self.C_m = -0.1
+
+        # structure
+        self.c = 3.929
+        self.e_ac = 0.113
+        self.e_cg = 0.304
+        self.r = 0.785
+        self.m = 203
+
+        self.nat_freqs = np.asarray([0.93, 0.61, 6.66])
+        self.damp_ratios = np.asarray([0.0049, 0.0047, 0.0093])
+
+        self.inertia = np.asarray([self.m, self.m, self.m*(self.e_cg**2+self.r**2)])
+        self.stiffness = np.asarray(self.nat_freqs)**2*self.inertia
+        self.damping = 2*self.damp_ratios*self.inertia*self.nat_freqs
+
