@@ -10,6 +10,7 @@ from os.path import join
 from os import listdir
 from helper_functions import Helper
 from itertools import product
+from defaults import Staeblein
 helper = Helper()
 
 do = {
@@ -30,7 +31,8 @@ sim_type = "free"
 # sim_type = "forced"
 
 # aero_scheme = "qs"
-aero_scheme = "BL_openFAST_Cl_disc"
+# aero_scheme = "BL_openFAST_Cl_disc"
+aero_scheme = "BL_Staeblein"
 
 alpha_lift = "alpha_qs" if aero_scheme == "qs" else "alpha_eff"
 
@@ -46,41 +48,28 @@ case_name = "val_staeblein"
 motion_from_axes = ["x", "y", "tors"]  # adapt 'cs' for changes here
 coordinate_system = "xy"
 
-linear_inertia = 203  # aka mass
-e_cg = 0.304
-torsional_inertia = linear_inertia*(e_cg**2+0.785**2)
-nat_freq_0 = 0.93
-nat_freq_1 = 0.61
-nat_freq_2 = 6.66
-damping_ratio_0 = 0.0049
-damping_ratio_1 = 0.0047
-# damping_ratio_1 = 0.342
-damping_ratio_2 = 0.0093
-
+staeblein = Staeblein()
 structure_def = {  # definition of structural parameters
-    "chord": 3.292,
+    "chord": staeblein.c,
     "coordinate_system": "xy",
-    "inertia": [linear_inertia, linear_inertia, torsional_inertia], # [linear, linear, torsion]
-    "damping": [
-        # 2*damping_ratio_0*nat_freq_0, 
-        # 2*damping_ratio_1*nat_freq_1, 
-        # 2*damping_ratio_2*nat_freq_2
-        damping_ratio_0*2*linear_inertia*nat_freq_0, 
-        damping_ratio_1*2*linear_inertia*nat_freq_1, 
-        damping_ratio_2*2*linear_inertia*nat_freq_2, 
-        ],  # [x_0, x_1, torsion]
-    "stiffness": [linear_inertia*nat_freq_0**2, 
-                  linear_inertia*nat_freq_1**2, 
-                  torsional_inertia*nat_freq_2**2]  # [x_0, x_1, torsion]
+    # "inertia": [1, 1, 1], # [linear, linear, torsion]
+    "inertia": staeblein.inertia.tolist(), # [linear, linear, torsion]
+    # "damping": [1, 1, 1], # [x_0, x_1, torsion]
+    "damping": staeblein.damping.tolist(), 
+    # "stiffness": [1, 1, 1],  # [x_0, x_1, torsion]
+    "stiffness": staeblein.stiffness.tolist(),
 }
-freq = 0.61  # in Hz
-damp_ratio = 0.342
-damping_coeff = freq*damp_ratio
-damped_freq = freq*np.sqrt(1-damping_coeff**2)
-x0 = 0.01
-nat_freq = np.sqrt(structure_def["stiffness"][1]/structure_def["inertia"][1])
-from calculations import Oscillations
-osci = Oscillations(structure_def["inertia"][1], nat_freq, damp_ratio)
+
+polars_from = "file" if "Staeblein" not in aero_scheme else "staeblein"
+
+# freq = 0.61  # in Hz
+# damp_ratio = 0.342
+# damping_coeff = freq*damp_ratio
+# damped_freq = freq*np.sqrt(1-damping_coeff**2)
+# x0 = 0.01
+# nat_freq = np.sqrt(structure_def["stiffness"][1]/structure_def["inertia"][1])
+# from calculations import Oscillations
+# osci = Oscillations(structure_def["inertia"][1], nat_freq, damp_ratio)
 
 def main(simulate, forced, post_calc, plot_results, plot_results_fill, plot_coupled_timeseries, 
          animate_results, plot_combined_forced):
@@ -89,19 +78,27 @@ def main(simulate, forced, post_calc, plot_results, plot_results_fill, plot_coup
         with open(join(case_dir, "section_data.json"), "w") as f:
             json.dump(structure_def, f, indent=4)
         dt = 0.01  # if dt<1e-5, the dt rounding in compress_oscillation() in calculation_utils.py needs to be adapted
-        t_end = 50
+        t_end = 100
         t = dt*np.arange(int(t_end/dt))  # set the time array for the simulation
         NACA_643_618 = ThreeDOFsAirfoil(root, t, verbose=False)
 
         # get inflow at each time step. The below line creates inflow that has magnitude 1 and changes from 0 deg to 40
         # deg in the first 3s.
         # inflow = get_inflow(t, [(0, 3, 10, 20)], init_velocity=1)
-        inflow = get_inflow(t, [(0, 0, 50, 0)], init_velocity=0.1)
+        inflow = get_inflow(t, [(0, 0, 45, 7)], init_velocity=0.1)
+        alpha = 7
+        # alpha = None
         # init_pos = np.zeros(3)  # initial conditions for the position in [x, y, rotation in rad]
-        init_pos, f_init = NACA_643_618.approximate_steady_state(inflow[0, :], structure_def["chord"], 
-                                                                 structure_def["stiffness"], x=False, y=False, 
-                                                                 torsion=False)
-        # init_pos[1] += 10
+        init_pos, f_init, inflow_angle = NACA_643_618.approximate_steady_state(inflow[0, :], structure_def["chord"], 
+                                                                               structure_def["stiffness"], x=True, 
+                                                                               y=True, torsion=True, alpha=alpha,
+                                                                               polars_from=polars_from)
+        if alpha is not None:
+            inflow = get_inflow(t, [(0, 0, 45, inflow_angle)], init_velocity=0.1)
+
+        init_pos[0] += 4
+        # init_pos[1] = 1
+        # init_pos[2] = 0
         NACA_643_618.aero[-1, :] = f_init  # if an HHT-alpha algorithm is used
         init_vel = np.zeros(3)  # initial conditions for the velocity in [x, y, rotation in rad/s]
 
@@ -109,34 +106,41 @@ def main(simulate, forced, post_calc, plot_results, plot_results_fill, plot_coup
         if aero_scheme == "qs":
             NACA_643_618.set_aero_calc(chord=structure_def["chord"], pitching_around=0.25, alpha_at=0.75)
         elif aero_scheme == "BL_chinese":
-            NACA_643_618.set_aero_calc("BL_chinese", A1=0.3, A2=0.7, b1=0.14, b2=0.53, pitching_around=0.25+0.113, 
+            NACA_643_618.set_aero_calc("BL_chinese", A1=0.3, A2=0.7, b1=0.14, b2=0.53, pitching_around=0.25, 
                                        alpha_at=0.75, chord=structure_def["chord"])
         elif aero_scheme == "BL_openFAST_Cl_disc":
             NACA_643_618.set_aero_calc("BL_openFAST_Cl_disc", A1=0.165, A2=0.335, b1=0.0445, b2=0.3, 
                                        pitching_around=0.25, alpha_at=0.75, chord=structure_def["chord"])
+        elif aero_scheme == "BL_Staeblein":
+            NACA_643_618.set_aero_calc("BL_Staeblein", A1=0.165, A2=0.335, b1=0.0445, b2=0.3, 
+                                       pitching_around=0.25+staeblein.e_ac, alpha_at=0.75, chord=structure_def["chord"])
+            structure_def["inertia"] = np.diag(structure_def["inertia"])
+            structure_def["inertia"][1, 2] = -staeblein.inertia[0]*staeblein.e_cg
+            structure_def["inertia"][2, 1] = -staeblein.inertia[0]*staeblein.e_cg
         else:
             raise NotImplementedError(f"'aero_scheme'={aero_scheme} not implemented.")
         
         # set the calculation scheme for the structural damping and stiffness forces
-        structure_def["inertia"] = np.diag(structure_def["inertia"])
-        structure_def["inertia"][1, 2] = -linear_inertia*e_cg
-        structure_def["inertia"][2, 1] = -linear_inertia*e_cg
         NACA_643_618.set_struct_calc("linear_xy", **structure_def)
         # NACA_643_618.set_time_integration("eE", **structure_def)
         NACA_643_618.set_time_integration("HHT-alpha-xy-adapted", alpha=0.1, dt=t[1]-t[0], **structure_def)
-        # NACA_643_618.simulate(inflow, init_pos, init_vel)  # perform simulation
+        NACA_643_618.simulate(inflow, init_pos, init_vel)  # perform simulation
         # damped = osci.damped(t)
         # vel = np.r_[0, (damped[1:]-damped[:-1])/t[1]]
-        NACA_643_618.simulate_along_path(inflow, "xy", init_pos, init_vel, 
-                                         {0: np.zeros_like(t), 
-                                        #  1: damped, 
-                                        #  2: np.zeros_like(t)
-                                         }, 
-                                         {0: np.zeros_like(t), 
-                                        #  1: vel, 
-                                        #  2: np.zeros_like(t)
-                                         }
-                                         )  # perform simulation
+        # NACA_643_618.simulate_along_path(inflow, "xy", init_pos, init_vel, 
+        #                                  {
+        #                                     #  0: np.zeros_like(t), 
+        #                                     #  1: damped, 
+        #                                      1: np.zeros_like(t), 
+        #                                     #  2: np.zeros_like(t)
+        #                                  }, 
+        #                                  {
+        #                                     #  0: np.zeros_like(t), 
+        #                                     #  1: damped, 
+        #                                      1: np.zeros_like(t), 
+        #                                     #  2: np.zeros_like(t)
+        #                                  }
+        #                                  )  # perform simulation
         NACA_643_618.save(case_dir)  # save simulation results
 
     if forced:
@@ -187,8 +191,8 @@ def main(simulate, forced, post_calc, plot_results, plot_results_fill, plot_coup
             dir_sim = join(root, "simulation", sim_type, aero_scheme, case_name, case_id)
         dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
         plotter = Plotter(file_profile, dir_sim, dir_plots, structure_def["coordinate_system"]) 
-        plotter.force()  # plot various forces of the simulation
-        plotter.energy()  # plot various energies and work done by forces of the simulation
+        plotter.force(trailing_every=1)  # plot various forces of the simulation
+        plotter.energy(trailing_every=1)  # plot various energies and work done by forces of the simulation
         if "BL" in aero_scheme:
             plotter.Beddoes_Leishman()
     
