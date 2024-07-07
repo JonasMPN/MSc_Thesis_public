@@ -6,6 +6,7 @@ test.py
 
 *.dat
 !polars.dat
+!polars_staeblein.dat
 !info_polar.dat
 !unsteady*.dat
 !Cd*.dat
