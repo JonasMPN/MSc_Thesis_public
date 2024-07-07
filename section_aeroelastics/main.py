@@ -34,6 +34,8 @@ sim_type = "free"
 # aero_scheme = "BL_openFAST_Cl_disc"
 aero_scheme = "BL_Staeblein"
 
+file_polar = "polars_staeblein.dat"
+
 alpha_lift = "alpha_qs" if aero_scheme == "qs" else "alpha_eff"
 
 # case_name = "test_BL_openFAST"
@@ -60,8 +62,6 @@ structure_def = {  # definition of structural parameters
     "stiffness": staeblein.stiffness.tolist(),
 }
 
-polars_from = "file" if "Staeblein" not in aero_scheme else "staeblein"
-
 # freq = 0.61  # in Hz
 # damp_ratio = 0.342
 # damping_coeff = freq*damp_ratio
@@ -78,42 +78,53 @@ def main(simulate, forced, post_calc, plot_results, plot_results_fill, plot_coup
         with open(join(case_dir, "section_data.json"), "w") as f:
             json.dump(structure_def, f, indent=4)
         dt = 0.01  # if dt<1e-5, the dt rounding in compress_oscillation() in calculation_utils.py needs to be adapted
-        t_end = 100
+        t_end = 10
         t = dt*np.arange(int(t_end/dt))  # set the time array for the simulation
-        NACA_643_618 = ThreeDOFsAirfoil(root, t, verbose=False)
+        NACA_643_618 = ThreeDOFsAirfoil(t, verbose=False)
 
         # get inflow at each time step. The below line creates inflow that has magnitude 1 and changes from 0 deg to 40
         # deg in the first 3s.
-        # inflow = get_inflow(t, [(0, 3, 10, 20)], init_velocity=1)
-        inflow = get_inflow(t, [(0, 0, 45, 7)], init_velocity=0.1)
-        alpha = 7
-        # alpha = None
-        # init_pos = np.zeros(3)  # initial conditions for the position in [x, y, rotation in rad]
-        init_pos, f_init, inflow_angle = NACA_643_618.approximate_steady_state(inflow[0, :], structure_def["chord"], 
-                                                                               structure_def["stiffness"], x=True, 
-                                                                               y=True, torsion=True, alpha=alpha,
-                                                                               polars_from=polars_from)
+        inflow = get_inflow(t, [(0, 0, 5, 7)], init_velocity=1)
+        # inflow = get_inflow(t, [(0, 0, 45, 7)], init_velocity=0.1)
+
+        # alpha = 7
+        alpha = None
+
+        approx_steady_x = True
+        approx_steady_y = True
+        approx_steady_tors = True
+        ffile_polar = join(root, file_polar)
+        init_data = NACA_643_618.approximate_steady_state(ffile_polar, inflow[0, :], structure_def["chord"],  
+                                                          structure_def["stiffness"], x=approx_steady_x,  
+                                                          y=approx_steady_y, torsion=approx_steady_tors, alpha=alpha)
+        init_pos, f_init, inflow_angle = init_data
+        NACA_643_618.aero[-1, :] = f_init  # if an HHT-alpha algorithm is used
+        
         if alpha is not None:
             inflow = get_inflow(t, [(0, 0, 45, inflow_angle)], init_velocity=0.1)
 
-        init_pos[0] += 4
+        init_pos = np.zeros(3)
+        # init_pos[0] += 4
         # init_pos[1] = 1
         # init_pos[2] = 0
-        NACA_643_618.aero[-1, :] = f_init  # if an HHT-alpha algorithm is used
         init_vel = np.zeros(3)  # initial conditions for the velocity in [x, y, rotation in rad/s]
+        
 
         # set the calculation scheme for the aerodynamic forces
+        chord = structure_def["chord"]
         if aero_scheme == "qs":
-            NACA_643_618.set_aero_calc(chord=structure_def["chord"], pitching_around=0.25, alpha_at=0.75)
+            NACA_643_618.set_aero_calc(root, scheme="qs", chord=chord, pitching_around=0.25*chord, alpha_at=0.75*chord)
         elif aero_scheme == "BL_chinese":
-            NACA_643_618.set_aero_calc("BL_chinese", A1=0.3, A2=0.7, b1=0.14, b2=0.53, pitching_around=0.25, 
-                                       alpha_at=0.75, chord=structure_def["chord"])
+            NACA_643_618.set_aero_calc(root, scheme="BL_chinese", A1=0.3, A2=0.7, b1=0.14, b2=0.53, 
+                                       pitching_around=0.25*chord, alpha_at=0.75*chord, chord=chord)
         elif aero_scheme == "BL_openFAST_Cl_disc":
-            NACA_643_618.set_aero_calc("BL_openFAST_Cl_disc", A1=0.165, A2=0.335, b1=0.0445, b2=0.3, 
-                                       pitching_around=0.25, alpha_at=0.75, chord=structure_def["chord"])
+            NACA_643_618.set_aero_calc(root, scheme="BL_openFAST_Cl_disc", A1=0.165, A2=0.335, b1=0.0445, b2=0.3, 
+                                       pitching_around=0.25*chord, alpha_at=0.75*chord, chord=chord)
         elif aero_scheme == "BL_Staeblein":
-            NACA_643_618.set_aero_calc("BL_Staeblein", A1=0.165, A2=0.335, b1=0.0445, b2=0.3, 
-                                       pitching_around=0.25+staeblein.e_ac, alpha_at=0.75, chord=structure_def["chord"])
+            NACA_643_618.set_aero_calc(root, file_polar="polars_staeblein.dat", scheme="BL_Staeblein", A1=0.165, 
+                                       A2=0.335, b1=0.0445, b2=0.3, chord=chord, 
+                                       pitching_around=(0.25+staeblein.e_ac)*chord, alpha_at=0.75*chord, 
+                                       e_ac=staeblein.e_ac)
             structure_def["inertia"] = np.diag(structure_def["inertia"])
             structure_def["inertia"][1, 2] = -staeblein.inertia[0]*staeblein.e_cg
             structure_def["inertia"][2, 1] = -staeblein.inertia[0]*staeblein.e_cg
@@ -183,6 +194,7 @@ def main(simulate, forced, post_calc, plot_results, plot_results_fill, plot_coup
             post_calculations_parallel(root_cases, alpha_lift, n_parallel)
 
     if plot_results:
+        trailing_every = 1
         file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
         if sim_type == "free":
             dir_sim = join(root, "simulation", "free", aero_scheme, case_name)  # define path to the root of the simulation results
@@ -191,10 +203,10 @@ def main(simulate, forced, post_calc, plot_results, plot_results_fill, plot_coup
             dir_sim = join(root, "simulation", sim_type, aero_scheme, case_name, case_id)
         dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
         plotter = Plotter(file_profile, dir_sim, dir_plots, structure_def["coordinate_system"]) 
-        plotter.force(trailing_every=1)  # plot various forces of the simulation
-        plotter.energy(trailing_every=1)  # plot various energies and work done by forces of the simulation
+        plotter.force(trailing_every=trailing_every)  # plot various forces of the simulation
+        plotter.energy(trailing_every=trailing_every)  # plot various energies and work done by forces of the simulation
         if "BL" in aero_scheme:
-            plotter.Beddoes_Leishman()
+            plotter.Beddoes_Leishman(trailing_every=trailing_every)
     
     if plot_results_fill:
         file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data

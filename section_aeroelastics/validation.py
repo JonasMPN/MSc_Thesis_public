@@ -70,7 +70,7 @@ def plot_sep_points(dir_sep_points: str, alpha_limits: tuple=(-30, 30)):
 def run_BeddoesLeishman(
         dir_profile: str, BL_scheme: str, validation_against: str, index_unsteady_data: int,
         k: float, inflow_speed: float, chord: float, amplitude: float, mean: float, 
-        period_res: int=1000,
+        period_res: int=1000, file_polar: str="polars_new.dat",
         # A1: float=0.3, A2: float=0.7, b1: float=0.14, b2: float=0.53
         A1: float=0.165, A2: float=0.335, b1: float=0.0445, b2: float=0.3
         ):
@@ -81,7 +81,7 @@ def run_BeddoesLeishman(
     dt = T/period_res
     t = dt*np.arange(overall_res)
 
-    airfoil = ThreeDOFsAirfoil(dir_profile, t)
+    airfoil = ThreeDOFsAirfoil(t)
 
     alpha = np.deg2rad(mean+amplitude*np.sin(omega*t))
     alpha_speed = np.deg2rad(amplitude*omega*np.cos(omega*t))
@@ -94,7 +94,9 @@ def run_BeddoesLeishman(
     
     pitch_around = 0.5
     # airfoil.set_aero_calc(BL_scheme, A1=A1, A2=A2, b1=b1, b2=b2, pitching_around=pitch_around, alpha_at=0.75)
-    airfoil.set_aero_calc(BL_scheme, A1=A1, A2=A2, b1=b1, b2=b2, pitching_around=pitch_around, alpha_at=0.75)
+    if BL_scheme == "BL_Staeblein":
+        airfoil.set_aero_calc(dir_polar=dir_airfoil, file_polar=file_polar, scheme=BL_scheme, A1=A1, A2=A2, b1=b1, 
+                              b2=b2, pitching_around=pitch_around, alpha_at=0.75,)
     airfoil._init_aero_force(airfoil, pitching_around=pitch_around, A1=A1, A2=A2)
     coeffs = np.zeros((t.size, 3))
     for i in range(overall_res):
@@ -106,7 +108,7 @@ def run_BeddoesLeishman(
     airfoil.save(dir_res)
     f_f_aero = join(dir_res, "f_aero.dat")
     df = pd.read_csv(f_f_aero)
-    df["C_d"] = coeffs[:, 0]  # "BL_openFAST"
+    df["C_d"] = coeffs[:, 0]  
     df["C_l"] = coeffs[:, 1]
     df["C_m"] = coeffs[:, 2]
     df.to_csv(f_f_aero, index=None)
@@ -415,7 +417,7 @@ class HHTalphaValidator(DefaultPlot, DefaultStructure, Rotations):
         scheme: str="HHT-alpha-xy",
         alpha_HHT: float=0.1,
         ) -> ThreeDOFsAirfoil:
-        airfoil = ThreeDOFsAirfoil(dir_polar=self.dir_polar, time=time)
+        airfoil = ThreeDOFsAirfoil(time)
         airfoil.pos[0, :] = init_pos
         airfoil.vel[0, :] = init_vel
         
@@ -465,8 +467,8 @@ if __name__ == "__main__":
     do = {
         "separation_point_calculation": False,
         "separation_point_plots": False,
-        "BL": False,
-        "plot_BL_results_meas": False,
+        "BL": True,
+        "plot_BL_results_meas": True,
         "plot_BL_results_polar": False,
         "calc_HHT_alpha_response": False,
         "plot_HHT_alpha_response": False,
@@ -475,13 +477,14 @@ if __name__ == "__main__":
         "HHT_alpha_forced": False,
         "HHT_alpha_forced_composite": False,
         "HHT_alpha_step": False,
-        "HHT_alpha_rotation": True,
+        "HHT_alpha_rotation": False,
         "ef_vs_xy": False
     }
     dir_airfoil = "data/FFA_WA3_221"
     dir_HHT_alpha_validation = "data/HHT_alpha_validation"
-    BL_scheme = "BL_openFAST_Cl_disc"
+    # BL_scheme = "BL_openFAST_Cl_disc"
     # BL_scheme = "BL_chinese"
+    BL_scheme = "BL_Staeblein"
     HHT_alpha_case = "test"
     sep_point_test_res = 202
     period_res = 400
@@ -505,16 +508,16 @@ if __name__ == "__main__":
 
     if do["plot_BL_results_meas"]:
         plotter = BLValidationPlotter()
-        plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), join(dir_airfoil, "polars_new.dat"))
-        # dir_validations = join(dir_airfoil, "validation", BL_scheme, "measurement")
-        # dir_unsteady = join(dir_airfoil, "unsteady")
-        # df_cases = pd.read_csv(join(dir_unsteady, "cases.dat"))
-        # df_meas_files = pd.read_csv(join(dir_unsteady, "cases_results.dat"))
-        # for case_id, row in df_meas_files.iterrows():
-        #     dir_case = join(dir_validations, str(case_id))
-        #     # plotter.plot_model_comparison(dir_case)
-        #     plotter.plot_meas_comparison(join(dir_unsteady, "unsteady_data"), row.to_dict(), dir_case, 
-        #                                  period_res=period_res)
+        # plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), join(dir_airfoil, "polars_new.dat"))
+        dir_validations = join(dir_airfoil, "validation", BL_scheme, "measurement")
+        dir_unsteady = join(dir_airfoil, "unsteady")
+        df_cases = pd.read_csv(join(dir_unsteady, "cases.dat"))
+        df_meas_files = pd.read_csv(join(dir_unsteady, "cases_results.dat"))
+        for case_id, row in df_meas_files.iterrows():
+            dir_case = join(dir_validations, str(case_id))
+            # plotter.plot_model_comparison(dir_case)
+            plotter.plot_meas_comparison(join(dir_unsteady, "unsteady_data"), row.to_dict(), dir_case, 
+                                         period_res=period_res)
             
     if do["plot_BL_results_polar"]:
         file_polar = join(dir_airfoil, "polars.dat")
@@ -775,7 +778,7 @@ if __name__ == "__main__":
             with open(join(dir_res, "section_data.json"), "w") as json_file:
                 json.dump(section_data, json_file, indent=4)
 
-            airfoil = ThreeDOFsAirfoil(dir_polar="data/FFA_WA3_221", time=t)
+            airfoil = ThreeDOFsAirfoil(t)
             airfoil.dt = dt*np.ones(t.size)
             airfoil.pos[0, :] = x_0
             airfoil.vel[0, :] = v_0

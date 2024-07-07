@@ -28,9 +28,7 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
 
     def __init__(
         self, 
-        dir_polar: str,
         time: np.ndarray,
-        file_polar: str="polars_new.dat",
         verbose: bool=True
         ) -> None:
         """Initialises instance object.
@@ -43,8 +41,6 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
         """
         SimulationResults.__init__(self, time)
 
-        self.dir_polar = dir_polar
-        self.file_polar_data = file_polar
         self.verbose = verbose
 
         self._aero_force = None
@@ -61,22 +57,13 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
 
         self._added_sim_params = {filename: None for filename in self._dfl_files.keys()}
 
-    def approximate_steady_state(self, inflow: np.ndarray, chord: float, stiffness: np.ndarray,  
+    def approximate_steady_state(self, ffile_polar: str, inflow: np.ndarray, chord: float, stiffness: np.ndarray,  
                                  x: bool=False, y: bool=False, torsion: bool=False, alpha: float=None,
-                                 density: float=1.225, polars_from: str="file"):
-        if polars_from == "file":
-            df_polars = pd.read_csv(join(self.dir_polar, self.file_polar_data), delim_whitespace=True)
-            C_d = interpolate.interp1d(np.deg2rad(df_polars["alpha"]), df_polars["C_d"])
-            C_l = interpolate.interp1d(np.deg2rad(df_polars["alpha"]), df_polars["C_l"])
-            C_m = interpolate.interp1d(np.deg2rad(df_polars["alpha"]), df_polars["C_m"])
-        elif polars_from == "staeblein":
-            staeblein = Staeblein()
-            C_d = lambda x: staeblein.C_d
-            C_l = lambda x: staeblein.C_l_alpha*x
-            C_m = lambda x: staeblein.C_m
-        else:
-            raise NotImplementedError(f"'polars_from'='{polars_from}', but only one of ['file', 'staeblein'] are "
-                                      "supported.")
+                                 density: float=1.225):
+        df_polars = pd.read_csv(ffile_polar, delim_whitespace=True)
+        C_d = interpolate.interp1d(np.deg2rad(df_polars["alpha"]), df_polars["C_d"])
+        C_l = interpolate.interp1d(np.deg2rad(df_polars["alpha"]), df_polars["C_l"])
+        C_m = interpolate.interp1d(np.deg2rad(df_polars["alpha"]), df_polars["C_m"])
 
         inflow_speed = np.linalg.norm(inflow)
         inflow_angle = np.arctan(inflow[1]/inflow[0])
@@ -106,7 +93,7 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
         pos_y = f_aero_xy[1]/stiffness[1]
         return np.asarray([pos_x, pos_y, tors_angle]), f_aero, np.rad2deg(inflow_angle)
   
-    def set_aero_calc(self, scheme: str="quasi_steady", **kwargs):
+    def set_aero_calc(self, dir_polar: str, file_polar: str="polars_new.dat", scheme: str="quasi_steady", **kwargs):
         """Sets how the aerodynamic forces are calculated in the simulation. If the scheme is dependet on constants,
         these must be given in the kwargs. Which kwargs are necessary are defined in the match-case statements in 
         this function's implementation; they are denoted "must_haves". These are mandatory. The "can_haves" are 
@@ -117,7 +104,7 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
         :raises NotImplementedError: If a scheme is wanted that is not implemented.
         """
         self._aero_scheme_settings = kwargs
-        AF = AeroForce(dir_polar=self.dir_polar, file_polar=self.file_polar_data, verbose=self.verbose)
+        AF = AeroForce(dir_polar=dir_polar, file_polar=file_polar, verbose=self.verbose)
         self._added_sim_params[self._dfl_filenames["f_aero"]] = AF.get_additional_params(scheme)
         self._aero_force = AF.prepare_and_get_scheme(scheme, self, "set_aero_calc", **kwargs)
         self._init_aero_force = AF.get_scheme_init_method(scheme)
@@ -358,7 +345,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         "BL_openFAST_Cl_disc": ["alpha_qs", "alpha_eff", "x1", "x2", "x3", "x4", "C_lpot", "C_lc", "C_lnc", "C_ds",
                                 "C_dc", "C_dsep", "C_ms", "C_mnc", "f_steady", "alpha_eq"],
         "BL_Staeblein": ["alpha_qs", "alpha_eff", "x1", "x2", "C_lpot", "C_lc", "C_lnc", "C_ds", "C_dc", "C_ms", 
-                         "C_mnc", "f_steady", "alpha_eq"],
+                         "C_mnc", "alpha_eq", "rel_inflow_speed", "rel_inflow_accel"],
     }
 
     # _copy_scheme = {
@@ -396,8 +383,6 @@ class AeroForce(SimulationSubRoutine, Rotations):
         self._C_fs = None
 
         self._state_derivatives = None
-
-        self._staeblein = None  # for aeroelastic validation using Staebleins paper
 
     def get_scheme_method(self, scheme: str) -> Callable:
         scheme_methods = {
@@ -503,7 +488,11 @@ class AeroForce(SimulationSubRoutine, Rotations):
                                 raise NotImplementedError(f"For param '{param}'")
                             df_fs = self._C_l_fs(sep_data[f"alpha_{direction}"], sep_data[param], alpha_interp, coeff,
                                                  alpha_0, slope, save_as)
-                        self._C_fs = interpolate.interp1d(df_fs["alpha"], df_fs["C_fs"])             
+                        self._C_fs = interpolate.interp1d(df_fs["alpha"], df_fs["C_fs"]) 
+            case "BL_Staeblein":
+                self._C_l_slope = np.rad2deg(0.12493650014276078)
+                self._alpha_0L = np.deg2rad(-3.0253288636075264)
+
 
     def _write_and_get_separation_points(
             self,
@@ -958,51 +947,77 @@ class AeroForce(SimulationSubRoutine, Rotations):
             self, 
             sim_res: SimulationResults,
             i: int,
-            A1: float, A2: float, b1: float, b2: float,
+            A1: float, A2: float, b1: float, b2: float, 
             chord: float=1, density: float=1.225, pitching_around: float=0.5, alpha_at: float=0.75):
+        # get inflow conditions
         sim_res.alpha_steady[i] = -sim_res.pos[i, 2]+sim_res.inflow_angle[i]
-        qs_flow_angle, v_x, v_y = self._quasi_steady_flow_angle(sim_res.vel[i, :], sim_res.pos[i, :], 
-                                                                sim_res.inflow[i, :], chord, pitching_around, alpha_at)
+        qs_flow_angle, _, _ = self._quasi_steady_flow_angle(sim_res.vel[i, :], sim_res.pos[i, :], 
+                                                            sim_res.inflow[i, :], chord, pitching_around, alpha_at)
         sim_res.alpha_qs[i] = -sim_res.pos[i, 2]+qs_flow_angle
-        T_u_current = 0.5*chord/np.sqrt(v_x**2+v_y**2)
+        sim_res.rel_inflow_speed[i] = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
+                                              (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
+        sim_res.rel_inflow_accel[i] = (sim_res.rel_inflow_speed[i]-sim_res.rel_inflow_speed[i-1])/sim_res.dt[i-1]
+
+        # get circulatory lift coefficient
+        tmp1 = (sim_res.rel_inflow_speed[i]+sim_res.rel_inflow_speed[i-1])/chord
+        tmp2 = sim_res.rel_inflow_accel[i]+sim_res.rel_inflow_accel[i-1]
+        tmp2 /= sim_res.rel_inflow_speed[i]+sim_res.rel_inflow_speed[i-1]
+        tmp3 = sim_res.rel_inflow_speed[i-1]*sim_res.alpha_qs[i-1]+sim_res.rel_inflow_speed[i]*sim_res.alpha_qs[i]
+
+        avg_P1 = b1*tmp1+tmp2
+        avg_P2 = b2*tmp1+tmp2
+        avg_Q1 = b1*A1/chord*tmp3
+        avg_Q2 = b2*A2/chord*tmp3
+
+        C1 = np.exp(-avg_P1*sim_res.dt[i-1])
+        C2 = np.exp(-avg_P2*sim_res.dt[i-1])
+
+        I1 = avg_Q1/avg_P1*(1-C1)
+        I2 = avg_Q2/avg_P2*(1-C2)
         
-        # todo realy with v_x and v_y and not just inflow conditions?
-        _, v_x_last, v_y_last = self._quasi_steady_flow_angle(sim_res.vel[i-1, :], sim_res.pos[i-1, :], 
-                                                              sim_res.inflow[i-1, :], chord, pitching_around, alpha_at)
-        T_u_last = 0.5*chord/np.sqrt(v_x_last**2+v_y_last**2)
-        tmp1 = np.exp(-sim_res.dt[i-1]*b1/T_u_last)  #todo last time step and last T_u_last should make sense
-        tmp2 = np.exp(-sim_res.dt[i-1]*b2/T_u_last)
-        alpha_qs_avg = 0.5*(sim_res.alpha_qs[i-1]+sim_res.alpha_qs[i])
-        sim_res.x1[i] = sim_res.x1[i-1]*tmp1+alpha_qs_avg*A1*(1-tmp1)
-        sim_res.x2[i] = sim_res.x2[i-1]*tmp2+alpha_qs_avg*A2*(1-tmp2)
+        sim_res.x1[i] = sim_res.x1[i-1]*C1+I1
+        sim_res.x2[i] = sim_res.x2[i-1]*C2+I2
 
         sim_res.alpha_eff[i] = sim_res.alpha_qs[i]*(1-A1-A2)+sim_res.x1[i]+sim_res.x2[i]
-        sim_res.C_lpot[i] = self._staeblein.C_l_alpha*sim_res.alpha_eff[i]-np.pi*T_u_current*sim_res.vel[i, 2]
+        sim_res.C_lc[i] = self._C_l_slope*(sim_res.alpha_eff[i]-self._alpha_0L)
 
-        C_l = sim_res.C_lpot[i]
+        # get circulatory lift
+        dynamic_pressure = density/2*sim_res.rel_inflow_speed[i]**2
+        base_force = dynamic_pressure*chord
+        L_c = base_force*sim_res.C_lc[i]
 
-        sim_res.C_ds[i] = self._staeblein.C_d
-        sim_res.C_dc[i] = (sim_res.alpha_qs[i]-sim_res.alpha_eff[i]-T_u_current*sim_res.vel[i, 2])*sim_res.C_lc[i]
-        C_d = sim_res.C_ds[i]+sim_res.C_dc[i]
+        # get inertial lift contribution
+        # L_iner is the apparent force times the vertical acceleration at the semi-chord position
+        m_apparent = density*np.pi*chord**2/4
+        L_iner = -m_apparent*(sim_res.accel[i, 1]+
+                              (chord/2-pitching_around)*sim_res.accel[i, 2]*np.cos(sim_res.pos[i,2]))
+        
+        # get centrifugal lift contribution
+        # minus because the torsional direction here is opposite to that of the paper but the lift direction is the same
+        L_cent = -m_apparent*sim_res.rel_inflow_speed[i]*sim_res.vel[i, 2]
+        
+        # get drag
+        D = base_force*self.C_d(np.rad2deg(sim_res.alpha_eff[i]))
+        D += 2*L_c*np.sin(sim_res.alpha_steady[i]-sim_res.alpha_eff[i])
 
-        sim_res.C_ms[i] = self._staeblein.C_m
-        sim_res.C_mnc[i] = 0.5*np.pi*T_u_current*sim_res.vel[i, 2]
-        C_m = sim_res.C_ms[i]+sim_res.C_mnc[i]
+        # get moment
+        M = -base_force*chord*self.C_m(np.rad2deg(sim_res.alpha_eff[i]))  # minus because a positive C_m means nose up by 
+        # definition, but in the CS used here nose down -> include minus to correct direction
+        M += chord/2*(L_iner/2+L_cent)  # moment caused by L_iner and L_cent w.r.t. the quarter-chord
+        M -= m_apparent*chord**2/32*sim_res.accel[i, 2]  # this minus stays because the acceleration term is on the same
+        # axes as the moment
 
-        # --------- Combining everything
-        coeffs = np.asarray([C_d, C_l, C_m])
+        # combine everything
+        f_aero = np.asarray([D, L_c+L_iner+L_cent, M])
 
-        # # for return of [C_d, C_l, C_m]
-        # return coeffs
+        # for return of [C_d, C_l, C_m]
+        coeffs = f_aero/base_force
+        coeffs[2] /= -chord
+        return coeffs
 
         # for return of [f_x, f_y, mom]
-        coeffs[2] *= -chord
-        rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
-                            (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
-        dynamic_pressure = density/2*rel_speed**2
-        rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])
-        # print( rel_speed, dynamic_pressure*chord*rot@coeffs)
-        return dynamic_pressure*chord*rot@coeffs
+        # rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])
+        # return rot@f_aero
 
     def _init_BL_chinese(
             self,
@@ -1054,10 +1069,14 @@ class AeroForce(SimulationSubRoutine, Rotations):
             alpha_at: float=0.75,
             **kwargs
     ):
-        self._staeblein = Staeblein()
         # currently does not support an initial non-zero velocity of the airfoil
-        alpha_steady = -sim_res.pos[0, 2]+sim_res.inflow_angle[0]
-        qs_flow_angle, v_x, v_y = self._quasi_steady_flow_angle(sim_res.vel[0, :], sim_res.pos[0, :], 
+        init_inflow_vel = np.linalg.norm(sim_res.inflow[0, :])
+        next_inflow_vel = np.linalg.norm(sim_res.inflow[1, :])
+        init_inflow_accel = (next_inflow_vel-init_inflow_vel)/sim_res.dt[0]
+        sim_res.rel_inflow_accel[-1] = init_inflow_accel
+        sim_res.rel_inflow_speed[-1] = init_inflow_vel-init_inflow_accel*sim_res.dt[0]
+
+        qs_flow_angle, _, _ = self._quasi_steady_flow_angle(sim_res.vel[0, :], sim_res.pos[0, :], 
                                                                 sim_res.inflow[0, :], chord, pitching_around, alpha_at)
         alpha_qs = -sim_res.pos[0, 2]+qs_flow_angle
         sim_res.alpha_qs[-1] = alpha_qs
