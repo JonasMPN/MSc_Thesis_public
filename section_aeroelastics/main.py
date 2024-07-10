@@ -18,7 +18,7 @@ do = {
     "forced": False,
     "post_calc": True,  # peform post calculations
     "plot_results": True,  # plot results,
-    "plot_results_fill": False,
+    "plot_results_fill": True,
     "plot_coupled_timeseries": False,
     "animate_results": False,
     "plot_combined_forced": False
@@ -34,6 +34,7 @@ sim_type = "free"
 # aero_scheme = "BL_openFAST_Cl_disc"
 aero_scheme = "BL_Staeblein"
 
+# file_polar = "polars_new.dat"
 file_polar = "polars_staeblein.dat"
 
 alpha_lift = "alpha_qs" if aero_scheme == "qs" else "alpha_eff"
@@ -42,7 +43,8 @@ alpha_lift = "alpha_qs" if aero_scheme == "qs" else "alpha_eff"
 # case_name = "test_qs"
 # case_name = "initial_y_and_tors_set"
 # case_name = "initial_at_steady_state"
-case_name = "val_staeblein"
+# case_name = "val_staeblein_main_polar"
+case_name = "val_staeblein_staeblein_polar"
 
 # for forced
 # motion_from_axes = ["edge", "flap", "tors"]  # adapt 'cs' for changes here
@@ -78,17 +80,18 @@ def main(simulate, forced, post_calc, plot_results, plot_results_fill, plot_coup
         with open(join(case_dir, "section_data.json"), "w") as f:
             json.dump(structure_def, f, indent=4)
         dt = 0.01  # if dt<1e-5, the dt rounding in compress_oscillation() in calculation_utils.py needs to be adapted
-        t_end = 10
+        t_end = 100
         t = dt*np.arange(int(t_end/dt))  # set the time array for the simulation
         NACA_643_618 = ThreeDOFsAirfoil(t, verbose=False)
 
         # get inflow at each time step. The below line creates inflow that has magnitude 1 and changes from 0 deg to 40
         # deg in the first 3s.
-        inflow = get_inflow(t, [(0, 0, 5, 7)], init_velocity=1)
-        # inflow = get_inflow(t, [(0, 0, 45, 7)], init_velocity=0.1)
+        # inflow = get_inflow(t, [(0, 0, 5, 7)], init_velocity=1)
+        inflow = get_inflow(t, [(0, 0, 45, 7)], init_velocity=0.1)
+        # inflow = get_inflow(t, [(0, 0, 175, 0)], init_velocity=0.1)
 
-        # alpha = 7
-        alpha = None
+        alpha = 7
+        # alpha = None
 
         approx_steady_x = True
         approx_steady_y = True
@@ -101,30 +104,30 @@ def main(simulate, forced, post_calc, plot_results, plot_results_fill, plot_coup
         NACA_643_618.aero[-1, :] = f_init  # if an HHT-alpha algorithm is used
         
         if alpha is not None:
-            inflow = get_inflow(t, [(0, 0, 45, inflow_angle)], init_velocity=0.1)
+            inflow = get_inflow(t, [(0, 0, 45, inflow_angle)], init_velocity=45)
 
-        init_pos = np.zeros(3)
-        # init_pos[0] += 4
-        # init_pos[1] = 1
-        # init_pos[2] = 0
+        # init_pos = np.zeros(3)
+        init_pos[0] += 5*np.cos(init_pos[2])
+        init_pos[1] += 5*np.sin(init_pos[2])
+        # init_pos[2] += 0.4
         init_vel = np.zeros(3)  # initial conditions for the velocity in [x, y, rotation in rad/s]
         
 
         # set the calculation scheme for the aerodynamic forces
         chord = structure_def["chord"]
         if aero_scheme == "qs":
-            NACA_643_618.set_aero_calc(root, scheme="qs", chord=chord, pitching_around=0.25*chord, alpha_at=0.75*chord)
+            NACA_643_618.set_aero_calc(root, file_polar=file_polar, scheme="quasi_steady", chord=chord, 
+                                       pitching_around=0.25, alpha_at=0.75)
         elif aero_scheme == "BL_chinese":
-            NACA_643_618.set_aero_calc(root, scheme="BL_chinese", A1=0.3, A2=0.7, b1=0.14, b2=0.53, 
-                                       pitching_around=0.25*chord, alpha_at=0.75*chord, chord=chord)
+            NACA_643_618.set_aero_calc(root, file_polar=file_polar, scheme="BL_chinese", A1=0.3, A2=0.7, b1=0.14,
+                                       b2=0.53, pitching_around=0.25, alpha_at=0.75, chord=chord)
         elif aero_scheme == "BL_openFAST_Cl_disc":
-            NACA_643_618.set_aero_calc(root, scheme="BL_openFAST_Cl_disc", A1=0.165, A2=0.335, b1=0.0445, b2=0.3, 
-                                       pitching_around=0.25*chord, alpha_at=0.75*chord, chord=chord)
+            NACA_643_618.set_aero_calc(root, file_polar=file_polar, scheme="BL_openFAST_Cl_disc", A1=0.165, A2=0.335, 
+                                       b1=0.0445, b2=0.3, pitching_around=0.25, alpha_at=0.75, chord=chord)
         elif aero_scheme == "BL_Staeblein":
             NACA_643_618.set_aero_calc(root, file_polar="polars_staeblein.dat", scheme="BL_Staeblein", A1=0.165, 
                                        A2=0.335, b1=0.0445, b2=0.3, chord=chord, 
-                                       pitching_around=(0.25+staeblein.e_ac)*chord, alpha_at=0.75*chord, 
-                                       e_ac=staeblein.e_ac)
+                                       pitching_around=(0.25+staeblein.e_ac/chord), alpha_at=0.75)
             structure_def["inertia"] = np.diag(structure_def["inertia"])
             structure_def["inertia"][1, 2] = -staeblein.inertia[0]*staeblein.e_cg
             structure_def["inertia"][2, 1] = -staeblein.inertia[0]*staeblein.e_cg
@@ -140,13 +143,13 @@ def main(simulate, forced, post_calc, plot_results, plot_results_fill, plot_coup
         # vel = np.r_[0, (damped[1:]-damped[:-1])/t[1]]
         # NACA_643_618.simulate_along_path(inflow, "xy", init_pos, init_vel, 
         #                                  {
-        #                                     #  0: np.zeros_like(t), 
+        #                                      0: np.zeros_like(t), 
         #                                     #  1: damped, 
         #                                      1: np.zeros_like(t), 
         #                                     #  2: np.zeros_like(t)
         #                                  }, 
         #                                  {
-        #                                     #  0: np.zeros_like(t), 
+        #                                      0: np.zeros_like(t), 
         #                                     #  1: damped, 
         #                                      1: np.zeros_like(t), 
         #                                     #  2: np.zeros_like(t)
@@ -209,6 +212,7 @@ def main(simulate, forced, post_calc, plot_results, plot_results_fill, plot_coup
             plotter.Beddoes_Leishman(trailing_every=trailing_every)
     
     if plot_results_fill:
+        trailing_every = 1
         file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
         if sim_type == "free":
             dir_sim = join(root, "simulation", "free", aero_scheme, case_name)  # define path to the root of the simulation results
@@ -220,8 +224,10 @@ def main(simulate, forced, post_calc, plot_results, plot_results_fill, plot_coup
         dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
         plotter = Plotter(file_profile, dir_sim, dir_plots, structure_def["coordinate_system"]) 
         alpha = 0.3
-        plotter.force_fill(alpha=alpha, peak_distance=peak_distance)  # plot various forces of the simulation
-        plotter.energy_fill(alpha=alpha, peak_distance=peak_distance)  # plot various energies and work done by forces of the simulation
+        # plot various forces of the simulation
+        plotter.force_fill(trailing_every=trailing_every, alpha=alpha, peak_distance=peak_distance) 
+        # plot various energies and work done by forces of the simulation
+        plotter.energy_fill(trailing_every=trailing_every, alpha=alpha, peak_distance=peak_distance)  
         if "BL" in aero_scheme:
             plotter.Beddoes_Leishman_fill(alpha=alpha, peak_distance=peak_distance)
 
