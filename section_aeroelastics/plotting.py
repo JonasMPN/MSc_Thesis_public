@@ -987,7 +987,7 @@ class BLValidationPlotter(DefaultPlot, Rotations):
                 # ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
                 #         **self.plt_settings["aerohor"])
             ax.plot(np.rad2deg(df_section["alpha_steady"][-period_res-1:]), df_section[coeff][-period_res-1:], 
-                    **self.plt_settings["section"])
+                    **self.plt_settings["section_staeblein"])
             handler.update(x_labels=r"$\alpha_{\text{steady}}$ (°)", y_labels=rf"${{{coeff[0]}}}_{{{coeff[2]}}}$ (-)",
                            legend=True)
             handler.save(join(dir_save, f"{coeff}.pdf"))
