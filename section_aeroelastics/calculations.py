@@ -69,6 +69,11 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
         inflow_angle = np.arctan(inflow[1]/inflow[0])
         dynamic_pressure = 0.5*density*inflow_speed**2
         base_force = dynamic_pressure*chord
+
+        if alpha is not None:
+            tors_angle = -base_force*chord*C_m(np.deg2rad(alpha))/stiffness[2]
+            inflow_angle = np.deg2rad(alpha)+tors_angle
+
         if torsion:
             if alpha is None:
                 def residue_moment(torsion_angle: float):
@@ -77,17 +82,15 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
                     # from -aero_mom-struct_mom which would be correct for the coordinate system
                     return aero_mom+struct_mom  
                 tors_angle = newton(residue_moment, 0)
-            else:
-                tors_angle = -base_force*chord*C_m(np.deg2rad(alpha))/stiffness[2]
-                inflow_angle = np.deg2rad(alpha)+tors_angle
         else:
             tors_angle = 0
         aoa = inflow_angle-tors_angle
         # aero forces in x and y
-        f_aero_xy = (self.passive_2D(-inflow_angle)@np.c_[[base_force*C_d(aoa)], [base_force*C_l(aoa)]].T).flatten()
+        rot = self.passive_2D(-inflow_angle)
+        f_aero_xy = (rot@np.c_[[base_force*C_d(aoa)], [base_force*C_l(aoa)]].T).flatten()
         f_aero_xy[0] = f_aero_xy[0] if x else 0 
         f_aero_xy[1] = f_aero_xy[1] if y else 0 
-        f_aero_tors = -base_force*chord*C_m(inflow_angle-tors_angle) if torsion else 0
+        f_aero_tors = -base_force*chord*C_m(aoa) if torsion else 0
         f_aero = np.r_[f_aero_xy, f_aero_tors]
         pos_x = f_aero_xy[0]/stiffness[0]
         pos_y = f_aero_xy[1]/stiffness[1]
@@ -345,7 +348,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         "BL_openFAST_Cl_disc": ["alpha_qs", "alpha_eff", "x1", "x2", "x3", "x4", "C_lpot", "C_lc", "C_lnc", "C_ds",
                                 "C_dc", "C_dsep", "C_ms", "C_mnc", "f_steady", "alpha_eq"],
         "BL_Staeblein": ["alpha_qs", "alpha_eff", "x1", "x2", "C_lpot", "C_lc", "C_lnc", "C_ds", "C_dc", "C_ms", 
-                         "C_mnc", "alpha_eq", "rel_inflow_speed", "rel_inflow_accel"],
+                         "C_mnc", "rel_inflow_speed", "rel_inflow_accel"],
     }
 
     # _copy_scheme = {
@@ -412,6 +415,12 @@ class AeroForce(SimulationSubRoutine, Rotations):
             dir_save_to: str=None):
         match scheme:
             case "BL_chinese"|"BL_openFAST_Cl_disc":
+                # self._C_l_slope = 7.15
+                # self._alpha_0L = 0
+                # self._C_fs = lambda x: 0
+                # self._f_l = lambda x: 1
+                # return
+
                 map_sep_point_scheme = {
                     "BL_chinese": 3,
                     "BL_openFAST_Cl_disc": 4,
@@ -490,8 +499,10 @@ class AeroForce(SimulationSubRoutine, Rotations):
                                                  alpha_0, slope, save_as)
                         self._C_fs = interpolate.interp1d(df_fs["alpha"], df_fs["C_fs"]) 
             case "BL_Staeblein":
-                self._C_l_slope = np.rad2deg(0.12493650014276078)
-                self._alpha_0L = np.deg2rad(-3.0253288636075264)
+                # self._C_l_slope = np.rad2deg(0.12493650014276078)
+                # self._alpha_0L = np.deg2rad(-3.0253288636075264)
+                self._C_l_slope = 7.15
+                self._alpha_0L = 0
 
 
     def _write_and_get_separation_points(
@@ -728,13 +739,12 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.alpha_steady[i] = -sim_res.pos[i, 2]+sim_res.inflow_angle[i]
         qs_flow_angle, _, _ = self._quasi_steady_flow_angle(sim_res.vel[i, :], sim_res.pos[i, :], sim_res.inflow[i, :],
                                                             chord, pitching_around, alpha_at)
-        
         rot = self.passive_3D_planar(-qs_flow_angle)
         sim_res.alpha_qs[i] = -sim_res.pos[i, 2]+qs_flow_angle
 
         rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
                             (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
-
+        
         dynamic_pressure = density/2*rel_speed**2
         alpha_qs_deg = np.rad2deg(sim_res.alpha_qs[i])
         coefficients = np.asarray([self.C_d(alpha_qs_deg), self.C_l(alpha_qs_deg), -self.C_m(alpha_qs_deg)*chord])
@@ -931,7 +941,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         # --------- Combining everything
         coeffs = np.asarray([C_d, C_l, C_m])
 
-        # # for return of [C_d, C_l, C_m]
+        # for return of [C_d, C_l, C_m]
         # return coeffs
 
         # for return of [f_x, f_y, mom]
@@ -951,8 +961,10 @@ class AeroForce(SimulationSubRoutine, Rotations):
             chord: float=1, density: float=1.225, pitching_around: float=0.5, alpha_at: float=0.75):
         # get inflow conditions
         sim_res.alpha_steady[i] = -sim_res.pos[i, 2]+sim_res.inflow_angle[i]
-        qs_flow_angle, _, _ = self._quasi_steady_flow_angle(sim_res.vel[i, :], sim_res.pos[i, :], 
-                                                            sim_res.inflow[i, :], chord, pitching_around, alpha_at)
+        qs_flow_angle, v_x, v_y = self._quasi_steady_flow_angle(sim_res.vel[i, :], sim_res.pos[i, :], 
+                                                                sim_res.inflow[i, :], chord, pitching_around, alpha_at)
+        T_u_current = 0.5*chord/np.sqrt(v_x**2+v_y**2)
+
         sim_res.alpha_qs[i] = -sim_res.pos[i, 2]+qs_flow_angle
         sim_res.rel_inflow_speed[i] = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
                                               (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
@@ -990,7 +1002,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         # L_iner is the apparent force times the vertical acceleration at the semi-chord position
         m_apparent = density*np.pi*chord**2/4
         L_iner = -m_apparent*(sim_res.accel[i, 1]+
-                              (chord/2-pitching_around)*sim_res.accel[i, 2]*np.cos(sim_res.pos[i,2]))
+                              (1/2-pitching_around)*chord*sim_res.accel[i, 2]*np.cos(sim_res.pos[i,2]))
         
         # get centrifugal lift contribution
         # minus because the torsional direction here is opposite to that of the paper but the lift direction is the same
@@ -998,11 +1010,13 @@ class AeroForce(SimulationSubRoutine, Rotations):
         
         # get drag
         D = base_force*self.C_d(np.rad2deg(sim_res.alpha_eff[i]))
-        D += 2*L_c*np.sin(sim_res.alpha_steady[i]-sim_res.alpha_eff[i])
+        D += L_c*(sim_res.alpha_qs[i]-sim_res.alpha_eff[i]-T_u_current*sim_res.vel[i, 2])
+        # D += (L_c+np.pi*T_u_current*sim_res.vel[i, 2])*(sim_res.alpha_steady[i]-sim_res.alpha_eff[i])
+        # D += L_c*(sim_res.alpha_steady[i]-sim_res.alpha_eff[i])
 
         # get moment
-        M = -base_force*chord*self.C_m(np.rad2deg(sim_res.alpha_eff[i]))  # minus because a positive C_m means nose up by 
-        # definition, but in the CS used here nose down -> include minus to correct direction
+        M = -base_force*chord*self.C_m(np.rad2deg(sim_res.alpha_eff[i]))  # minus because a positive C_m means nose up 
+        # by definition, but in the CS used here nose down -> include minus to correct direction
         M += chord/2*(L_iner/2+L_cent)  # moment caused by L_iner and L_cent w.r.t. the quarter-chord
         M -= m_apparent*chord**2/32*sim_res.accel[i, 2]  # this minus stays because the acceleration term is on the same
         # axes as the moment
@@ -1010,14 +1024,14 @@ class AeroForce(SimulationSubRoutine, Rotations):
         # combine everything
         f_aero = np.asarray([D, L_c+L_iner+L_cent, M])
 
-        # for return of [C_d, C_l, C_m]
-        coeffs = f_aero/base_force
-        coeffs[2] /= -chord
-        return coeffs
+        # for return of [C_d, C_l, C_m] uncomment the three following lines
+        # coeffs = f_aero/base_force
+        # coeffs[2] /= -chord
+        # return coeffs
 
-        # for return of [f_x, f_y, mom]
-        # rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])
-        # return rot@f_aero
+        # for return of [f_x, f_y, mom] uncomment the two following lines 
+        rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])
+        return rot@f_aero
 
     def _init_BL_chinese(
             self,
@@ -1050,7 +1064,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
             ):
         # currently does not support an initial non-zero velocity of the airfoil
         alpha_steady = -sim_res.pos[0, 2]+sim_res.inflow_angle[0]
-        qs_flow_angle, v_x, v_y = self._quasi_steady_flow_angle(sim_res.vel[0, :], sim_res.pos[0, :], 
+        qs_flow_angle, _, _ = self._quasi_steady_flow_angle(sim_res.vel[0, :], sim_res.pos[0, :], 
                                                                 sim_res.inflow[0, :], chord, pitching_around, alpha_at)
         alpha_qs = -sim_res.pos[0, 2]+qs_flow_angle
         sim_res.alpha_qs[-1] = alpha_qs
@@ -1108,8 +1122,8 @@ class AeroForce(SimulationSubRoutine, Rotations):
         position: np.ndarray,
         flow: np.ndarray,
         chord: float,
-        pitching_around: float,
-        alpha_at: float
+        pitching_around: float,  # as factor of chord!
+        alpha_at: float  #  as factor of chord!
         ):
         pitching_speed = velocity[2]*chord*(alpha_at-pitching_around)
         v_pitching_x = np.sin(-position[2])*pitching_speed  # x velocity of the point
