@@ -547,19 +547,22 @@ class _DefaultGeneral(_BaseDefaultPltSettings):
     _params = [  # parameters that are supported by default
         "HAWC2",
         "openFAST",
-        "section"
+        "section",
+        "section_staeblein",
     ]
 
     _colours = {  # line colour
         "HAWC2": "forestgreen",
         "openFAST": "coral",
-        "section": "royalblue"
+        "section": "royalblue",
+        "section_staeblein": "royalblue"
     }
 
     _labels = {  # line label
         "HAWC2": "HAWC2",
         "openFAST": "openFAST",
-        "section": "section"
+        "section": "section",
+        "section_staeblein": "section, Stäblein"
     }
     
     def __init__(self) -> None:
