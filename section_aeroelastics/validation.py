@@ -93,14 +93,14 @@ def run_BeddoesLeishman(
     airfoil.density = 1
     
     pitch_around = 0.5
-    # airfoil.set_aero_calc(BL_scheme, A1=A1, A2=A2, b1=b1, b2=b2, pitching_around=pitch_around, alpha_at=0.75)
-    if BL_scheme == "BL_Staeblein":
-        airfoil.set_aero_calc(dir_polar=dir_airfoil, file_polar=file_polar, scheme=BL_scheme, A1=A1, A2=A2, b1=b1, 
-                              b2=b2, pitching_around=pitch_around, alpha_at=0.75,)
-    airfoil._init_aero_force(airfoil, pitching_around=pitch_around, A1=A1, A2=A2)
+    alpha_at = 0.75
+    airfoil.set_aero_calc(dir_polar=dir_airfoil, file_polar=file_polar, scheme=BL_scheme, A1=A1, A2=A2, b1=b1, 
+                          b2=b2, pitching_around=pitch_around, alpha_at=alpha_at)
+    airfoil._init_aero_force(airfoil, chord=chord, pitching_around=pitch_around, alpha_at=alpha_at, A1=A1, A2=A2)
     coeffs = np.zeros((t.size, 3))
     for i in range(overall_res):
-        coeffs[i, :] = airfoil._aero_force(airfoil, i, A1=A1, A2=A2, b1=b1, b2=b2)
+        coeffs[i, :] = airfoil._aero_force(airfoil, i, A1=A1, A2=A2, b1=b1, b2=b2, chord=chord, 
+                                           pitching_around=pitch_around, alpha_at=alpha_at)
     airfoil.vel = np.c_[np.zeros((overall_res, 2)), -alpha_speed]  # because it's changed in aero._init_BL()
 
     dir_res = helper.create_dir(join(dir_profile, "validation", BL_scheme, validation_against,
