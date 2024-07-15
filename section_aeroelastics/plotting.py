@@ -478,9 +478,7 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
         DefaultStructure.__init__(self)
         DefaultPlot.__init__(self)
         Shapes.__init__(self)
-        AnimationPreparation.__init__(self)
         
-        self.profile = pd.read_csv(file_profile, delim_whitespace=True).to_numpy()
         self.df_f_aero = pd.read_csv(join(dir_data, self._dfl_filenames["f_aero"]))
         self.df_f_structural = pd.read_csv(join(dir_data, self._dfl_filenames["f_structural"]))
         self.df_general = pd.read_csv(join(dir_data, self._dfl_filenames["general"]))
@@ -490,7 +488,10 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
         self.time = self.df_general["time"].to_numpy()
         with open(join(dir_data, self._dfl_filenames["section_data"]), "r") as f:
             self.section_data = json.load(f)
-
+        
+        self._chord = self.section_data["chord"]
+        AnimationPreparation.__init__(self, self.section_data["chord"])
+        self.profile = pd.read_csv(file_profile, delim_whitespace=True).to_numpy()*self._chord
         self.dir_plots = dir_plots
         helper.create_dir(self.dir_plots)
         self._rot = Rotations()
@@ -498,8 +499,8 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
     def force(
             self,
             angle_lift: str,
-            arrow_scale_forces: float=1,
-            arrow_scale_moment: float=1,
+            arrow_scale_forces: float=None,
+            arrow_scale_moment: float=None,
             plot_qc_trailing_every: int=2,
             keep_qc_trailing: int=40,
             until: float=None,
@@ -509,12 +510,12 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
         norm_moments = self.df_f_aero["aero_mom"]/np.abs(self.df_f_aero["aero_mom"]).max()
         mom_arrow_res = 40
         mom_arrow = np.zeros((self.time.size, mom_arrow_res+3, 2))
-        prof = self.profile-np.c_[0.25*self.section_data["chord"], 0]
+        prof = self.profile-np.c_[0.25*self._chord, 0]
         for i, (angle, moment) in enumerate(zip(self.df_general["pos_tors"], norm_moments)):
             rot_mat = self._rot.active_2D(angle)
             profile[i, :, :] = (rot_mat@prof.T).T+qc_pos[i, :]
 
-            trailing_edge = (rot_mat@np.c_[(0.75-arrow_scale_moment)*self.section_data["chord"], 0].T).T+qc_pos[i, :]
+            trailing_edge = (rot_mat@np.c_[(0.75-arrow_scale_moment)*self._chord, 0].T).T+qc_pos[i, :]
             moment_arrow = rot_mat@self.circle_arrow(180*moment)*arrow_scale_moment
             mom_arrow[i, :, :] = moment_arrow.T+trailing_edge.squeeze()
         
@@ -527,7 +528,7 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
         force_arrows = self._rot.project_separate(aero_force, angle_aero_to_xyz)*arrow_scale_forces
         
         dfs = {"general": self.df_general, "f_aero": self.df_f_aero, "f_structural": self.df_f_structural}
-        until = self.time[-1] if until is None else until
+        until = self.time[-1] if until is None else min(until, self.time[-1])
         fig, plt_lines, plt_arrows, aoas = self._prepare_force_animation(dfs, until)
 
         #todo code rad2deg conversion nicer (also in _prepare_force_animation()!)
@@ -578,12 +579,12 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
         norm_moments = self.df_f_aero["aero_mom"]/np.abs(self.df_f_aero["aero_mom"]).max()
         mom_arrow_res = 40
         mom_arrow = np.zeros((self.time.size, mom_arrow_res+3, 2))
-        prof = self.profile-np.c_[0.25*self.section_data["chord"], 0]
+        prof = self.profile-np.c_[0.25*self._chord, 0]
         for i, (angle, moment) in enumerate(zip(self.df_general["pos_tors"], norm_moments)):
             rot_mat = self._rot.active_2D(angle)
             profile[i, :, :] = (rot_mat@prof.T).T+qc_pos[i, :]
 
-            trailing_edge = (rot_mat@np.c_[(0.75-arrow_scale_moment)*self.section_data["chord"], 0].T).T+qc_pos[i, :]
+            trailing_edge = (rot_mat@np.c_[(0.75-arrow_scale_moment)*self._chord, 0].T).T+qc_pos[i, :]
             moment_arrow = rot_mat@self.circle_arrow(180*moment)*arrow_scale_moment
             mom_arrow[i, :, :] = moment_arrow.T+trailing_edge.squeeze()
         

@@ -388,6 +388,11 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_dc", 
         "C_dsep", 
         "C_ms",
+        "C_liner",
+        "C_lcent",
+        "C_dind",
+        "C_mus",
+        "C_miner",
     ]
     _params = _prep_params + _sim_params
 
@@ -419,6 +424,11 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_dc": "orange", 
         "C_dsep": "blue", 
         "C_ms": "red",
+        "C_liner": "blue", 
+        "C_lcent": "red", 
+        "C_dind": "green",
+        "C_mus": "orange", 
+        "C_miner": "blue", 
     }
     _colours = _prep_colours|_c_rest
 
@@ -453,6 +463,11 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_dc": "$C_{dc}$",
         "C_dsep": "$C_{dsep}$",
         "C_ms": "$C_{ms}$",
+        "C_liner": r"$C_{l,\text{iner}}$",
+        "C_lcent": r"$C_{l,\text{cent}}$",
+        "C_dind": r"$C_{d,\text{ind}}$",
+        "C_mus": r"$C_{m,\text{us}}$",
+        "C_miner": r"$C_{m,\text{iner}}$",
     }
 
     _linestyles = {  # line style
@@ -662,17 +677,24 @@ class Staeblein:
         self.C_d = 0.01
         self.C_m = -0.1
 
-        # structure
-        self.c = 3.929
+        # structure from Stäblein paper
+        self.c = 3.292
         self.e_ac = 0.113
         self.e_cg = 0.304
-        self.r = 0.785
+        self.r = 0.785 
+
+        # self.e_ac = 0.3283  # from DTU 10 MW RWT description
+
         self.m = 203
 
-        self.nat_freqs = np.asarray([0.93, 0.61, 6.66])
+        self.nat_freqs = np.asarray([0.93, 0.61, 6.66])*2*np.pi
         self.damp_ratios = np.asarray([0.0049, 0.0047, 0.0093])
+        # self.nat_freqs = np.asarray([0.93, 0.61, 5.69])*2*np.pi
+        # self.damp_ratios = np.asarray([0.0049, 0.0047, 0.0331])
 
         self.inertia = np.asarray([self.m, self.m, self.m*(self.e_cg**2+self.r**2)])
-        self.stiffness = np.asarray(self.nat_freqs)**2*self.inertia
+        lin_stiff = np.asarray(self.nat_freqs[:2])**2*self.inertia[:2]
+        tors_stiff = self.m*self.r**2*self.nat_freqs[2]**2
+        self.stiffness = np.r_[lin_stiff, tors_stiff] 
         self.damping = 2*self.damp_ratios*self.inertia*self.nat_freqs
 

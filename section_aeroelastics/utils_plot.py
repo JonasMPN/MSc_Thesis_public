@@ -269,7 +269,8 @@ class PlotHandler(Helper):
             for values in param_values:
                 lim_max = max(lim_max, max(values))
                 lim_min = min(lim_min, min(values))
-            limits[ax_label] = (lim_min*scale, lim_max*scale)
+            mean = (lim_min+lim_max)/2
+            limits[ax_label] = ((lim_min-mean)*scale+mean, (lim_max-mean)*scale+mean)
         return limits if "tmp" not in limits.keys() else (limits["tmp"][0], limits["tmp"][1])     
     
     @staticmethod
@@ -469,22 +470,23 @@ class PlotPreparation:
     
 
 class AnimationPreparation(PlotPreparation, DefaultPlot):
-    def __init__(self) -> None:
+    def __init__(self, chord: float) -> None:
         DefaultPlot.__init__(self)
+        self._chord = chord
         
     
     def _prepare_force_animation(self, dfs: pd.DataFrame, until: float, equal_y: tuple[str]=None):
         fig, axs, handler = self._prepare_force_plot(equal_y)
         aoas = self._get_aoas(dfs["f_aero"])
         x_lims_from = {
-            "profile": [dfs["general"]["pos_x"]-.4, dfs["general"]["pos_x"]+1],
+            "profile": [dfs["general"]["pos_x"]-.4*self._chord, dfs["general"]["pos_x"]+1*self._chord],
             "aoa": [0, until],
             "aero": [0, until],
             "damp": [0, until],
             "stiff": [0, until],
         }
         y_lims_from = {
-            "profile": [dfs["general"]["pos_y"]-.4, dfs["general"]["pos_y"]+0.3],
+            "profile": [dfs["general"]["pos_y"]-.4*self._chord, dfs["general"]["pos_y"]+0.3*self._chord],
             "aoa": [np.rad2deg(dfs["f_aero"][col]) for col in aoas],
             "aero": [dfs["f_aero"]["aero_edge"], dfs["f_aero"]["aero_flap"], self.df_f_aero["aero_mom"]],
             "damp": [dfs["f_structural"]["damp_edge"], dfs["f_structural"]["damp_flap"], 

@@ -69,33 +69,78 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
         inflow_angle = np.arctan(inflow[1]/inflow[0])
         dynamic_pressure = 0.5*density*inflow_speed**2
         base_force = dynamic_pressure*chord
+        base_moment = -base_force*chord
 
-        if alpha is not None:
-            tors_angle = -base_force*chord*C_m(np.deg2rad(alpha))/stiffness[2]
-            inflow_angle = np.deg2rad(alpha)+tors_angle
+        alpha = alpha if alpha is None else np.deg2rad(alpha)
 
-        if torsion:
-            if alpha is None:
+        if len(stiffness.shape) == 1:  # no structural coupling
+            if alpha is not None:
+                tors_angle = -base_force*chord*C_m(alpha)/stiffness[2]
+                inflow_angle = alpha+tors_angle
+
+            if torsion:
+                if alpha is None:
+                    def residue_moment(torsion_angle: float):
+                        aero_mom = base_moment*C_m(inflow_angle-torsion_angle)
+                        struct_mom = torsion_angle*stiffness[2]
+                        # from -aero_mom-struct_mom which would be correct for the coordinate system
+                        return aero_mom+struct_mom
+
+                    tors_angle = newton(residue_moment, 0)
+            else:
+                tors_angle = 0
+            aoa = inflow_angle-tors_angle
+            # aero forces in x and y
+            rot = self.passive_2D(-inflow_angle)
+            f_aero_xy = (rot@np.c_[[base_force*C_d(aoa)], [base_force*C_l(aoa)]].T).flatten()
+            f_aero_xy[0] = f_aero_xy[0] if x else 0 
+            f_aero_xy[1] = f_aero_xy[1] if y else 0 
+            f_aero_tors = -base_force*chord*C_m(aoa) if torsion else 0
+            f_aero = np.r_[f_aero_xy, f_aero_tors]
+            pos_x = f_aero_xy[0]/stiffness[0]
+            pos_y = f_aero_xy[1]/stiffness[1]
+            return np.asarray([pos_x, pos_y, tors_angle]), f_aero, np.rad2deg(inflow_angle)
+        else:  # with structural coupling (currently only supports heave-pitch coupling)
+            k_y = stiffness[1, 1]
+            k_ytors = stiffness[1, 2]
+            k_tors = stiffness[2, 2]
+            if alpha is not None:
+                L = base_force*C_l(alpha)
+                D = base_force*C_d(alpha)
+                M = base_moment*C_m(alpha)
                 def residue_moment(torsion_angle: float):
-                    aero_mom = base_force*chord*C_m(inflow_angle-torsion_angle)
-                    struct_mom = torsion_angle*stiffness[2]
-                    # from -aero_mom-struct_mom which would be correct for the coordinate system
-                    return aero_mom+struct_mom  
+                    cos = np.cos(alpha+torsion_angle)
+                    sin = np.sin(alpha+torsion_angle)
+                    return k_ytors/k_y*(L*cos+D*sin-k_ytors*torsion_angle)+k_tors*torsion_angle-M
+
                 tors_angle = newton(residue_moment, 0)
-        else:
-            tors_angle = 0
-        aoa = inflow_angle-tors_angle
-        # aero forces in x and y
-        rot = self.passive_2D(-inflow_angle)
-        f_aero_xy = (rot@np.c_[[base_force*C_d(aoa)], [base_force*C_l(aoa)]].T).flatten()
-        f_aero_xy[0] = f_aero_xy[0] if x else 0 
-        f_aero_xy[1] = f_aero_xy[1] if y else 0 
-        f_aero_tors = -base_force*chord*C_m(aoa) if torsion else 0
-        f_aero = np.r_[f_aero_xy, f_aero_tors]
-        pos_x = f_aero_xy[0]/stiffness[0]
-        pos_y = f_aero_xy[1]/stiffness[1]
-        return np.asarray([pos_x, pos_y, tors_angle]), f_aero, np.rad2deg(inflow_angle)
-  
+                inflow_angle = alpha+tors_angle
+            if torsion:
+                if alpha is None:
+                    cos = np.cos(inflow_angle)
+                    sin = np.sin(inflow_angle)
+                    def residue_moment(torsion_angle: float):
+                        alpha = inflow_angle-torsion_angle
+                        aero_y = base_force*C_l(alpha)*cos+base_force*C_d(alpha)*sin
+                        aero_mom = base_moment*C_m(alpha)
+                        return k_ytors/k_y*(aero_y-k_ytors*torsion_angle)+k_tors*torsion_angle-aero_mom
+                    tors_angle = newton(residue_moment, 0)
+            else:
+                tors_angle = 0
+                
+            aoa = inflow_angle-tors_angle
+            # aero forces in x and y
+            rot = self.passive_2D(-inflow_angle)
+            f_aero_xy = (rot@np.c_[[base_force*C_d(aoa)], [base_force*C_l(aoa)]].T).flatten()
+            f_aero_xy[0] = f_aero_xy[0] if x else 0 
+            f_aero_xy[1] = f_aero_xy[1] if y else 0 
+            f_aero_tors = base_moment*C_m(aoa) if torsion else 0
+            f_aero = np.r_[f_aero_xy, f_aero_tors]
+
+            pos_x = f_aero_xy[0]/stiffness[0, 0]
+            pos_y = (f_aero_xy[1]-stiffness[1, 2]*tors_angle)/stiffness[1, 1]
+            return np.asarray([pos_x, pos_y, tors_angle]), f_aero, np.rad2deg(inflow_angle)
+        
     def set_aero_calc(self, dir_polar: str, file_polar: str="polars_new.dat", scheme: str="quasi_steady", **kwargs):
         """Sets how the aerodynamic forces are calculated in the simulation. If the scheme is dependet on constants,
         these must be given in the kwargs. Which kwargs are necessary are defined in the match-case statements in 
@@ -184,6 +229,7 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
         for i in range(self.time.size-1):
             # get aerodynamic forces
             self.aero[i, :] = self._aero_force(self, i, **self._aero_scheme_settings)
+            # self.aero[i, :] = 0
             # get structural forces
             self.damp[i, :], self.stiff[i, :] = self._struct_force(self, i, **self._struct_scheme_settings)
             # perform time integration
@@ -347,8 +393,8 @@ class AeroForce(SimulationSubRoutine, Rotations):
                        "D_p", "C_nsEq", "alpha_sEq", "f_t_Dp", "f_n_Dp", "D_bl_t", "D_bl_n", "f_t", "f_n", "C_nf", "C_tf", "tau_vortex", "C_nv_instant", "C_nv", "C_mqs", "C_mnc"],
         "BL_openFAST_Cl_disc": ["alpha_qs", "alpha_eff", "x1", "x2", "x3", "x4", "C_lpot", "C_lc", "C_lnc", "C_ds",
                                 "C_dc", "C_dsep", "C_ms", "C_mnc", "f_steady", "alpha_eq"],
-        "BL_Staeblein": ["alpha_qs", "alpha_eff", "x1", "x2", "C_lpot", "C_lc", "C_lnc", "C_ds", "C_dc", "C_ms", 
-                         "C_mnc", "rel_inflow_speed", "rel_inflow_accel"],
+        "BL_Staeblein": ["alpha_qs", "alpha_eff", "x1", "x2", "C_lc", "rel_inflow_speed", "rel_inflow_accel",
+                         "C_liner", "C_lcent", "C_ds", "C_dind", "C_ms", "C_mus", "C_miner"],
     }
 
     # _copy_scheme = {
@@ -1001,25 +1047,38 @@ class AeroForce(SimulationSubRoutine, Rotations):
         # get inertial lift contribution
         # L_iner is the apparent force times the vertical acceleration at the semi-chord position
         m_apparent = density*np.pi*chord**2/4
-        L_iner = -m_apparent*(sim_res.accel[i, 1]+
-                              (1/2-pitching_around)*chord*sim_res.accel[i, 2]*np.cos(sim_res.pos[i,2]))
+        # L_iner = -m_apparent*(sim_res.accel[i, 1]+
+        #                       (1/2-pitching_around)*chord*sim_res.accel[i, 2]*np.cos(sim_res.pos[i,2]))
+        L_iner = -m_apparent*(sim_res.accel[i, 1]+(1/2-pitching_around)*chord*sim_res.accel[i, 2])
         
         # get centrifugal lift contribution
         # minus because the torsional direction here is opposite to that of the paper but the lift direction is the same
         L_cent = -m_apparent*sim_res.rel_inflow_speed[i]*sim_res.vel[i, 2]
         
         # get drag
-        D = base_force*self.C_d(np.rad2deg(sim_res.alpha_eff[i]))
-        D += L_c*(sim_res.alpha_qs[i]-sim_res.alpha_eff[i]-T_u_current*sim_res.vel[i, 2])
-        # D += (L_c+np.pi*T_u_current*sim_res.vel[i, 2])*(sim_res.alpha_steady[i]-sim_res.alpha_eff[i])
-        # D += L_c*(sim_res.alpha_steady[i]-sim_res.alpha_eff[i])
+        D_s = base_force*self.C_d(np.rad2deg(sim_res.alpha_eff[i]))
+        D_ind = L_c*(sim_res.alpha_qs[i]-sim_res.alpha_eff[i]-T_u_current*sim_res.vel[i, 2])
+        D = D_s+D_ind
+        # alpha_quasi_geometric = np.arctan2(sim_res.inflow[i, 0]-sim_res.vel[i, 0], 
+        #                                    sim_res.inflow[i, 1]-sim_res.vel[i, 1])-sim_res.pos[i, 2]
+        # D += L_c*(alpha_quasi_geometric-sim_res.alpha_eff[i]-T_u_current*sim_res.vel[i, 2])
 
         # get moment
-        M = -base_force*chord*self.C_m(np.rad2deg(sim_res.alpha_eff[i]))  # minus because a positive C_m means nose up 
-        # by definition, but in the CS used here nose down -> include minus to correct direction
-        M += chord/2*(L_iner/2+L_cent)  # moment caused by L_iner and L_cent w.r.t. the quarter-chord
-        M -= m_apparent*chord**2/32*sim_res.accel[i, 2]  # this minus stays because the acceleration term is on the same
-        # axes as the moment
+        M_s = -base_force*chord*self.C_m(np.rad2deg(sim_res.alpha_eff[i]))  # minus because a positive C_m means nose
+        # up by definition, but in the CS used here nose down -> include minus to correct direction
+        M_us = chord/2*(L_iner/2+L_cent)  # moment caused by L_iner and L_cent w.r.t. the quarter-chord
+        M_iner = m_apparent*chord**2/32*sim_res.accel[i, 2]  # this minus stays because the acceleration term is on the 
+        M = M_s+M_us-M_iner
+        # same axes as the moment
+
+        # save coefficients
+        sim_res.C_liner[i] = L_iner/base_force
+        sim_res.C_lcent[i] = L_cent/base_force
+        sim_res.C_ds[i] = D_s/base_force
+        sim_res.C_dind[i] = D_ind/base_force
+        sim_res.C_ms[i] = -M_s/(base_force*chord)
+        sim_res.C_mus[i] = -M_us/(base_force*chord)
+        sim_res.C_miner[i] = -M_iner/(base_force*chord)
 
         # combine everything
         f_aero = np.asarray([D, L_c+L_iner+L_cent, M])
@@ -1090,8 +1149,8 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.rel_inflow_accel[-1] = init_inflow_accel
         sim_res.rel_inflow_speed[-1] = init_inflow_vel-init_inflow_accel*sim_res.dt[0]
 
-        qs_flow_angle, _, _ = self._quasi_steady_flow_angle(sim_res.vel[0, :], sim_res.pos[0, :], 
-                                                                sim_res.inflow[0, :], chord, pitching_around, alpha_at)
+        qs_flow_angle, _, _ = self._quasi_steady_flow_angle(sim_res.vel[0, :], sim_res.pos[0, :],
+                                                            sim_res.inflow[0, :], chord, pitching_around, alpha_at)
         alpha_qs = -sim_res.pos[0, 2]+qs_flow_angle
         sim_res.alpha_qs[-1] = alpha_qs
         sim_res.x1[-1] = alpha_qs*kwargs["A1"]
