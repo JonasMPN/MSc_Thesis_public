@@ -40,6 +40,7 @@ def run_forced(
         angle_of_attack: list[float]|float,
         case_id: list[int],
         dir_airfoil: str,
+        file_polar: str,
         root: str,
         aero_scheme: str,
         coordinate_system: str,
@@ -71,27 +72,30 @@ def run_forced(
 
         inflow = get_inflow(time, [(0, 0, inflow_velocity, aoa)], init_velocity=inflow_velocity)
         
-        NACA_643_618 = ThreeDOFsAirfoil(dir_airfoil, time, verbose=False)
+        NACA_643_618 = ThreeDOFsAirfoil(time, verbose=False)
         # set the calculation scheme for the aerodynamic forces
         if aero_scheme == "qs":
-            NACA_643_618.set_aero_calc()
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="quasi_steady", 
+                                       chord=structure_data["chord"], pitching_around=0.25, alpha_at=0.75)
         elif aero_scheme == "BL_chinese":
-            NACA_643_618.set_aero_calc("BL_chinese", A1=0.3, A2=0.7, b1=0.14, b2=0.53, pitching_around=0.25, 
-                                       alpha_at=0.75, chord=structure_data["chord"])
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_chinese", A1=0.3, A2=0.7, b1=0.14,
+                                       b2=0.53, pitching_around=0.25, alpha_at=0.75, chord=structure_data["chord"])
         elif aero_scheme == "BL_openFAST_Cl_disc":
-            NACA_643_618.set_aero_calc("BL_openFAST_Cl_disc", A1=0.165, A2=0.335, b1=0.0445, b2=0.3, 
-                                       pitching_around=0.25, alpha_at=0.75, chord=structure_data["chord"])
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_openFAST_Cl_disc", A1=0.165, #
+                                       A2=0.335, b1=0.0445, b2=0.3, pitching_around=0.25, alpha_at=0.75, 
+                                       chord=structure_data["chord"])
         # set the calculation scheme for the structural damping and stiffness forces
         NACA_643_618.set_struct_calc("linear_xy", **structure_data)
         # set the time integration scheme
         NACA_643_618.set_time_integration("HHT-alpha-xy-adapted", alpha=0.1, dt=time[1], **structure_data)
         # NACA_643_618.simulate_along_path(inflow, coordinate_system, pos, vel, accel)  # perform simulation
-        NACA_643_618.simulate_along_path(inflow, coordinate_system, pos, vel)  # perform simulation
+        NACA_643_618.simulate_along_path(inflow, coordinate_system, 0, 0, pos, vel)  # perform simulation
         NACA_643_618.save(case_dir)  # save simulation results
 
 
 def _run_forced_parallel(
         dir_airfoil: str,
+        file_polar: str,
         root: str,
         aero_scheme: str,
         structure_data: dict[str, float],
@@ -120,7 +124,7 @@ def _run_forced_parallel(
     dict_combinations = {"amplitude": amplitudes, "alpha": alphas}
     pd.DataFrame(dict_combinations).to_csv(join(root_dir, "combinations.dat"), index=None)
 
-    always_use = [dir_airfoil, root, aero_scheme, coordinate_system,
+    always_use = [dir_airfoil, file_polar, root, aero_scheme, coordinate_system,
                   time, inflow_velocity, base_pos, base_vel, mean_pos, mean_vel, 
                 #   time, base_pos, base_vel, base_accel, mean_pos, mean_vel, mean_accel, 
                   structure_data, helper]
@@ -131,6 +135,7 @@ def _run_forced_parallel(
 
 def run_forced_parallel_from_free_case(
         dir_airfoil: str,
+        file_polar: str,
         ffile_free_motion: str,
         motion_cols: list[str],
         coordinate_system: str,
@@ -200,6 +205,7 @@ def run_forced_parallel_from_free_case(
 
     _run_forced_parallel(
         dir_airfoil,
+        file_polar,
         root,
         aero_scheme,
         structure_data,
