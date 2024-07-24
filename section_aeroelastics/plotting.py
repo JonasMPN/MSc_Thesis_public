@@ -109,21 +109,34 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         fig.savefig(join(self.dir_plots, "forces.pdf"))
 
     def couple_timeseries(self, cmap="viridis_r", linewidth: float=1.2, skip_points: int=1):
+        df_polar = pd.read_csv("data/FFA_WA3_221/polars_new.dat", delim_whitespace=True)
+        a = (self.df_f_aero, "f_aero", "alpha_steady", r"$\alpha$ (deg)")
+        b = (self.df_f_aero, "f_aero", "alpha_eff", r"$\alpha_{\text{eff}}$ (deg)")
+        c = (self.df_f_aero, "f_aero", "C_l", r"$C_{l,\text{us}}$ (-)")
+        d = (self.df_f_aero, "f_aero", "C_d", r"$C_{d,\text{us}}$ (-)")
+        e = (self.df_f_aero, "f_aero", "f_steady", r"$f$ (-)")
+        f = (self.df_f_aero, "f_aero", "x4", r"$x_4$ (-)")
         from_f_aero = [(self.df_f_aero, "f_aero", "aero_edge", r"$f_{\text{edge}}^{\text{aero}}$ (N)"), 
                        (self.df_f_aero, "f_aero", "aero_flap", r"$f_{\text{flap}}^{\text{aero}}$ (N)"), 
-                       (self.df_f_aero, "f_aero", "aero_mom", r"$f_{\text{moment}}^{\text{aero}}$ (Nm)")]
+                       (self.df_f_aero, "f_aero", "aero_mom", r"$f_{\text{moment}}^{\text{aero}}$ (Nm)"),
+                       ]
         from_power = [(self.df_power, "power", "aero_drag", r"$P_{\text{drag}}^{\text{aero}}$ (Nm/s)"),
                       (self.df_power, "power", "aero_lift", r"$P_{\text{lift}}^{\text{aero}}$ (Nm/s)"),
                       (self.df_power, "power", "aero_mom", r"$P_{\text{moment}}^{\text{aero}}$ (Nm/s)")]
         from_energy = [(self.df_e_kin, "e_kin", "total", r"$E_{\text{total}}^{\text{kin}}$ (Nm)"),
                        (self.df_e_pot, "e_pot", "total", r"$E_{\text{total}}^{\text{pot}}$ (Nm)")]
         from_general = [(self.df_general, "general", "pos_edge", r"$x_{\text{edge}}$ (m)"),
+                        (self.df_general, "general", "vel_edge_xy", r"$u_{\text{edge}}$ (m/s)"),
                         (self.df_general, "general", "pos_flap", r"$x_{\text{flap}}$ (m)"),
+                        (self.df_general, "general", "vel_flap_xy", r"$u_{\text{flap}}$ (m/s)"),
                         (self.df_general, "general", "pos_tors", r"$x_{\text{torsion}}$ (deg)")]
-        couples = [p for p in product(from_f_aero, from_general)] + [p for p in product(from_power, from_general)]
-        couples += [(from_general[1], from_general[0]), (from_general[2], from_general[0]), 
-                    (from_general[2], from_general[1])]
-        couples += [(from_energy[0], from_energy[1])]
+        # couples = [(a, b), (c, b), (d, b), (f, b), (b, from_general[0])]
+        # couples = [(from_general[1], from_general[0]), (from_general[2], from_general[0]), (from_general[2], from_general[1])]
+        couples = [(b, from_general[1])]
+        # couples = [p for p in product(from_f_aero, from_general)] + [p for p in product(from_power, from_general)]
+        # couples = [(from_general[1], from_general[0]), (from_general[2], from_general[0]), 
+        #             (from_general[2], from_general[1])]
+        # couples += [(from_energy[0], from_energy[1])]
         dir_plots_coupled_root = helper.create_dir(join(self.dir_plots, "coupled"))[0]
         time = self.df_general["time"].to_numpy()
         # because this column is used in the loop
@@ -134,9 +147,18 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             val_general = df_general[col_general].to_numpy()
             # because power values have one values fewer
             val_general = val_general if "P_" not in label_specific else val_general[:-1]
-            self.coupled_timeseries(time, val_general, df_specific[col_specific].to_numpy(),
+            val_specifc = df_specific[col_specific].to_numpy()
+            
+            # val_general = np.rad2deg(val_general)
+            val_specifc = np.rad2deg(val_specifc)
+            add = None
+            if col_specific == "C_l" and "alpha" in col_general:
+                add = (df_polar["alpha"], df_polar["C_l"])
+            elif col_specific == "C_l" and "alpha" in col_general:
+                add = (df_polar["alpha"], df_polar["C_d"])
+            self.coupled_timeseries(time, val_general, val_specifc,
                                     label_general, label_specific, cmap=cmap, linewidth=linewidth, save_to=save_to, 
-                                    skip_points=skip_points)
+                                    skip_points=skip_points, add=add)
         self.df_general["pos_tors"]= np.deg2rad(self.df_general["pos_tors"])  # change the column back to rad
             
         
@@ -373,7 +395,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
     @staticmethod
     def coupled_timeseries(time: np.ndarray, val1: np.ndarray, val2: np.ndarray,
                            x_label: str, y_label: str, grid: bool=False, cmap="viridis_r", linewidth: float=1.2,
-                           save_to: str=None, skip_points: int=1):
+                           save_to: str=None, skip_points: int=1, add: tuple[list, list]=None):
         fig, ax = plt.subplots()
 
         points = np.asarray([val1[::skip_points], val2[::skip_points]]).T.reshape(-1, 1, 2)
@@ -391,6 +413,14 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             ticks.append(time[-1])
             ticks = sorted(ticks)
         cbar.set_ticks(ticks)
+
+        if add is not None:
+            min_x = val1[::skip_points].min()
+            max_x = val1[::skip_points].max()
+            x = add[0] if isinstance(add[0], np.ndarray) else np.asarray(add[0])
+            y = add[1] if isinstance(add[1], np.ndarray) else np.asarray(add[1])
+            used_ids = np.logical_and(x>=min_x, x<=max_x)
+            ax.plot(x[used_ids], y[used_ids], "k", label="polar")
         
         handler = PlotHandler(fig, ax)
         handler.update(x_labels=x_label, y_labels=y_label, grid=grid)
