@@ -71,6 +71,7 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
         base_force = dynamic_pressure*chord
         base_moment = -base_force*chord
 
+        stiffness = np.asarray(stiffness) if not isinstance(stiffness, np.ndarray) else stiffness
         alpha = alpha if alpha is None else np.deg2rad(alpha)
 
         if len(stiffness.shape) == 1:  # no structural coupling
@@ -392,9 +393,9 @@ class AeroForce(SimulationSubRoutine, Rotations):
         "BL_chinese": ["s", "alpha_qs", "X_lag", "Y_lag", "alpha_eff", "C_nc", "D_i", "C_ni", "C_npot", "C_tpot", 
                        "D_p", "C_nsEq", "alpha_sEq", "f_t_Dp", "f_n_Dp", "D_bl_t", "D_bl_n", "f_t", "f_n", "C_nf", "C_tf", "tau_vortex", "C_nv_instant", "C_nv", "C_mqs", "C_mnc"],
         "BL_openFAST_Cl_disc": ["alpha_qs", "alpha_eff", "x1", "x2", "x3", "x4", "C_lpot", "C_lc", "C_lnc", "C_ds",
-                                "C_dc", "C_dsep", "C_ms", "C_mnc", "f_steady", "alpha_eq"],
+                                "C_dc", "C_dsep", "C_ms", "C_mnc", "f_steady", "alpha_eq", "C_d", "C_l", "C_m"],
         "BL_Staeblein": ["alpha_qs", "alpha_eff", "x1", "x2", "C_lc", "rel_inflow_speed", "rel_inflow_accel",
-                         "C_liner", "C_lcent", "C_ds", "C_dind", "C_ms", "C_mus", "C_miner"],
+                         "C_liner", "C_lcent", "C_ds", "C_dind", "C_ms", "C_mus", "C_miner", "C_l"],
     }
 
     # _copy_scheme = {
@@ -972,26 +973,26 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.C_lc[i] = sim_res.x4[i]*C_slope*(sim_res.alpha_eff[i]-alpha_0)
         sim_res.C_lc[i] += (1-sim_res.x4[i])*self._C_fs(np.rad2deg(sim_res.alpha_eff[i]))
         sim_res.C_lnc[i] = -np.pi*T_u_current*sim_res.vel[i, 2]
-        C_l = sim_res.C_lc[i]+sim_res.C_lnc[i]
+        sim_res.C_l[i] = sim_res.C_lc[i]+sim_res.C_lnc[i]
 
         sim_res.C_ds[i] = self.C_d(np.rad2deg(sim_res.alpha_eff[i]))
         sim_res.C_dc[i] = (sim_res.alpha_qs[i]-sim_res.alpha_eff[i]-T_u_current*sim_res.vel[i, 2])*sim_res.C_lc[i]
         tmp = (np.sqrt(sim_res.f_steady[i])-np.sqrt(sim_res.x4[i]))/2-(sim_res.f_steady[i]-sim_res.x4[i])/4
         sim_res.C_dsep[i] = (sim_res.C_ds[i]-self._C_d_0)*tmp
-        C_d = sim_res.C_ds[i]+sim_res.C_dc[i]+sim_res.C_dsep[i]
+        sim_res.C_d[i] = sim_res.C_ds[i]+sim_res.C_dc[i]+sim_res.C_dsep[i]
 
         sim_res.C_ms[i] = self.C_m(np.rad2deg(sim_res.alpha_eff[i]))
         sim_res.C_mnc[i] = 0.5*np.pi*T_u_current*sim_res.vel[i, 2]
-        C_m = sim_res.C_ms[i]+sim_res.C_mnc[i]
+        sim_res.C_m[i] = sim_res.C_ms[i]+sim_res.C_mnc[i]
 
         # --------- Combining everything
-        coeffs = np.asarray([C_d, C_l, C_m])
+        # coeffs = np.asarray([C_d, C_l, C_m])
 
         # for return of [C_d, C_l, C_m]
         # return coeffs
 
         # for return of [f_x, f_y, mom]
-        coeffs = np.asarray([C_d, C_l, -C_m*chord])
+        coeffs = np.asarray([sim_res.C_d[i], sim_res.C_l[i], -sim_res.C_m[i]*chord])
         rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
                             (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
         dynamic_pressure = density/2*rel_speed**2
@@ -1058,10 +1059,10 @@ class AeroForce(SimulationSubRoutine, Rotations):
         # get drag
         D_s = base_force*self.C_d(np.rad2deg(sim_res.alpha_eff[i]))
         D_ind = L_c*(sim_res.alpha_qs[i]-sim_res.alpha_eff[i]-T_u_current*sim_res.vel[i, 2])
+        # alpha_quasi_geometric = np.arctan2(sim_res.inflow[i, 1]-sim_res.vel[i, 1],
+        #                                    sim_res.inflow[i, 0]-sim_res.vel[i, 0])-sim_res.pos[i, 2]
+        # D_ind = L_c*(alpha_quasi_geometric-sim_res.alpha_eff[i]-T_u_current*sim_res.vel[i, 2])
         D = D_s+D_ind
-        # alpha_quasi_geometric = np.arctan2(sim_res.inflow[i, 0]-sim_res.vel[i, 0], 
-        #                                    sim_res.inflow[i, 1]-sim_res.vel[i, 1])-sim_res.pos[i, 2]
-        # D += L_c*(alpha_quasi_geometric-sim_res.alpha_eff[i]-T_u_current*sim_res.vel[i, 2])
 
         # get moment
         M_s = -base_force*chord*self.C_m(np.rad2deg(sim_res.alpha_eff[i]))  # minus because a positive C_m means nose
@@ -1074,6 +1075,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         # save coefficients
         sim_res.C_liner[i] = L_iner/base_force
         sim_res.C_lcent[i] = L_cent/base_force
+        sim_res.C_l[i] = sim_res.C_liner[i]+sim_res.C_lcent[i]+sim_res.C_lc[i]
         sim_res.C_ds[i] = D_s/base_force
         sim_res.C_dind[i] = D_ind/base_force
         sim_res.C_ms[i] = -M_s/(base_force*chord)
