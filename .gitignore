@@ -14,6 +14,7 @@ test.py
 !Cm*.dat
 !cases*.dat
 !f_s.dat
+!validation_speeds.txt
 
 *.json
 *.mp4
