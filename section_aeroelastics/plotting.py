@@ -591,6 +591,8 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
                 plt_arrows[arrow_name].set_data(x=data_lines["qc_trail"][i, 0], y=data_lines["qc_trail"][i, 1], 
                                                 dx=data[i, 0], dy=data[i, 1])
             rtrn = [*plt_lines.values()]+[*plt_arrows.values()]
+            if not (j+1)%100:
+                print(f"Animation until frame number {j+1} of {n_frames} ({np.round((j+1)/n_frames*1e2, 2)}%) done.")
             return tuple(rtrn)
         
         ani = animation.FuncAnimation(fig=fig, func=update, frames=n_frames, interval=15, blit=True)
@@ -603,7 +605,87 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
             arrow_scale_forces: float=1,
             arrow_scale_moment: float=1,
             plot_qc_trailing_every: int=2,
-            keep_qc_trailing: int=40):
+            keep_qc_trailing: int=40,
+            until: float=None,
+            dt_per_frame: float=None):
+        qc_pos = self.df_general[["pos_x", "pos_y"]].to_numpy()
+        profile = np.zeros((self.time.size, *self.profile.shape))
+        norm_moments = self.df_f_aero["aero_mom"]/np.abs(self.df_f_aero["aero_mom"]).max()
+        mom_arrow_res = 40
+        mom_arrow = np.zeros((self.time.size, mom_arrow_res+3, 2))
+        prof = self.profile-np.c_[0.25*self._chord, 0]
+        for i, (angle, moment) in enumerate(zip(self.df_general["pos_tors"], norm_moments)):
+            rot_mat = self._rot.active_2D(angle)
+            profile[i, :, :] = (rot_mat@prof.T).T+qc_pos[i, :]
+
+            trailing_edge = (rot_mat@np.c_[(0.75-arrow_scale_moment)*self._chord, 0].T).T+qc_pos[i, :]
+            moment_arrow = rot_mat@self.circle_arrow(180*moment)*arrow_scale_moment
+            mom_arrow[i, :, :] = moment_arrow.T+trailing_edge.squeeze()
+        
+        ids = np.arange(self.time.size)-1
+        trailing_idx_from = ids-(keep_qc_trailing+ids%plot_qc_trailing_every)
+        trailing_idx_from[trailing_idx_from < 0] = 0
+        
+        angle_aero_to_xyz = (self.df_general["pos_tors"]-self.df_f_aero[angle_lift]).to_numpy()
+        aero_force = np.c_[self.df_f_aero["aero_drag"], self.df_f_aero["aero_lift"], np.zeros(self.time.size)]
+        force_arrows = self._rot.project_separate(aero_force, angle_aero_to_xyz)*arrow_scale_forces
+        
+        df_total = pd.concat([self.df_e_kin["total"], self.df_e_pot["total"]], keys=["e_kin", "e_pot"], axis=1)
+        df_total["e_total"] = df_total.sum(axis=1)
+        dfs = {"general": self.df_general, "e_tot": df_total, "power": self.df_power, "e_kin": self.df_e_kin, 
+               "e_pot": self.df_e_pot}
+        fig, plt_lines, plt_arrows = self._prepare_energy_animation(dfs)
+
+        data_lines = {linename: df_total[linename] for linename in ["e_total", "e_kin", "e_pot"]} |\
+                     {linename: self.df_power[linename] for linename in ["aero_drag", "aero_lift", "aero_mom", 
+                                                                         "damp_edge", "damp_flap", "damp_tors"]} |\
+                     {linename: self.df_e_kin[linename[linename.rfind("_")+1:]] for linename in ["kin_edge",
+                                                                                                 "kin_flap", "kin_tors"]} |\
+                     {linename: self.df_e_pot[linename[linename.rfind("_")+1:]] for linename in ["pot_x", 
+                                                                                                 "pot_y", 
+                                                                                                 "pot_tors"]} 
+        data_lines = data_lines | {"qc_trail": qc_pos, # data with dict[line: data_for_line]
+                                   "profile": profile, 
+                                   "mom": mom_arrow}
+        data_arrows = {"drag": force_arrows[:, :2], "lift": force_arrows[:, 2:4]}
+        
+        dt_sim = self.time[1]
+        dt_per_frame = dt_sim if dt_per_frame is None else dt_per_frame
+        n_frames = int(until/dt_per_frame)
+        ids_frames = [int(i*dt_per_frame/dt_sim) for i in range(n_frames)]
+        
+        def update(j: int):
+            i = ids_frames[j]
+            for linename, data in data_lines.items():
+                match linename:
+                    case "profile"|"mom":
+                        plt_lines[linename].set_data(data[i, :, 0], data[i, :, 1])
+                    case "qc_trail":
+                        plt_lines[linename].set_data(data[trailing_idx_from[i]:i:plot_qc_trailing_every, 0], 
+                                                     data[trailing_idx_from[i]:i:plot_qc_trailing_every, 1])
+                    case _:
+                        plt_lines[linename].set_data(self.time[:i], data[:i])
+            for arrow_name, data in data_arrows.items():
+                plt_arrows[arrow_name].set_data(x=data_lines["qc_trail"][i, 0], y=data_lines["qc_trail"][i, 1], 
+                                                dx=data[i, 0], dy=data[i, 1])
+            rtrn = [*plt_lines.values()]+[*plt_arrows.values()]
+            if not (j+1)%100:
+                print(f"Animation until frame number {j+1} of {n_frames} ({np.round((j+1)/n_frames*1e2, 2)}%) done.")
+            return tuple(rtrn)
+        
+        ani = animation.FuncAnimation(fig=fig, func=update, frames=n_frames, interval=15, blit=True)
+        writer = animation.FFMpegWriter(fps=30)
+        ani.save(join(self.dir_plots, "animation_energy.mp4"), writer=writer)
+
+    def Beddoes_Leishman(
+            self,
+            angle_lift: str,
+            arrow_scale_forces: float=1,
+            arrow_scale_moment: float=1,
+            plot_qc_trailing_every: int=2,
+            keep_qc_trailing: int=40,
+            until: float=None,
+            dt_per_frame: float=None):
         qc_pos = self.df_general[["pos_x", "pos_y"]].to_numpy()
         profile = np.zeros((self.time.size, *self.profile.shape))
         norm_moments = self.df_f_aero["aero_mom"]/np.abs(self.df_f_aero["aero_mom"]).max()
@@ -628,24 +710,24 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
         
         df_total = pd.concat([self.df_e_kin.sum(axis=1), self.df_e_pot.sum(axis=1)], keys=["e_kin", "e_pot"], axis=1)
         df_total["e_total"] = df_total.sum(axis=1)
-        dfs = {"general": self.df_general, "e_tot": df_total, "power": self.df_power, "e_kin": self.df_e_kin, 
-               "e_pot": self.df_e_pot}
-        fig, plt_lines, plt_arrows = self._prepare_energy_animation(dfs)
+        dfs = {"general": self.df_general, "f_aero": self.df_f_aero}
+        fig, plt_lines, plt_arrows, aoas, coeffs = self._prepare_BL_animation(dfs)
 
-        data_lines = {linename: df_total[linename] for linename in ["e_total", "e_kin", "e_pot"]} |\
-                     {linename: self.df_power[linename] for linename in ["aero_drag", "aero_lift", "aero_mom", 
-                                                                        "damp_edge", "damp_flap", "damp_tors"]} |\
-                     {linename: self.df_e_kin[linename[linename.rfind("_")+1:]] for linename in ["kin_edge",
-                                                                                                 "kin_flap", "kin_tors"]} |\
-                     {linename: self.df_e_pot[linename[linename.rfind("_")+1:]] for linename in ["pot_edge", 
-                                                                                                 "pot_flap", "pot_tors"]} 
+        coeff_names = [name for names in coeffs.values() for name in names]
+        data_lines = {linename: self.df_f_aero[linename] for linename in coeff_names}
+        data_lines = data_lines|{linename: np.rad2deg(self.df_f_aero[linename]) for linename in aoas}
         data_lines = data_lines | {"qc_trail": qc_pos, # data with dict[line: data_for_line]
                                    "profile": profile, 
                                    "mom": mom_arrow}
         data_arrows = {"drag": force_arrows[:, :2], "lift": force_arrows[:, 2:4]}
         
-        def update(i: int):
-            i += 1
+        dt_sim = self.time[1]
+        dt_per_frame = dt_sim if dt_per_frame is None else dt_per_frame
+        n_frames = int(until/dt_per_frame)
+        ids_frames = [int(i*dt_per_frame/dt_sim) for i in range(n_frames)]
+        
+        def update(j: int):
+            i = ids_frames[j]
             for linename, data in data_lines.items():
                 match linename:
                     case "profile"|"mom":
@@ -659,12 +741,13 @@ class Animator(DefaultStructure, Shapes, AnimationPreparation):
                 plt_arrows[arrow_name].set_data(x=data_lines["qc_trail"][i, 0], y=data_lines["qc_trail"][i, 1], 
                                                 dx=data[i, 0], dy=data[i, 1])
             rtrn = [*plt_lines.values()]+[*plt_arrows.values()]
+            if not (j+1)%100:
+                print(f"Animation until frame number {j+1} of {n_frames} ({np.round((j+1)/n_frames*1e2, 2)}%) done.")
             return tuple(rtrn)
-        
-        ani = animation.FuncAnimation(fig=fig, func=update, frames=self.time.size-1, interval=15, blit=True)
+                
+        ani = animation.FuncAnimation(fig=fig, func=update, frames=n_frames, interval=15, blit=True)
         writer = animation.FFMpegWriter(fps=30)
-        ani.save(join(self.dir_plots, "animation_energy.mp4"), writer=writer)
-        
+        ani.save(join(self.dir_plots, "animation_BL.mp4"), writer=writer)
 
 class HHTalphaPlotter(DefaultStructure):
     def __init__(self) -> None:
