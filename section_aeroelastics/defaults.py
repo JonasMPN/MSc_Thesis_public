@@ -391,8 +391,12 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_liner",
         "C_lcent",
         "C_dind",
-        "C_mus",
+        "C_lift",
         "C_miner",
+        "C_dus",
+        "C_lus",
+        "C_mus",
+
     ]
     _params = _prep_params + _sim_params
 
@@ -427,8 +431,11 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_liner": "blue", 
         "C_lcent": "red", 
         "C_dind": "green",
-        "C_mus": "orange", 
+        "C_lift": "orange", 
         "C_miner": "blue", 
+        "C_dus": "black",
+        "C_lus": "black",
+        "C_mus": "black",
     }
     _colours = _prep_colours|_c_rest
 
@@ -463,11 +470,14 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_dc": "$C_{dc}$",
         "C_dsep": "$C_{dsep}$",
         "C_ms": "$C_{ms}$",
-        "C_liner": r"$C_{l,\text{iner}}$",
-        "C_lcent": r"$C_{l,\text{cent}}$",
-        "C_dind": r"$C_{d,\text{ind}}$",
-        "C_mus": r"$C_{m,\text{us}}$",
-        "C_miner": r"$C_{m,\text{iner}}$",
+        "C_liner": r"$C_{l\text{,iner}}$",
+        "C_lcent": r"$C_{l\text{,cent}}$",
+        "C_dind": r"$C_{d\text{,ind}}$",
+        "C_lift": r"$C_{m\text{,us}}$",
+        "C_miner": r"$C_{m\text{,iner}}$",
+        "C_dus": r"$C_{d\text{,us}}$",
+        "C_lus": r"$C_{l\text{,us}}$",
+        "C_mus": r"$C_{m\text{,us}}$",
     }
 
     _linestyles = {  # line style
@@ -479,6 +489,9 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_ni": "--",
         "C_npot": "--",
         "C_lpot": "--",
+        "C_dus": "--",
+        "C_lus": "--",
+        "C_mus": "--",
     }
 
     def __init__(self) -> None:
@@ -620,6 +633,7 @@ class DefaultStructure:
         "power": "power.dat",
         "e_kin": "e_kin.dat",
         "e_pot": "e_pot.dat",
+        "aoa_threshold": "aoa_thresholds.dat"
     }
 
 
