@@ -1,12 +1,13 @@
 import numpy as np
 from calculations import Rotations
 import pandas as pd
-from os.path import join
+from os.path import join, isfile
 from os import listdir
 from scipy.signal import find_peaks
 import json
 from helper_functions import Helper
 from defaults import DefaultsSimulation
+from copy import copy
 helper = Helper()
 
 
@@ -22,7 +23,7 @@ class PowerAndEnergy(Rotations):
             velocity_damp: np.ndarray,
             velocity_e_kin: np.ndarray,
             f_aero_dlm: np.ndarray,
-            f_damp: np.ndarray,
+            f_damp: np.ndarray
             ) -> None:
         """Class to calculate the energy of a system and the power done by various forces.
 
@@ -62,7 +63,7 @@ class PowerAndEnergy(Rotations):
         self.f_aero_dlm = f_aero_dlm
         self.f_damp = f_damp
 
-    def power(self) -> dict[str: dict[str: np.ndarray]]:
+    def power(self) -> tuple[dict[str: dict[str: np.ndarray]], dict[str: np.ndarray]]:
         """Calculates the power done by the aerodynamic and structural damping forces. The powers are calculated by 
         means of dot products. Thus, the coordinate system of the velocities and the forces must be the same!
 
@@ -85,7 +86,7 @@ class PowerAndEnergy(Rotations):
         vel_damp_mean = (self.velocity_damp[:-1, :]+self.velocity_damp[1:, :])/2
         power_damp = f_damp_mean*vel_damp_mean
         
-        return {
+        power = {
             "aero": {
                 "drag": power_drag,
                 "lift": power_lift,
@@ -97,6 +98,8 @@ class PowerAndEnergy(Rotations):
                 2: power_damp[:, 2]
             }
         }
+        
+        return power 
     
     def kinetic_energy(self) -> dict[str: np.ndarray]:
         """Calculates the kinetic energy of the moving airfoil in the edgewise, flapwise, and torsional direction. 
@@ -164,6 +167,13 @@ class PostCaluculations(Rotations, DefaultsSimulation):
             self._index_to_label_pot = {0: "x", 1: "y", 2: "tors"}
         else:
             raise ValueError(f"Unrecoginsed 'coordinate_system_structure'={self._cs_struc}")
+        
+    def check_angle_of_attack(self, **kwargs: float):
+        exceeds_threshold = {}
+        for aoa, threshold in kwargs.items():
+            vals = self.df_f_aero[aoa].to_numpy()
+            exceeds_threshold[aoa] = np.abs(vals) > np.deg2rad(threshold)
+        pd.DataFrame(exceeds_threshold).to_csv(join(self.dir_in, self._dfl_filenames["aoa_threshold"]), index=None)
 
     def project_data(self) -> None:
         """The simulation data saved is purely in the xyz coordinate system. This function projects
@@ -217,7 +227,9 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         # save projected data
         for df_name, df in zip(["f_aero", "f_structural", "general"], 
                                [self.df_f_aero, self.df_f_structural, self.df_general]):
-            df.to_csv(join(self.dir_in, self._dfl_filenames[df_name]), index=None)
+            columns = df.columns.tolist()
+            columns.sort(key=str.lower)
+            df.to_csv(join(self.dir_in, self._dfl_filenames[df_name]), index=None, columns=columns)
 
     def _init_calc(func) -> callable:
         """Decorator initialising a PowerAndEnergy instance if it is not already initialised.
@@ -278,13 +290,13 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         before power().
         """
         power_res = self._calc.power()
-        df = pd.DataFrame()
+        power = {}
         for category, forces in power_res.items():
             for force, values in forces.items():
                 if category == "damp":
                     force = self._index_to_label[force]
-                df[category+"_"+force] = values
-        df.to_csv(join(self.dir_in, self._dfl_filenames["power"]), index=None)
+                power[category+"_"+force] = values
+        pd.DataFrame(power).to_csv(join(self.dir_in, self._dfl_filenames["power"]), index=None)
     
     @_init_calc
     def kinetic_energy(self):
@@ -308,7 +320,7 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         df["total"] = df.sum(axis=1)
         df.to_csv(join(self.dir_in, self._dfl_filenames["e_pot"]), index=None)
 
-    def work_per_cycle(self, peaks: np.ndarray=None):
+    def work_per_cycle(self, peaks: np.ndarray=None, constant_timestep: bool=True):
         t = self.df_general["time"].to_numpy()
         dt = t[1:]-t[:-1]
         if peaks is None:
@@ -322,8 +334,26 @@ class PostCaluculations(Rotations, DefaultsSimulation):
             period_power[col] = [(timeseries[i_begin:i_end]*dt[i_begin:i_end]).sum() for 
                                  i_begin, i_end in zip(peaks[:-1], peaks[1:])]
         
+        df_exceeded = None
+        ff_aoa_thresholds = join(self.dir_in, self._dfl_filenames["aoa_threshold"])
+        if isfile(ff_aoa_thresholds):
+            df_thresholds = pd.read_csv(ff_aoa_thresholds)
+            aoas = df_thresholds.columns
+            exceeds_threshold_per_cycle = []
+            if constant_timestep:
+                for i_begin, i_end in zip(peaks[:-1], peaks[1:]):
+                    time_steps = i_end-i_begin
+                    exceeds_threshold_per_cycle.append(df_thresholds.iloc[i_begin:i_end].sum()/time_steps)
+            else:
+                raise NotImplementedError
+            columns = {aoa: aoa+"_exceeds_threshold" for aoa in aoas}
+            df_exceeded = pd.DataFrame(exceeds_threshold_per_cycle)
+            df_exceeded = df_exceeded.rename(columns=columns)
         data =  {"cycle_no": np.arange(len(peaks)-1), "T": t[peaks[1:]]-t[peaks[:-1]]} | period_power
+        
         df = pd.DataFrame(data)
+        if df_exceeded is not None:
+            df = pd.concat((df, df_exceeded), axis=1)
         df.to_csv(join(self.dir_in, "period_work.dat"), index=None)
 
     def _v_ef(self, velocity, position, coordinate_system: str):
