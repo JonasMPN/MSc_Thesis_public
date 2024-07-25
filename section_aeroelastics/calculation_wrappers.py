@@ -88,7 +88,6 @@ def run_forced(
         NACA_643_618.set_struct_calc("linear_xy", **structure_data)
         # set the time integration scheme
         NACA_643_618.set_time_integration("HHT-alpha-xy-adapted", alpha=0.1, dt=time[1], **structure_data)
-        # NACA_643_618.simulate_along_path(inflow, coordinate_system, pos, vel, accel)  # perform simulation
         NACA_643_618.simulate_along_path(inflow, coordinate_system, 0, 0, pos, vel)  # perform simulation
         NACA_643_618.save(case_dir)  # save simulation results
 
@@ -222,17 +221,109 @@ def run_forced_parallel_from_free_case(
         mean_vel,
         # mean_accel,
     )
+
+
+def _run_free(
+        velocities: list[float]|float,
+        aoas: list[float]|float,
+        case_id: list[int],
+        dir_airfoil: str,
+        file_polar: str,
+        root: str,
+        aero_scheme: str,
+        time: np.ndarray,
+        structure_data: dict[str, float],
+        helper: Helper,
+        ):
+    # changes in the order of the arguments must be reflected in prepare_multiprocessing_input() and calls thereof!'
+    ffile_polar = join(dir_airfoil, file_polar)
+    approx_steady_x = True
+    approx_steady_y = True
+    approx_steady_tors = True
+    fac_x = 1.3
+    fac_y = 1
+    fac_tors = 1
+    for vel, aoa, i in zip(velocities, aoas, case_id):
+        case_dir = helper.create_dir(join(root, str(i)))[0]
+        with open(join(case_dir, "section_data.json"), "w") as f:
+            json.dump(structure_data, f, indent=4)
+
+        NACA_643_618 = ThreeDOFsAirfoil(time, verbose=False)
+        # set the calculation scheme for the aerodynamic forces
+        if aero_scheme == "qs":
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="quasi_steady", 
+                                       chord=structure_data["chord"], pitching_around=0.25, alpha_at=0.75)
+        elif aero_scheme == "BL_chinese":
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_chinese", A1=0.3, A2=0.7, b1=0.14,
+                                       b2=0.53, pitching_around=0.25, alpha_at=0.75, chord=structure_data["chord"])
+        elif aero_scheme == "BL_openFAST_Cl_disc":
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_openFAST_Cl_disc", A1=0.165, #
+                                       A2=0.335, b1=0.0445, b2=0.3, pitching_around=0.25, alpha_at=0.75, 
+                                       chord=structure_data["chord"])
+        
+        inflow = get_inflow(time, [(0, 0, vel, aoa)], init_velocity=vel)
+        init_data = NACA_643_618.approximate_steady_state(ffile_polar, inflow[0, :], structure_data["chord"],  
+                                                          structure_data["stiffness"], x=approx_steady_x,  
+                                                          y=approx_steady_y, torsion=approx_steady_tors, alpha=aoa)
+        init_pos, f_init, inflow_angle = init_data
+        NACA_643_618.aero[-1, :] = f_init  # needed if an HHT-alpha algorithm is used
+        
+        if aoa is not None:
+            inflow_vel = np.linalg.norm(inflow[0, :])
+            inflow = get_inflow(time, [(0, 0, inflow_vel, inflow_angle)], init_velocity=vel)
+        
+        facs = np.asarray([fac_x, fac_y, fac_tors])
+        init_pos *= facs
+        init_vel = np.zeros(3)
+
+        # set the calculation scheme for the structural damping and stiffness forces
+        NACA_643_618.set_struct_calc("linear_xy", **structure_data)
+        # set the time integration scheme
+        NACA_643_618.set_time_integration("HHT-alpha-xy-adapted", alpha=0.1, dt=time[1], **structure_data)
+        NACA_643_618.simulate(inflow, init_pos, init_vel)  # perform simulation
+        NACA_643_618.save(case_dir)  # save simulation results
+
+
+def run_free_parallel(
+        dir_airfoil: str,
+        file_polar: str,
+        root: str,
+        n_processes: int,
+        aero_scheme: str,
+        time: np.ndarray,
+        structure_data: dict[str, float],
+        inflow_velocity: list[float]|float,
+        angle_of_attack: list[float]|float
+):
+    root_dir = helper.create_dir(root)[0]
+    inflow_velocity = inflow_velocity if isinstance(inflow_velocity, list) else [inflow_velocity]
+    angle_of_attack = angle_of_attack if isinstance(angle_of_attack, list) else [angle_of_attack]
+    combinations = [(ampl, aoa) for ampl, aoa in product(inflow_velocity, angle_of_attack)]
+    velocities = []
+    alphas = []
+    for combi in combinations:
+        velocities.append(combi[0])
+        alphas.append(combi[1])
+    dict_combinations = {"amplitude": velocities, "alpha": alphas}
+    pd.DataFrame(dict_combinations).to_csv(join(root_dir, "combinations.dat"), index=None)
+
+    always_use = [dir_airfoil, file_polar, root, aero_scheme, time, structure_data, helper]
+    input_args = prepare_multiprocessing_input(n_processes, always_use, velocities, alphas, add_call_number=True)
+    with Pool(processes=n_processes) as pool:
+        pool.starmap(_run_free, input_args)
     
 
 def post_calc(
         case_dirs: list[str],
         alpha_lift: str,
+        aoa_thresholds: dict[str, float]
         ):
     for case_dir in case_dirs:
         #todo hardcoded CS
         post_calc = PostCaluculations(dir_sim_res=case_dir, alpha_lift=alpha_lift, coordinate_system_structure="xy")
         post_calc.project_data()  # projects the simulation's x-y-rot_z data into different coordinate systems such as
         # edgewise-flapwise-rot_z or drag-lift_rot_z.
+        post_calc.check_angle_of_attack(**aoa_thresholds)
         post_calc.power()  # calculate and save the work done by the aerodynamic and structural damping forces
         post_calc.kinetic_energy()  # calculate the edgewise, flapwise, and rotational kinetic energy
         post_calc.potential_energy()  # calculate the edgewise, flapwise, and rotational potential energy
@@ -243,10 +334,11 @@ def post_calculations_parallel(
         root_cases: str,
         alpha_lift: str,
         n_processes: int,
+        aoa_thresholds: dict[str, float]
         ):
     case_dirs = [join(root_cases, case_name) for case_name in listdir(root_cases) if case_name not in 
                  ["combinations.dat", "plots"]]
-    always_use = [alpha_lift]
+    always_use = [alpha_lift, aoa_thresholds]
     input_args = prepare_multiprocessing_input(n_processes, always_use, case_dirs)
     with Pool(processes=n_processes) as pool:
         pool.starmap(post_calc, input_args)
