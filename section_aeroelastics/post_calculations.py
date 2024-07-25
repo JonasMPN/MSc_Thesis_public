@@ -86,7 +86,7 @@ class PowerAndEnergy(Rotations):
         vel_damp_mean = (self.velocity_damp[:-1, :]+self.velocity_damp[1:, :])/2
         power_damp = f_damp_mean*vel_damp_mean
         
-        power = {
+        return {
             "aero": {
                 "drag": power_drag,
                 "lift": power_lift,
@@ -98,8 +98,6 @@ class PowerAndEnergy(Rotations):
                 2: power_damp[:, 2]
             }
         }
-        
-        return power 
     
     def kinetic_energy(self) -> dict[str: np.ndarray]:
         """Calculates the kinetic energy of the moving airfoil in the edgewise, flapwise, and torsional direction. 
