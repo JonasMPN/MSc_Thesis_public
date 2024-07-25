@@ -395,7 +395,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         "BL_openFAST_Cl_disc": ["alpha_qs", "alpha_eff", "x1", "x2", "x3", "x4", "C_lpot", "C_lc", "C_lnc", "C_ds",
                                 "C_dc", "C_dsep", "C_ms", "C_mnc", "f_steady", "alpha_eq", "C_d", "C_l", "C_m"],
         "BL_Staeblein": ["alpha_qs", "alpha_eff", "x1", "x2", "C_lc", "rel_inflow_speed", "rel_inflow_accel",
-                         "C_liner", "C_lcent", "C_ds", "C_dind", "C_ms", "C_mus", "C_miner", "C_l"],
+                         "C_liner", "C_lcent", "C_ds", "C_dind", "C_ms", "C_lift", "C_miner", "C_l"],
     }
 
     # _copy_scheme = {
@@ -976,9 +976,9 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.C_l[i] = sim_res.C_lc[i]+sim_res.C_lnc[i]
 
         sim_res.C_ds[i] = self.C_d(np.rad2deg(sim_res.alpha_eff[i]))
-        sim_res.C_dc[i] = (sim_res.alpha_qs[i]-sim_res.alpha_eff[i]-T_u_current*sim_res.vel[i, 2])*sim_res.C_lc[i]
         tmp = (np.sqrt(sim_res.f_steady[i])-np.sqrt(sim_res.x4[i]))/2-(sim_res.f_steady[i]-sim_res.x4[i])/4
         sim_res.C_dsep[i] = (sim_res.C_ds[i]-self._C_d_0)*tmp
+        sim_res.C_dc[i] = (sim_res.alpha_qs[i]-sim_res.alpha_eff[i]-T_u_current*sim_res.vel[i, 2])*sim_res.C_lc[i]
         sim_res.C_d[i] = sim_res.C_ds[i]+sim_res.C_dc[i]+sim_res.C_dsep[i]
 
         sim_res.C_ms[i] = self.C_m(np.rad2deg(sim_res.alpha_eff[i]))
@@ -1067,9 +1067,9 @@ class AeroForce(SimulationSubRoutine, Rotations):
         # get moment
         M_s = -base_force*chord*self.C_m(np.rad2deg(sim_res.alpha_eff[i]))  # minus because a positive C_m means nose
         # up by definition, but in the CS used here nose down -> include minus to correct direction
-        M_us = chord/2*(L_iner/2+L_cent)  # moment caused by L_iner and L_cent w.r.t. the quarter-chord
+        M_lift = chord/2*(L_iner/2+L_cent)  # moment caused by L_iner and L_cent w.r.t. the quarter-chord
         M_iner = m_apparent*chord**2/32*sim_res.accel[i, 2]  # this minus stays because the acceleration term is on the 
-        M = M_s+M_us-M_iner
+        M = M_s+M_lift-M_iner
         # same axes as the moment
 
         # save coefficients
@@ -1079,15 +1079,18 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.C_ds[i] = D_s/base_force
         sim_res.C_dind[i] = D_ind/base_force
         sim_res.C_ms[i] = -M_s/(base_force*chord)
-        sim_res.C_mus[i] = -M_us/(base_force*chord)
+        sim_res.C_lift[i] = -M_lift/(base_force*chord)
         sim_res.C_miner[i] = -M_iner/(base_force*chord)
 
         # combine everything
         f_aero = np.asarray([D, L_c+L_iner+L_cent, M])
 
         # for return of [C_d, C_l, C_m] uncomment the three following lines
-        # coeffs = f_aero/base_force
-        # coeffs[2] /= -chord
+        coeffs = f_aero/base_force
+        coeffs[2] /= -chord
+        sim_res.C_dus[i] = coeffs[0]
+        sim_res.C_lus[i] = coeffs[1]
+        sim_res.C_mus[i] = coeffs[2]
         # return coeffs
 
         # for return of [f_x, f_y, mom] uncomment the two following lines 
