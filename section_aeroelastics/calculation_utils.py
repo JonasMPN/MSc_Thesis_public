@@ -52,7 +52,8 @@ class SimulationResults(DefaultsSimulation):
         files: dict[str, list[str]]=None, 
         split: dict[str, list[str]]=None, 
         use_default: bool=True,
-        apply: dict[Callable]=None):
+        apply: dict[Callable]=None,
+        sort_columns: bool=True):
         """Saves instance attributes to CSV .dat files.
 
         :param root: Root directory in relation to the current working directory into which the files are saved.
@@ -91,6 +92,8 @@ class SimulationResults(DefaultsSimulation):
                     
         for file, params in files.items():
             df = pd.DataFrame()
+            if sort_columns:
+                params.sort() 
             for param in params:
                 if param in split.keys():
                     for i, split_name in enumerate(split[param]):
