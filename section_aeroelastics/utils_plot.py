@@ -454,7 +454,7 @@ class PlotPreparation:
         return aoas
     
     @staticmethod
-    def _get_force_and_moment_coeffs(df_aero: pd.DataFrame):
+    def _get_force_and_moment_coeffs(df_aero: pd.DataFrame) -> dict[str, list[str]]:
         params = df_aero.columns
         if any(["C_n" in param for param in params]):
             collect_with =  ["C_n", "C_t"]
@@ -465,7 +465,11 @@ class PlotPreparation:
         collect_with.append("C_m")
         coeffs = {category: None for category in collect_with}
         for coeff_category in collect_with:
-            coeffs[coeff_category] = [param for param in params if coeff_category in param]
+            cat_coeffs = [param for param in params if coeff_category in param]
+            if f"{coeff_category}us" in cat_coeffs:
+                cat_coeffs.pop(cat_coeffs.index(f"{coeff_category}us"))
+                cat_coeffs.append(f"{coeff_category}us")  # so that the total unsteady coeff is plotted last
+            coeffs[coeff_category] = cat_coeffs
         return coeffs
     
 
@@ -529,7 +533,7 @@ class AnimationPreparation(PlotPreparation, DefaultPlot):
             "power": [dfs["power"]["aero_drag"], dfs["power"]["aero_lift"], dfs["power"]["aero_mom"],
                      dfs["power"]["damp_edge"], dfs["power"]["damp_flap"], dfs["power"]["damp_tors"]],
             "kinetic": [dfs["e_kin"]["edge"], dfs["e_kin"]["flap"], dfs["e_kin"]["tors"]],
-            "potential": [dfs["e_pot"]["edge"], dfs["e_pot"]["flap"], dfs["e_pot"]["tors"]],
+            "potential": [dfs["e_pot"]["x"], dfs["e_pot"]["y"], dfs["e_pot"]["tors"]],
         }
         
         plot = {
@@ -537,14 +541,59 @@ class AnimationPreparation(PlotPreparation, DefaultPlot):
             "total": ["e_total", "e_kin", "e_pot"],
             "power": ["aero_drag", "aero_lift", "aero_mom", "damp_edge", "damp_flap", "damp_tors"],
             "kinetic": ["kin_edge", "kin_flap", "kin_tors"],
-            "potential": ["pot_edge", "pot_flap", "pot_tors"]
+            "potential": ["pot_x", "pot_y", "pot_tors"]
         }
         def map_cols_to_settings(column: str) -> str:
-            return column
+            if any([force_type in column for force_type in ["aero", "damp", "stiff"]]):
+                return column[column.find("_")+1:]
+            elif column in ["drag", "lift"]:
+                return f"arrow_{column}"
+            elif column.startswith("kin") or column.startswith("pot"):
+                return column.split("_")[1]
+            else:
+                return column 
         fig, axs = handler.update(x_lims_from=x_lims_from, y_lims_from=y_lims_from, scale_limits=1.2)
         plt_lines, plt_arrows = self._get_lines_and_arrows(axs, plot, map_cols_to_settings)
         fig, axs = handler.update(legend=True)
         return fig, plt_lines, plt_arrows
+    
+    def _prepare_BL_animation(self, dfs: pd.DataFrame, equal_y: tuple[str]=None):
+        fig, axs, handler = self._prepare_BL_plot(["C_l", "C_d"], equal_y)
+        coeffs = self._get_force_and_moment_coeffs(dfs["f_aero"])
+        aoas = self._get_aoas(dfs["f_aero"])
+        x_lims_from = {
+            "profile": [dfs["general"]["pos_x"]-.4, dfs["general"]["pos_x"]+1],
+            "aoa": dfs["general"]["time"],
+            "C_l": dfs["general"]["time"],  #todo the C_l and C_d is going to fail if the BL scheme uses 
+            "C_d": dfs["general"]["time"],  #todo C_n and C_t instead
+            "C_m": dfs["general"]["time"],
+        }
+        y_lims_from = {
+            "profile": [dfs["general"]["pos_y"]-.4, dfs["general"]["pos_y"]+0.3],
+            "aoa": [np.rad2deg(dfs["f_aero"][col]) for col in aoas],
+            "C_l": [dfs["f_aero"][coeff] for coeff in coeffs["C_l"]],
+            "C_d": [dfs["f_aero"][coeff] for coeff in coeffs["C_d"]],
+            "C_m": [dfs["f_aero"][coeff] for coeff in coeffs["C_m"]],
+        }
+        
+        plot = {
+            "profile": ["qc_trail", "profile", "drag", "lift", "mom"],
+            "aoa": aoas,
+            "C_l": coeffs["C_l"],
+            "C_d": coeffs["C_d"],
+            "C_m": coeffs["C_m"]
+        }
+        def map_cols_to_settings(column: str) -> str:
+            if any([force_type in column for force_type in ["aero", "damp", "stiff"]]):
+                return column[column.find("_")+1:]
+            elif column in ["drag", "lift"]:
+                return f"arrow_{column}"
+            else:
+                return column 
+        fig, axs = handler.update(x_lims_from=x_lims_from, y_lims_from=y_lims_from, scale_limits=1.2)
+        plt_lines, plt_arrows = self._get_lines_and_arrows(axs, plot, map_cols_to_settings)
+        fig, axs = handler.update(legend=True)
+        return fig, plt_lines, plt_arrows, aoas, coeffs
     
     def _get_lines_and_arrows(   
             self,
