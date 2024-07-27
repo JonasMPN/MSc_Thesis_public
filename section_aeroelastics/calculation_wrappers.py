@@ -9,15 +9,16 @@ import json
 from itertools import product
 from multiprocessing import Pool
 import pandas as pd
+from copy import copy
 helper = Helper()
 
-import matplotlib.pyplot as plt
 
 def prepare_multiprocessing_input(
         n_processes: int,
         always_use: list[float|str],
         *args: list[float],
-        add_call_number: bool=False
+        add_call_number: bool=False,
+        call_numbers_start: int=0
         ):
     args_passed = max([len(arg) for arg in args])
     split_size = max(1, args_passed//n_processes)
@@ -29,7 +30,7 @@ def prepare_multiprocessing_input(
         idx_end = split_size*(n+1)+idx_advanced
         process_input = [arg[idx_start:idx_end] if len(arg) != 0 else [] for arg in args]
         if add_call_number:
-            process_input += [[i for i in range(idx_start, idx_end)]]
+            process_input += [[i+call_numbers_start for i in range(idx_start, idx_end)]]
         process_input += always_use 
         input_args.append(process_input)
     return input_args
@@ -234,6 +235,7 @@ def _run_free(
         time: np.ndarray,
         structure_data: dict[str, float],
         helper: Helper,
+        save_last: float=None
         ):
     # changes in the order of the arguments must be reflected in prepare_multiprocessing_input() and calls thereof!'
     ffile_polar = join(dir_airfoil, file_polar)
@@ -281,7 +283,7 @@ def _run_free(
         # set the time integration scheme
         NACA_643_618.set_time_integration("HHT-alpha-xy-adapted", alpha=0.1, dt=time[1], **structure_data)
         NACA_643_618.simulate(inflow, init_pos, init_vel)  # perform simulation
-        NACA_643_618.save(case_dir)  # save simulation results
+        NACA_643_618.save(case_dir, save_last=save_last)  # save simulation results
 
 
 def run_free_parallel(
@@ -293,22 +295,45 @@ def run_free_parallel(
         time: np.ndarray,
         structure_data: dict[str, float],
         inflow_velocity: list[float]|float,
-        angle_of_attack: list[float]|float
+        angle_of_attack: list[float]|float,
+        save_last: float=None
 ):
     root_dir = helper.create_dir(root)[0]
     inflow_velocity = inflow_velocity if isinstance(inflow_velocity, list) else [inflow_velocity]
     angle_of_attack = angle_of_attack if isinstance(angle_of_attack, list) else [angle_of_attack]
-    combinations = [(ampl, aoa) for ampl, aoa in product(inflow_velocity, angle_of_attack)]
+    combinations = [(vel, aoa) for vel, aoa in product(inflow_velocity, angle_of_attack)]
+
+    ffile_combinations = join(root_dir, "combinations.dat")
+    df_existing_combinations = None
+    start_idx = 0
+    if isfile(ffile_combinations):
+        df_existing_combinations = pd.read_csv(ffile_combinations)
+        start_idx = df_existing_combinations.shape[0]
+        popped = 0
+        for i, (vel, aoa) in enumerate(copy(combinations)):
+            row = {"velocity": [vel], "alpha": [aoa]}
+            if df_existing_combinations.isin(row).all(axis=1).any():
+                combinations.pop(i-popped)
+                popped += 1
+    if len(combinations) == 0:
+        print("All combinations already exist.")
+        return
+    
     velocities = []
     alphas = []
     for combi in combinations:
         velocities.append(combi[0])
         alphas.append(combi[1])
-    dict_combinations = {"amplitude": velocities, "alpha": alphas}
-    pd.DataFrame(dict_combinations).to_csv(join(root_dir, "combinations.dat"), index=None)
-
-    always_use = [dir_airfoil, file_polar, root, aero_scheme, time, structure_data, helper]
-    input_args = prepare_multiprocessing_input(n_processes, always_use, velocities, alphas, add_call_number=True)
+    dict_combinations = {"velocity": velocities, "alpha": alphas}
+    if df_existing_combinations is not None:
+        df_new = pd.DataFrame(dict_combinations)
+        pd.concat((df_existing_combinations, df_new), ignore_index=True).to_csv(ffile_combinations, index=None)
+    else:
+        pd.DataFrame(dict_combinations).to_csv(ffile_combinations, index=None)
+    
+    always_use = [dir_airfoil, file_polar, root, aero_scheme, time, structure_data, helper, save_last]
+    input_args = prepare_multiprocessing_input(n_processes, always_use, velocities, alphas, add_call_number=True, 
+                                               call_numbers_start=start_idx)
     with Pool(processes=n_processes) as pool:
         pool.starmap(_run_free, input_args)
     
