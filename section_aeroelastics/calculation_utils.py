@@ -53,7 +53,8 @@ class SimulationResults(DefaultsSimulation):
         split: dict[str, list[str]]=None, 
         use_default: bool=True,
         apply: dict[Callable]=None,
-        sort_columns: bool=True):
+        sort_columns: bool=True,
+        save_ids: np.ndarray|list=None):
         """Saves instance attributes to CSV .dat files.
 
         :param root: Root directory in relation to the current working directory into which the files are saved.
@@ -98,7 +99,7 @@ class SimulationResults(DefaultsSimulation):
                 if param in split.keys():
                     for i, split_name in enumerate(split[param]):
                         try:
-                            vals = vars(self)[param][:, i]
+                            vals = vars(self)[param][:, i] if save_ids is None else vars(self)[param][save_ids, i]
                             if param in to_change:
                                 vals = apply[param](vals)
                             df[param+"_"+split_name] = vals
@@ -106,7 +107,7 @@ class SimulationResults(DefaultsSimulation):
                             #todo add original error message
                             raise ValueError(f"The above ValueError was caused for parameter {param}.")
                 else:
-                    df[param] = vars(self)[param]
+                    df[param] = vars(self)[param] if save_ids is None else vars(self)[param][save_ids]
             df.to_csv(join(root, file), index=False)
 
 
