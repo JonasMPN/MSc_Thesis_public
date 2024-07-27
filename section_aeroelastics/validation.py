@@ -467,9 +467,9 @@ if __name__ == "__main__":
     do = {
         "separation_point_calculation": False,
         "separation_point_plots": False,
-        "BL": True,
-        "plot_BL_results_meas": True,
-        "plot_BL_results_polar": False,
+        "BL": False,
+        "plot_BL_results_meas": False,
+        "plot_BL_results_polar": True,
         "calc_HHT_alpha_response": False,
         "plot_HHT_alpha_response": False,
         "HHT_alpha_undamped": False,
@@ -484,7 +484,8 @@ if __name__ == "__main__":
     dir_HHT_alpha_validation = "data/HHT_alpha_validation"
     # BL_scheme = "BL_openFAST_Cl_disc"
     # BL_scheme = "BL_chinese"
-    BL_scheme = "BL_Staeblein"
+    BL_scheme = "BL_openFAST_Cl_disc_f_scaled"
+    # BL_scheme = "BL_Staeblein"
     HHT_alpha_case = "test"
     sep_point_test_res = 202
     period_res = 400
@@ -496,10 +497,10 @@ if __name__ == "__main__":
         plot_sep_points(join(dir_airfoil, "sep_point_tests", str(sep_point_test_res)), alpha_limits=(-30, 30))
 
     if do["BL"]:
-        validation_against = "measurement"
-        cases_defined_in = "cases.dat"
-        # validation_against = "polar"
-        # cases_defined_in = "cases_polar.dat"
+        # validation_against = "measurement"
+        # cases_defined_in = "cases.dat"
+        validation_against = "polar"
+        cases_defined_in = "cases_polar.dat"
         df_cases = pd.read_csv(join(dir_airfoil, "unsteady", cases_defined_in))
         for i, row in df_cases.iterrows():
             run_BeddoesLeishman(dir_airfoil, BL_scheme, validation_against, index_unsteady_data=i,
@@ -520,9 +521,9 @@ if __name__ == "__main__":
                                          period_res=period_res)
             
     if do["plot_BL_results_polar"]:
-        file_polar = join(dir_airfoil, "polars.dat")
+        file_polar = join(dir_airfoil, "polars_new.dat")
         plotter = BLValidationPlotter()
-        plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), join(dir_airfoil, "polars.dat"))
+        # plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), join(dir_airfoil, "polars.dat"))
         dir_validations = join(dir_airfoil, "validation", BL_scheme, "polar")
         df_cases = pd.read_csv(join(dir_airfoil, "unsteady", "cases_polar.dat"))
         for case_name in listdir(dir_validations):
