@@ -110,7 +110,7 @@ class PlotHandler(Helper):
     def save(self, save_as: str, close: bool=True):
         save_as = save_as.replace("\\", "/")
         self.create_dir(join(*save_as.split("/")[:-1]))
-        self.fig.savefig(save_as)
+        self.fig.savefig(save_as, bbox_inches="tight")
         if close:
             plt.close(self.fig)
         
@@ -264,6 +264,9 @@ class PlotHandler(Helper):
                 param_values[0][0]
             except (IndexError, TypeError):
                 param_values = [param_values]
+            except KeyError:
+                if type(param_values[0]) == pd.Series:
+                    param_values = [series.to_numpy() for series in param_values]
             lim_max = param_values[0][0]
             lim_min = param_values[0][0]
             for values in param_values:
@@ -479,15 +482,15 @@ class AnimationPreparation(PlotPreparation, DefaultPlot):
         self._chord = chord
         
     
-    def _prepare_force_animation(self, dfs: pd.DataFrame, until: float, equal_y: tuple[str]=None):
+    def _prepare_force_animation(self, dfs: pd.DataFrame, time_frame: tuple[float, float], equal_y: tuple[str]=None):
         fig, axs, handler = self._prepare_force_plot(equal_y)
         aoas = self._get_aoas(dfs["f_aero"])
         x_lims_from = {
             "profile": [dfs["general"]["pos_x"]-.4*self._chord, dfs["general"]["pos_x"]+1*self._chord],
-            "aoa": [0, until],
-            "aero": [0, until],
-            "damp": [0, until],
-            "stiff": [0, until],
+            "aoa": time_frame,
+            "aero": time_frame,
+            "damp": time_frame,
+            "stiff": time_frame,
         }
         y_lims_from = {
             "profile": [dfs["general"]["pos_y"]-.4*self._chord, dfs["general"]["pos_y"]+0.3*self._chord],
@@ -518,14 +521,14 @@ class AnimationPreparation(PlotPreparation, DefaultPlot):
         fig, axs = handler.update(legend=True)
         return fig, plt_lines, plt_arrows, aoas
     
-    def _prepare_energy_animation(self, dfs: pd.DataFrame, equal_y: tuple[str]=None):
+    def _prepare_energy_animation(self, dfs: pd.DataFrame, time_frame: tuple[float, float], equal_y: tuple[str]=None):
         fig, axs, handler = self._prepare_energy_plot(equal_y)
         x_lims_from = {
             "profile": [dfs["general"]["pos_x"]-.4, dfs["general"]["pos_x"]+1],
-            "total": dfs["general"]["time"],
-            "power": dfs["general"]["time"],
-            "kinetic": dfs["general"]["time"],
-            "potential": dfs["general"]["time"],
+            "total": time_frame,
+            "power": time_frame,
+            "kinetic": time_frame,
+            "potential": time_frame,
         }
         y_lims_from = {
             "profile": [dfs["general"]["pos_y"]-.4, dfs["general"]["pos_y"]+0.3],
@@ -557,22 +560,22 @@ class AnimationPreparation(PlotPreparation, DefaultPlot):
         fig, axs = handler.update(legend=True)
         return fig, plt_lines, plt_arrows
     
-    def _prepare_BL_animation(self, dfs: pd.DataFrame, equal_y: tuple[str]=None):
+    def _prepare_BL_animation(self, dfs: pd.DataFrame, time_frame: tuple[float, float], equal_y: tuple[str]=None):
         fig, axs, handler = self._prepare_BL_plot(["C_l", "C_d"], equal_y)
         coeffs = self._get_force_and_moment_coeffs(dfs["f_aero"])
         aoas = self._get_aoas(dfs["f_aero"])
         x_lims_from = {
             "profile": [dfs["general"]["pos_x"]-.4, dfs["general"]["pos_x"]+1],
-            "aoa": dfs["general"]["time"],
-            "C_l": dfs["general"]["time"],  #todo the C_l and C_d is going to fail if the BL scheme uses 
-            "C_d": dfs["general"]["time"],  #todo C_n and C_t instead
-            "C_m": dfs["general"]["time"],
+            "aoa": time_frame,
+            "C_l": time_frame,  
+            "C_d": time_frame,  
+            "C_m": time_frame,
         }
         y_lims_from = {
             "profile": [dfs["general"]["pos_y"]-.4, dfs["general"]["pos_y"]+0.3],
             "aoa": [np.rad2deg(dfs["f_aero"][col]) for col in aoas],
-            "C_l": [dfs["f_aero"][coeff] for coeff in coeffs["C_l"]],
-            "C_d": [dfs["f_aero"][coeff] for coeff in coeffs["C_d"]],
+            "C_l": [dfs["f_aero"][coeff] for coeff in coeffs["C_l"]],#todo the C_l and C_d is going to fail if the BL scheme uses 
+            "C_d": [dfs["f_aero"][coeff] for coeff in coeffs["C_d"]],#todo C_n and C_t instead
             "C_m": [dfs["f_aero"][coeff] for coeff in coeffs["C_m"]],
         }
         
