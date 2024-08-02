@@ -3,6 +3,7 @@ import os
 import shutil
 from os.path import join, isfile
 import pandas as pd
+import numpy as np
 
 
 class Helper():
@@ -112,4 +113,59 @@ def convert_plot_digitizer_dfs(root: str, exclude: str):
             data = df[col].apply(rep)
             df_converted[new_col] = data
         df_converted.to_csv(join(dir_save, file_name), index=False)
+
+
+def save_OSU_static_polar(ff_measurement: str, ff_save: str):
+    alpha = []
+    C_l = []
+    C_d = []
+    C_m = []
+    with open(ff_measurement) as f:
+        lines = f.readlines()
+        for line in lines:
+            split = line.split()
+            if len(split) > 0:
+                if split[0] == "Corrected":
+                    alpha.append(float(split[6].split("=")[1]))
+                    C_l.append(float(split[7].split("=")[1]))
+                    C_d.append(float(split[8].split("=")[1]))
+                    C_m.append(float(split[9].split("=")[1]))
+                elif split[0] ==  "Drag":
+                    C_d[-1] = float(split[-1])
+    alpha = np.asarray(alpha)
+    C_l = np.asarray(C_l)
+    C_d = np.asarray(C_d)
+    C_m = np.asarray(C_m)
+            
+    sort_ids = alpha.argsort()
+    alpha = alpha[sort_ids]
+    C_l = C_l[sort_ids]
+    C_d = C_d[sort_ids]
+    C_m = C_m[sort_ids]
+    pd.DataFrame({"alpha": alpha, "C_l": C_l, "C_d": C_d, "C_m": C_m}).to_csv(ff_save, index=None)
+
+
+def save_OSU_unsteady_polar(ff_measurement: str, ff_save: str):
+    data = []
+    with open(ff_measurement) as f:
+        lines = f.readlines()
+        found_beginning = False
+        for line in lines:
+            split = line.split()
+            if len(split) != 0:
+                if split[0] == "Sample":
+                    found_beginning = True
+                    continue
+                if not found_beginning:
+                    continue
+            elif found_beginning:
+                break
+            else:
+                continue
+            current_data = [float(val.split(",")[0]) for val in split[2:]]
+            data.append(current_data)
+    pd.DataFrame(data, columns=["alpha", "C_l", "C_d", "C_m"]).to_csv(ff_save, index=None)
+    
+    
+
 
