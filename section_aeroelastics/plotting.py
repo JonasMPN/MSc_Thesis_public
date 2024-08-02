@@ -539,11 +539,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                 except KeyError:
                     raise NotImplementedError(f"Default plot styles for '{col}' are missing.")
                 vals = data[ax][col] if ax not in apply_to_axs else apply[ax](data[ax][col])
-                # time = base_time if ax != "power" else base_time[:-1]
                 time = base_time
+                time = base_time if ax != "power" else base_time[:-1]
                 use_ids = time_ids if ax != "power" else time_ids[:-1]
-                vals = vals if time_frame is None else vals[use_ids]
-                
+                vals = vals if time_frame is None else vals[use_ids]                
                 axes[ax].plot(time[::skip_points], vals[::skip_points],
                               **self.plt_settings[map_column_to_settings(col)])
         return axes
@@ -1122,27 +1121,25 @@ class BLValidationPlotter(DefaultPlot, Rotations):
             ):
         dir_preparation = dir_preparation.replace("\\", "/")
         BL_scheme = dir_preparation.split("/")[-1]
-        scheme_id = {
-            "BL_chinese": 3,
-            "BL_openFAST_Cl_disc": 4,
-            "BL_openFAST_Cd": 5,
-            "BL_openFAST_Cl_disc_f_scaled": 4,
-        }[BL_scheme]
         
-        if scheme_id in [3]:
-            self._BL_preparation(dir_preparation, file_polar, scheme_id)
-        elif scheme_id in [4]:
+        if any([specifier in BL_scheme for specifier in ["IAG", "AEROHOR"]]):
+            self._BL_preparation(dir_preparation, file_polar, BL_scheme)
+        elif any([specifier in BL_scheme for specifier in ["IAG", "AEROHOR"]]):
             self._BL_openFAST_preparation(dir_preparation, file_polar, "data/FFA_WA3_221/general_openFAST")
 
     def _BL_preparation(
             self,
             dir_preparation: str,
             file_polar: str,
-            scheme_id: int
+            BL_scheme: str
             ):
+        df_polar = pd.read_csv(file_polar, delim_whitespace=True)
+        if "alpha_steady" not in df_polar:
+            df_polar = pd.read_csv(file_polar)
+
         f_data = {}
         for file in listdir(dir_preparation):
-            if "sep_points" not in file:
+            if "f_" not in file:
                 continue
             file_name = file.split(".")[0]
             f_data[f"{file_name[-1]}"] = pd.read_csv(join(dir_preparation, file))
@@ -1152,34 +1149,44 @@ class BLValidationPlotter(DefaultPlot, Rotations):
         fig, ax = plt.subplots()
         alpha = {}  # for plots of coeffs
         f = {}
+        x_lims = [-50, 50]
         for direction, df in f_data.items():
-            ax.plot(df["alpha"], df[f"f_{direction}"], **self.plt_settings[f"f_{direction}"])
-
-            alpha[direction] = np.deg2rad(df["alpha"].to_numpy()) # np needed for later project_2D().
+            alpha[direction] = df[f"alpha_{direction}"].to_numpy().flatten()
+            raoa = np.rad2deg(df[f"alpha_{direction}"])
+            x_lims = [max(x_lims[0], raoa.min()), min(x_lims[1], raoa.max())]
+            ax.plot(raoa, df[f"f_{direction}"], **self.plt_settings[f"f_{direction}"])
             f[direction] = df[f"f_{direction}"].to_numpy()
+
         handler = PlotHandler(fig, ax)
-        handler.update(x_labels=r"$\alpha$ (°)", y_labels="separation point (-)", legend=True, x_lims=[-50, 50], 
+        handler.update(x_labels=r"$\alpha$ (°)", y_labels="separation point (-)", legend=True, x_lims=x_lims, 
                        y_lims=[-0.1, 1.1])
         handler.save(join(dir_plots, "sep_points.pdf"))
 
-        with open(join(dir_preparation, "zero_data.json"), "r") as file:
-            zero_data = json.load(file)
-
-        coeffs = self._reconstruct_force_coeffs(scheme_id, np.deg2rad(zero_data["alpha_0_n"]),
-                                                np.rad2deg(zero_data["C_n_slope"]), alpha, f)
-        coeffs = np.c_[coeffs["C_t"], coeffs["C_n"]]
+        with open(join(dir_preparation, "aero_characteristics.json"), "r") as file:
+            aero_characteristics = json.load(file)
+            
+        coeffs = self._reconstruct_force_coeffs(BL_scheme, aero_characteristics, alpha, f)
+        if "C_t" in coeffs and "C_n" in coeffs:
+            coeffs = np.c_[coeffs["C_t"], coeffs["C_n"]]
+        elif "C_n" in coeffs:
+            C_l = interp1d(np.deg2rad(df_polar["alpha"]), df_polar["C_l"])
+            C_d = interp1d(np.deg2rad(df_polar["alpha"]), df_polar["C_d"])
+            C_t = np.sin(alpha["n"])*C_l(alpha["n"])-np.cos(alpha["n"])*C_d(alpha["n"])
+            coeffs = np.c_[C_t, coeffs["C_n"]]
         alpha = alpha["n"]
         rot_coeffs = self.rotate_2D(coeffs, alpha)
-        df_polar = pd.read_csv(file_polar, delim_whitespace=True)
 
         fig, ax = plt.subplots()
         ax.plot(df_polar["alpha"], df_polar["C_d"], **self.plt_settings["C_d_specify"])
         ax.plot(df_polar["alpha"], df_polar["C_l"], **self.plt_settings["C_l_specify"])
-        ax.plot(np.rad2deg(alpha), -rot_coeffs[:, 0]+df_polar["C_d"].min(), **self.plt_settings["C_d_rec"])
+        if "AEROHOR" in BL_scheme:
+            ax.plot(np.rad2deg(alpha), -rot_coeffs[:, 0]+df_polar["C_d"].min(), **self.plt_settings["C_d_rec"])
+        else:
+            ax.plot(np.rad2deg(alpha), -rot_coeffs[:, 0], **self.plt_settings["C_d_rec"])
         ax.plot(np.rad2deg(alpha), rot_coeffs[:, 1], **self.plt_settings["C_l_rec"])
+
         handler = PlotHandler(fig, ax)
-        handler.update(x_labels=r"$\alpha$ (°)", y_labels="Force coefficient (-)", x_lims=[-180, 180], y_lims=[-3, 3],
-                       legend=True)
+        handler.update(x_labels=r"$\alpha$ (°)", y_labels="Force coefficient (-)", legend=True)
         handler.save(join(dir_plots, "coeffs.pdf"))
 
     def _BL_openFAST_preparation(
@@ -1244,7 +1251,8 @@ class BLValidationPlotter(DefaultPlot, Rotations):
             fig, ax = plt.subplots()
             handler = PlotHandler(fig, ax)
             for tool, data in data_meas[coeff].items():
-                ax.plot(data[0], data[1], **self.plt_settings[coeff+f"_{tool}"])
+                # ax.plot(data[0], data[1], **self.plt_settings[coeff+f"_{tool}"])
+                ax.plot(data[0], data[1], **self.plt_settings[coeff])
             # if coef != "C_m":
                 # ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
                 #         **self.plt_settings["aerohor"])
@@ -1263,6 +1271,8 @@ class BLValidationPlotter(DefaultPlot, Rotations):
         alpha_buffer: float=3,
         ):
         df_polar = pd.read_csv(file_polar, delim_whitespace=True)
+        if "alpha_steady" not in df_polar:
+            df_polar = pd.read_csv(file_polar)
         # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
         df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
         
@@ -1271,6 +1281,7 @@ class BLValidationPlotter(DefaultPlot, Rotations):
         alpha_min = case_data["mean"]-case_data["amplitude"]-alpha_buffer
         alpha_max = case_data["mean"]+case_data["amplitude"]+alpha_buffer
         df_sliced = df_polar.loc[(df_polar["alpha"] >= alpha_min) & (df_polar["alpha"] <= alpha_max)]
+        
         for coef in ["C_d", "C_l", "C_m"]:
             fig, ax = plt.subplots()
             handler = PlotHandler(fig, ax)
@@ -1332,31 +1343,38 @@ class BLValidationPlotter(DefaultPlot, Rotations):
     
     @staticmethod
     def _reconstruct_force_coeffs(
-        scheme_id: int, 
-        alpha_0: float, 
-        C_slope: float, 
+        BL_scheme: str, 
+        aero_characteristics: dict,
         alpha: dict[str, np.ndarray], 
         f: dict[str, np.ndarray]):
-        coeffs = {f"C_{direction}": None for direction in ["n", "t"]}
-        if scheme_id==1 or scheme_id==3:
+        coeffs = {f"C_{direction}": None for direction in alpha}
+        if "AEROHOR" in BL_scheme:
+            C_slope = aero_characteristics["C_n_inv_max_slope"]
+            alpha_0 = aero_characteristics["C_n_inv_root"]
             alpha_n = alpha["n"]
             alpha_t = alpha["t"]
             f_n = f["n"]
             f_t = f["t"]
-        elif scheme_id==2:
+        elif "IAG" in BL_scheme:
+            C_slope = aero_characteristics["C_n_inv_max_slope"]
+            alpha_0 = aero_characteristics["C_n_visc_root"]
             alpha_n = alpha["n"]
             f_n = f["n"]
+        elif "openFAST" in BL_scheme:
+            alpha_0 = aero_characteristics["C_l_visc_root"]
+            C_slope = aero_characteristics["C_l_visc_max_slope"]
+            alpha_l = alpha["l"]
+            f_l = f["l"]
+        else:
+            raise NotImplementedError(f"Reconstructing force coefficients for BL scheme {BL_scheme}.")
 
-        match scheme_id:
-            case 1:
-                coeffs["C_n"] = C_slope*np.sin(alpha_n-alpha_0)*((1+np.sqrt(np.abs(f_n))*np.sign(f_n))/2)**2
-                coeffs["C_t"] = C_slope*np.sin(alpha_t-alpha_0)**2*np.sqrt(np.abs(f_t))*np.sign(f_t)
-            case 2:
-                coeffs["C_n"] = C_slope*(alpha_n-alpha_0)*((1+np.sqrt(np.abs(f_n))*np.sign(f_n))/2)**2
-                coeffs["C_t"] = C_slope*alpha_n**2*np.sqrt(np.abs(f_n))*np.sign(f_n)
-            case 3:
+        if "AEROHOR" in BL_scheme:
                 coeffs["C_n"] = C_slope*(alpha_n-alpha_0)*((1+np.sqrt(np.abs(f_n))*np.sign(f_n))/2)**2
                 coeffs["C_t"] = C_slope*(alpha_t-alpha_0)*np.tan(alpha_t)*np.sqrt(np.abs(f_t))*np.sign(f_t)
+        elif "IAG" in BL_scheme:
+                coeffs["C_n"] = C_slope*(alpha_n-alpha_0)*((1+np.sqrt(f_n))/2)**2
+        elif "openFAST" in BL_scheme:
+                coeffs["C_l"] = C_slope*(alpha_l-alpha_0)*((1+np.sqrt(f_l))/2)**2
         return coeffs
 
     
