@@ -396,7 +396,10 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_dus",
         "C_lus",
         "C_mus",
-
+        "C_nvisc",
+        "C_mf",
+        "C_mV",
+        "C_mC",
     ]
     _params = _prep_params + _sim_params
 
@@ -436,6 +439,10 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_dus": "black",
         "C_lus": "black",
         "C_mus": "black",
+        "C_nvisc": "black",
+        "C_mf": "black",
+        "C_mV": "black",
+        "C_mC": "black",
     }
     _colours = _prep_colours|_c_rest
 
@@ -478,6 +485,10 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_dus": r"$C_{d\text{,us}}$",
         "C_lus": r"$C_{l\text{,us}}$",
         "C_mus": r"$C_{m\text{,us}}$",
+        "C_nvisc": r"$C_{n\text{,visc}}$",
+        "C_mf": r"$C_{m\text{,f}}$",
+        "C_mV": r"$C_{m\text{,V}}$",
+        "C_mC": r"$C_{m\text{,C}}$",
     }
 
     _linestyles = {  # line style
