@@ -72,7 +72,9 @@ n_processes = 1  # for sim_type="forced"
 
 # aero_scheme = "qs"
 # aero_scheme = "BL_openFAST_Cl_disc"
-aero_scheme = "BL_openFAST_Cl_disc_f_scaled"
+# aero_scheme = "BL_openFAST_Cl_disc_f_scaled"
+aero_scheme = "BL_AEROHOR"
+# aero_scheme = "BL_first_order_IAG2"
 # aero_scheme = "BL_Staeblein"
 
 file_polar = "polars_new.dat"
@@ -126,7 +128,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         # definition has no influence on "run_forced_parallel". It only influences "free" and "free_parallel".
         # Otherwise, the NACA definition is used for "free" and "free_parallel" (not yet, do in future).
         dt = 0.005  # if dt<1e-5, the dt rounding in compress_oscillation() in calculation_utils.py needs to be adapted
-        t_end = 20
+        t_end = 3
         save_last = 400  # the last 'save_last' seconds of the simulation will be saved
         t = dt*np.arange(int(t_end/dt))  # set the time array for the simulation
         NACA_643_618 = ThreeDOFsAirfoil(t, verbose=False)
@@ -134,17 +136,21 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         chord = structure_def["chord"]
         if aero_scheme == "qs":
             NACA_643_618.set_aero_calc(root, file_polar=file_polar, scheme="quasi_steady", chord=chord, 
-                                    pitching_around=0.25, alpha_at=0.75)
-        elif aero_scheme == "BL_chinese":
-            NACA_643_618.set_aero_calc(root, file_polar=file_polar, scheme="BL_chinese", A1=0.3, A2=0.7, b1=0.14,
-                                    b2=0.53, pitching_around=0.25, alpha_at=0.75, chord=chord)
+                                       pitching_around=0.25, alpha_at=0.75)
+        elif aero_scheme == "BL_AEROHOR":
+            NACA_643_618.set_aero_calc(root, file_polar=file_polar, scheme="BL_AEROHOR", A1=0.3, A2=0.7, b1=0.14,
+                                       b2=0.53, pitching_around=0.25, alpha_at=0.75, chord=chord, alpha_critical=14.2)
+        elif aero_scheme == "BL_first_order_IAG2":
+            NACA_643_618.set_aero_calc(root, file_polar=file_polar, scheme="BL_first_order_IAG2", A1=0.3, A2=0.7, 
+                                       b1=0.7, b2=0.53, pitching_around=0.25, alpha_at=0.75, chord=chord, 
+                                       alpha_critical=14.2)
         elif aero_scheme == "BL_openFAST_Cl_disc":
-            NACA_643_618.set_aero_calc(root, file_polar=file_polar, scheme="BL_openFAST_Cl_disc", A1=0.165, A2=0.335, 
-                                    b1=0.0445, b2=0.3, pitching_around=0.25, alpha_at=0.75, chord=chord)
+            NACA_643_618.set_aero_calc(root, file_polar=file_polar, scheme="BL_openFAST_Cl_disc", A1=0.165, A2=0.335,
+                                       b1=0.0445, b2=0.3, pitching_around=0.25, alpha_at=0.75, chord=chord)
         elif aero_scheme == "BL_Staeblein":
             NACA_643_618.set_aero_calc(root, file_polar="polars_staeblein.dat", scheme="BL_Staeblein", A1=0.165, 
-                                    A2=0.335, b1=0.0445, b2=0.3, chord=chord, 
-                                    pitching_around=(0.25+staeblein.e_ac/chord), alpha_at=0.75)
+                                       A2=0.335, b1=0.0445, b2=0.3, chord=chord, 
+                                       pitching_around=(0.25+staeblein.e_ac/chord), alpha_at=0.75)
             structure_def["inertia"] = np.diag(structure_def["inertia"])
             structure_def["inertia"][1, 2] = staeblein.inertia[0]*staeblein.e_cg  # no minus because rot direction
             structure_def["inertia"][2, 1] = staeblein.inertia[0]*staeblein.e_cg  # is opposite to paper!
@@ -163,16 +169,21 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         if sim_type == "free":
             with open(join(case_dir, "section_data.json"), "w") as f:
                 json.dump(structure_def, f, indent=4)
-            alpha = 20
+            alpha = 1
             # alpha = None
+
             inflow = get_inflow(t, [(0, 0, 20, alpha)], init_velocity=0.1)
             approx_steady_x = True
             approx_steady_y = True
-            approx_steady_tors = True
+            approx_steady_tors = True if aero_scheme != "BL_AEROHOR" else False
             ffile_polar = join(root, file_polar)
+            if "AEROHOR" in aero_scheme or "IAG" in aero_scheme:
+                coeff_direction = "airfoil"
+            else:
+                coeff_direction = "inflow"
             init_data = NACA_643_618.approximate_steady_state(ffile_polar, inflow[0, :], structure_def["chord"],  
                                                               structure_def["stiffness"], x=approx_steady_x,  
-                                                              y=approx_steady_y, torsion=approx_steady_tors, alpha=alpha)
+                                                              y=approx_steady_y, torsion=approx_steady_tors, alpha=alpha, coeff_direction=coeff_direction)
             init_pos, f_init, inflow_angle = init_data
             NACA_643_618.aero[-1, :] = f_init  # needed if an HHT-alpha algorithm is used
             
@@ -183,7 +194,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             # initial conditions for position in [x, y, rotation in rad]
             # init_pos = np.zeros(3)
             # init_pos[0] += 5*np.cos(init_pos[2])
-            init_pos[0] *= 1.3
+            # init_pos[0] *= 1.3
             # init_pos[0] += 1.3
             # init_pos[1] += 5*np.sin(init_pos[2])
             # init_pos[1] += 4
@@ -348,4 +359,4 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         combined_LOC_amplitude(join(root, "simulation", sim_type, aero_scheme, case_name))
 
 if __name__ == "__main__":
-    main(**do)
+    main(**do) 
