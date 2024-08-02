@@ -71,8 +71,9 @@ def run_BeddoesLeishman(
         dir_profile: str, BL_scheme: str, validation_against: str, index_unsteady_data: int,
         k: float, inflow_speed: float, chord: float, amplitude: float, mean: float, 
         period_res: int=1000, file_polar: str="polars_new.dat",
-        # A1: float=0.3, A2: float=0.7, b1: float=0.14, b2: float=0.53
-        A1: float=0.165, A2: float=0.335, b1: float=0.0445, b2: float=0.3
+        # A1: float=0.3, A2: float=0.7, b1: float=0.7, b2: float=0.53 # IAG2
+        A1: float=0.3, A2: float=0.7, b1: float=0.14, b2: float=0.53 # BL
+        # A1: float=0.165, A2: float=0.335, b1: float=0.0445, b2: float=0.3 #HAWC2
         ):
     n_periods = 8
     overall_res = n_periods*period_res
@@ -92,7 +93,7 @@ def run_BeddoesLeishman(
     airfoil.dt = np.r_[t[1:]-t[:-1], t[1]]
     airfoil.density = 1
     
-    pitch_around = 0.5
+    pitch_around = 0.25
     alpha_at = 0.75
     airfoil.set_aero_calc(dir_polar=dir_airfoil, file_polar=file_polar, scheme=BL_scheme, A1=A1, A2=A2, b1=b1, 
                           b2=b2, pitching_around=pitch_around, alpha_at=alpha_at)
@@ -108,7 +109,7 @@ def run_BeddoesLeishman(
     airfoil.save(dir_res)
     f_f_aero = join(dir_res, "f_aero.dat")
     df = pd.read_csv(f_f_aero)
-    df["C_d"] = coeffs[:, 0]  
+    df["C_d"] = coeffs[:, 0]
     df["C_l"] = coeffs[:, 1]
     df["C_m"] = coeffs[:, 2]
     df.to_csv(f_f_aero, index=None)
@@ -467,7 +468,7 @@ if __name__ == "__main__":
     do = {
         "separation_point_calculation": False,
         "separation_point_plots": False,
-        "BL": False,
+        "BL": True,
         "plot_BL_results_meas": False,
         "plot_BL_results_polar": True,
         "calc_HHT_alpha_response": False,
@@ -480,11 +481,14 @@ if __name__ == "__main__":
         "HHT_alpha_rotation": False,
         "ef_vs_xy": False
     }
-    dir_airfoil = "data/FFA_WA3_221"
+    # dir_airfoil = "data/FFA_WA3_221"
+    dir_airfoil = "data/S801/"
+    file_polar = "polars/polars_G075.dat"
     dir_HHT_alpha_validation = "data/HHT_alpha_validation"
     # BL_scheme = "BL_openFAST_Cl_disc"
-    # BL_scheme = "BL_chinese"
-    BL_scheme = "BL_openFAST_Cl_disc_f_scaled"
+    BL_scheme = "BL_AEROHOR"
+    # BL_scheme = "BL_first_order_IAG2"
+    # BL_scheme = "BL_openFAST_Cl_disc_f_scaled"
     # BL_scheme = "BL_Staeblein"
     HHT_alpha_case = "test"
     sep_point_test_res = 202
@@ -505,7 +509,8 @@ if __name__ == "__main__":
         for i, row in df_cases.iterrows():
             run_BeddoesLeishman(dir_airfoil, BL_scheme, validation_against, index_unsteady_data=i,
                                 k=row["k"], inflow_speed=row["inflow_speed"], chord=row["chord"], 
-                                amplitude=row["amplitude"], mean=row["mean"], period_res=period_res)
+                                amplitude=row["amplitude"], mean=row["mean"], period_res=period_res,
+                                file_polar=file_polar)
 
     if do["plot_BL_results_meas"]:
         plotter = BLValidationPlotter()
@@ -521,9 +526,10 @@ if __name__ == "__main__":
                                          period_res=period_res)
             
     if do["plot_BL_results_polar"]:
-        file_polar = join(dir_airfoil, "polars_new.dat")
+        # file_polar = join(dir_airfoil, "polars_new.dat")
+        file_polar = join(dir_airfoil, "polars/polars_G075.dat")
         plotter = BLValidationPlotter()
-        # plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), join(dir_airfoil, "polars.dat"))
+        plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), file_polar)
         dir_validations = join(dir_airfoil, "validation", BL_scheme, "polar")
         df_cases = pd.read_csv(join(dir_airfoil, "unsteady", "cases_polar.dat"))
         for case_name in listdir(dir_validations):
