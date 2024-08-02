@@ -142,7 +142,7 @@ class SimulationSubRoutine(ABC):
                     raise AssertionError(f"Method '{fnc.__name__}()' of class '{type(self).__name__}' is/are missing a "
                                          f"return for scheme '{scheme}'.")        
 
-    def prepare_and_get_scheme(self, scheme: str, simulation_results: SimulationResults, call_from: str, **kwargs):
+    def get_scheme(self, scheme: str, simulation_results: SimulationResults, call_from: str, **kwargs):
         """Returns a function object that receives a ThreeDOFsAirfoil instance and returns a numpy array with
         [aero_force_x, aero_force_y, aero_force_moment]. "scheme" sets which kind of calculation for the aerodynamic
         forces is used. Implemented schemes are defined in _implemented_schemes.
@@ -155,7 +155,6 @@ class SimulationSubRoutine(ABC):
         :rtype: Callable
         """
         self._check_scheme(scheme)
-        self._pre_calculations(scheme)
 
         must_have = self._scheme_settings_must[scheme]
         can_have = self._scheme_settings_can[scheme]
@@ -205,9 +204,6 @@ class SimulationSubRoutine(ABC):
                   f"{not_supported} was/were additionally given. They have no influence on the execution.")
   
     def _skip(*args, **kwargs):
-        pass
-
-    def _pre_calculations(self, scheme: str):
         pass
 
     @abstractmethod
