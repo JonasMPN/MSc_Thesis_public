@@ -78,7 +78,6 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
             if alpha is not None:
                 tors_angle = -base_force*chord*C_m(alpha)/stiffness[2]
                 inflow_angle = alpha+tors_angle
-
             if torsion:
                 if alpha is None:
                     def residue_moment(torsion_angle: float):
@@ -131,7 +130,6 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
                 
             aoa = inflow_angle-tors_angle
             # aero forces in x and y
-            rot = self.passive_2D(-inflow_angle)
             f_aero_xy = (rot@np.c_[[base_force*C_d(aoa)], [base_force*C_l(aoa)]].T).flatten()
             f_aero_xy[0] = f_aero_xy[0] if x else 0 
             f_aero_xy[1] = f_aero_xy[1] if y else 0 
@@ -148,14 +146,14 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
         this function's implementation; they are denoted "must_haves". These are mandatory. The "can_haves" are 
         constants for which default values are set. They (the "can_haves") can, but do not have to, thus be set.
 
-        :param scheme: Existing schemes are "steady", "quasi_steady", and "BL_chinese". See details in class AeroForce., defaults to "quasi_steady"
+        :param scheme: Existing schemes are "steady", "quasi_steady", and "BL_first_order_IAG2". See details in class AeroForce., defaults to "quasi_steady"
         :type scheme: str, optional
         :raises NotImplementedError: If a scheme is wanted that is not implemented.
         """
         self._aero_scheme_settings = kwargs
         AF = AeroForce(dir_polar=dir_polar, file_polar=file_polar, verbose=self.verbose)
         self._added_sim_params[self._dfl_filenames["f_aero"]] = AF.get_additional_params(scheme)
-        self._aero_force = AF.prepare_and_get_scheme(scheme, self, "set_aero_calc", **kwargs)
+        self._aero_force = AF.get_scheme(scheme, self, "set_aero_calc", **kwargs)
         self._init_aero_force = AF.get_scheme_init_method(scheme)
 
     def set_struct_calc(self, scheme: str="linear", **kwargs):
@@ -171,7 +169,7 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
         self._struct_scheme_settings = kwargs
         SF = StructForce(verbose=self.verbose)
         self._added_sim_params[self._dfl_filenames["f_structural"]] = SF.get_additional_params(scheme)
-        self._struct_force = SF.prepare_and_get_scheme(scheme, self, "set_struct_calc", **kwargs)
+        self._struct_force = SF.get_scheme(scheme, self, "set_struct_calc", **kwargs)
         self._init_struct_force = SF.get_scheme_init_method(scheme)
 
     def set_time_integration(self, scheme: str="eE", **kwargs):
@@ -187,7 +185,7 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
         """
         self._time_integration_scheme_settings = kwargs
         TI = TimeIntegration(verbose=self.verbose)
-        self._time_integration = TI.prepare_and_get_scheme(scheme, self, "set_time_integration", **kwargs)
+        self._time_integration = TI.get_scheme(scheme, self, "set_time_integration", **kwargs)
         self._init_time_integration = TI.get_scheme_init_method(scheme)
 
     def simulate(
@@ -375,21 +373,29 @@ class AeroForce(SimulationSubRoutine, Rotations):
     """Class implementing differnt ways to calculate the lift, drag, and moment depending on the
     state of the system.
     """
-    _implemented_schemes = ["quasi_steady", "BL_chinese", "BL_openFAST_Cl_disc", "BL_Staeblein", 
-                            "BL_openFAST_Cl_disc_f_scaled"]
+    _implemented_schemes = ["quasi_steady", 
+                            "BL_first_order_IAG2",
+                            "BL_openFAST_Cl_disc",
+                            "BL_Staeblein", 
+                            "BL_openFAST_Cl_disc_f_scaled", 
+                            "BL_AEROHOR"]
 
     _scheme_settings_must = {
         "quasi_steady": [],
-        "BL_chinese": ["A1", "A2", "b1", "b2"],
+        "BL_first_order_IAG2": ["A1", "A2", "b1", "b2"],
         "BL_openFAST_Cl_disc": ["A1", "A2", "b1", "b2"],
         "BL_Staeblein": ["A1", "A2", "b1", "b2"],
         "BL_openFAST_Cl_disc_f_scaled": ["A1", "A2", "b1", "b2"],
+        "BL_AEROHOR": ["A1", "A2", "b1", "b2"],
     }
 
     _scheme_settings_can = {
         "quasi_steady": ["density", "chord", "pitching_around", "alpha_at"],
-        "BL_chinese": ["density", "chord", "a", "K_alpha", "T_p", "T_bl", "Cn_vortex_detach", "tau_vortex_pure_decay", 
-                       "T_v", "pitching_around", "alpha_at"],
+        "BL_first_order_IAG2": ["density", "chord", "a", "K_alpha", "T_p", "T_bl",
+                                "tau_vortex_pure_decay", "T_v", "pitching_around", "alpha_at", "K_fC", "K_v",
+                                "T_MU", "T_MD"],
+        "BL_AEROHOR": ["density", "chord", "a", "K_alpha", "T_p", "T_bl", "tau_vortex_pure_decay", 
+                       "T_v", "pitching_around", "alpha_at", "K_v"],
         "BL_openFAST_Cl_disc": ["density", "chord", "T_p", "T_f", "pitching_around", "alpha_at"],
         "BL_Staeblein": ["density", "chord", "T_p", "T_f", "pitching_around", "alpha_at"],
         "BL_openFAST_Cl_disc_f_scaled": ["density", "chord", "T_p", "T_f", "pitching_around", "alpha_at"],
@@ -397,41 +403,51 @@ class AeroForce(SimulationSubRoutine, Rotations):
 
     _sim_params_required = {
         "quasi_steady": ["alpha_qs"],
-        "BL_chinese": ["s", "alpha_qs", "X_lag", "Y_lag", "alpha_eff", "C_nc", "D_i", "C_ni", "C_npot", "C_tpot", 
-                       "D_p", "C_nsEq", "alpha_sEq", "f_t_Dp", "f_n_Dp", "D_bl_t", "D_bl_n", "f_t", "f_n", "C_nf", "C_tf", "tau_vortex", "C_nv_instant", "C_nv", "C_mqs", "C_mnc"],
+        "BL_first_order_IAG2": ["ds", "tau_vortex", "D_bl_n", "f_n_Dp", "f_n", "D_p", "D_i",
+                                "alpha_qs", "X_lag", "Y_lag", "alpha_eff", "alpha_sEq",
+                                "C_nc", "C_nf", "C_nsEq", "C_nv_instant", "C_nv", "C_ni", "C_npot", "C_nvisc",
+                                "C_tf",    
+                                "C_mf", "C_mV", "C_mC"],
+        "BL_AEROHOR": ["ds", "tau_vortex", "D_bl_n", "D_bl_t", "f_n_Dp", "f_n", "f_t_Dp", "f_t", "D_p", "D_i",
+                       "alpha_qs", "X_lag", "Y_lag", "alpha_eff", "alpha_sEq",
+                       "C_nc", "C_nf", "C_nsEq", "C_nv_instant", "C_nv", "C_ni", "C_npot", 
+                       "C_tf", "C_tpot"],
         "BL_openFAST_Cl_disc": ["alpha_qs", "alpha_eff", "x1", "x2", "x3", "x4", "C_lpot", "C_lc", "C_lnc", "C_ds", 
                                 "C_dc", "C_dsep", "C_ms", "C_mnc", "f_steady", "alpha_eq", "C_dus", "C_lus", "C_mus"],
         "BL_Staeblein": ["alpha_qs", "alpha_eff", "x1", "x2", "C_lc", "rel_inflow_speed", "rel_inflow_accel",
-                "C_liner", "C_lcent", "C_ds", "C_dind", "C_ms", "C_lift", "C_miner", "C_l"],
+                         "C_liner", "C_lcent", "C_ds", "C_dind", "C_ms", "C_lift", "C_miner", "C_l"],
         "BL_openFAST_Cl_disc_f_scaled": ["alpha_qs", "alpha_eff", "x1", "x2", "x3", "x4", "C_lpot", "C_lc", "C_lnc", 
                                       "C_ds", "C_dc", "C_dsep", "C_ms", "C_mnc", "f_steady", "T_u", "alpha_eq", 
                                       "C_dus", "C_lus", "C_mus", "rel_inflow_speed"],
     }
 
     # _copy_scheme = {
-    #     "BL_chinese": ["BL_openFAST_Cl_disc"]
+    #     "BL_first_order_IAG2": ["BL_openFAST_Cl_disc"]
     # }
     
     def __init__(self, dir_polar: str, file_polar: str="polars.dat", verbose: bool=True) -> None:
         """Initialises an instance.
 
         :param file_polar_data: Path to the file from the current working directory containing the polar data.
-        The file must contain the columns ["alpha", "C_d", "C_l", "C_m"].
+        The file must contain the columns ["alpha", "C_d", "C_l", "C_m"]. Alpha must be in degree!
         :type file_polar_data: str
         """
         SimulationSubRoutine.__init__(self, verbose=verbose)
 
         self.dir_polar = dir_polar
         self.df_polars = pd.read_csv(join(dir_polar, file_polar), delim_whitespace=True)
-        self._C_d_0 = self.df_polars["C_d"].min()
+        if "alpha" not in self.df_polars:
+            self.df_polars = pd.read_csv(join(dir_polar, file_polar))
         
-        self.C_d = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["C_d"])
-        self.C_l = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["C_l"])
-        self.C_m = interpolate.interp1d(self.df_polars["alpha"], self.df_polars["C_m"])
+        self._raoa_given = np.deg2rad(self.df_polars["alpha"].to_numpy().flatten())
+        self.C_d_polar = interpolate.interp1d(self._raoa_given, self.df_polars["C_d"])
+        self.C_l_polar = interpolate.interp1d(self._raoa_given, self.df_polars["C_l"])
+        self.C_m_polar = interpolate.interp1d(self._raoa_given, self.df_polars["C_m"])
+        self._C_fs = None
 
-        self._alpha_0L = None
-        self._alpha_0N = None
-        self._alpha_0D = self.df_polars["alpha"].iat[self.df_polars["C_d"].argmin()]
+        self._alpha_0l = None
+        self._alpha_0n_inv = None
+        self._alpha_0n_visc = None
 
         self._C_l_slope = None
         self._C_n_slope = None
@@ -440,335 +456,28 @@ class AeroForce(SimulationSubRoutine, Rotations):
         self._f_l = None
         self._f_t = None
 
-        self._C_fs = None
-
-        self._state_derivatives = None
-
     def get_scheme_method(self, scheme: str) -> Callable:
         scheme_methods = {
             "quasi_steady": self._quasi_steady,
-            "BL_chinese": self._BL_chinese,
+            "BL_first_order_IAG2": self._BL_first_order_IAG2,
             "BL_openFAST_Cl_disc": self._BL_openFAST_Cl_disc,
             "BL_Staeblein": self._BL_Staeblein,
             "BL_openFAST_Cl_disc_f_scaled": self._BL_openFAST_Cl_disc_f_scaled,
+            "BL_AEROHOR": self._BL_AEROHOR
         }
         return scheme_methods[scheme]
     
     def get_scheme_init_method(self, scheme: str) -> Callable:
         scheme_methods = {
             "quasi_steady": self._init_quasi_steady,
-            "BL_chinese": self._init_BL_chinese,
+            "BL_first_order_IAG2": self._init_BL_first_order_IAG2,
             "BL_openFAST_Cl_disc": self._init_BL_openFAST_Cl_disc,
             "BL_Staeblein": self._init_BL_Staeblein,
             "BL_openFAST_Cl_disc_f_scaled": self._init_BL_openFAST_f_scaled,
+            "BL_AEROHOR": self._init_BL_AEROHOR
         }
         return scheme_methods[scheme]
-
-    def _pre_calculations(
-            self, 
-            scheme: str,
-            resolution: int=1000, 
-            sep_points_scheme: int=None,
-            adjust_attached: bool=True,
-            adjust_separated: bool=True,
-            dir_save_to: str=None):
-        match scheme:
-            case "BL_chinese"|"BL_openFAST_Cl_disc"|"BL_openFAST_Cl_disc_f_scaled":
-                # self._C_l_slope = 7.15
-                # self._alpha_0L = 0
-                # self._C_fs = lambda x: 0
-                # self._f_l = lambda x: 1
-                # return
-
-                map_sep_point_scheme = {
-                    "BL_chinese": 3,
-                    "BL_openFAST_Cl_disc": 4,
-                    "BL_openFAST_Cd": 5,
-                    "BL_openFAST_Cl_disc_f_scaled": 4
-                }
-                if sep_points_scheme is None:
-                    sep_points_scheme = map_sep_point_scheme[scheme]
-                if dir_save_to is None:
-                    dir_BL_data = helper.create_dir(join(self.dir_polar, "preparation", scheme))[0]
-                else:
-                    dir_BL_data = helper.create_dir(dir_save_to)[0]
-                f_zero_data = join(dir_BL_data, "zero_data.json")
-                
-                alpha_given = self.df_polars["alpha"]
-                #todo: if resolution<=polar resolution around alpha_0, C_l_slope and alpha_0L are not correct anymore;
-                #todo if the polar is not resolved by equidistant points further care needs to be taken!
-                alpha_interp = np.linspace(alpha_given.min(), alpha_given.max(), resolution)
-                coefficients = np.c_[self.C_d(alpha_interp)-self._C_d_0, self.C_l(alpha_interp)]
-                if not isfile(f_zero_data):
-                    coeff_rot = self.project_2D(coefficients, -np.deg2rad(alpha_interp))
-                    coeffs = {"C_l": coefficients[:, 1], "C_n": coeff_rot[:, 1]}
-                    alphas = {"C_l": alpha_interp, "C_n": alpha_interp}
-                    # coeffs = {"C_l": self.C_l(self.df_polars["alpha"].to_numpy()), "C_n": coeff_rot[:, 1]}
-                    # alphas = {"C_l": self.df_polars["alpha"].to_numpy(), "C_n": alpha_interp}
-                    add = {"alpha_0_d": self._alpha_0D}
-                    zero_data = self._zero_forces(alpha=alphas, coeffs=coeffs, save_as=f_zero_data, add=add)
-                else:
-                    with open(f_zero_data, "r") as f:
-                        zero_data = json.load(f)
-
-                self._alpha_0L = np.deg2rad(zero_data["alpha_0_l"])
-                self._alpha_0N = np.deg2rad(zero_data["alpha_0_n"])
-                self._C_l_slope = np.rad2deg(zero_data["C_l_slope"])
-                self._C_n_slope = np.rad2deg(zero_data["C_n_slope"])
-
-                f_sep = join(dir_BL_data, f"sep_points_{sep_points_scheme}.dat")
-                #todo could write something like the below; currently doesn't work because the file name is
-                #todo apadated in _write_and_get_separation_points()
-                sep_data = self._write_and_get_separation_points(f_sep, alpha_interp, sep_points_scheme,
-                                                                 adjust_attached, adjust_separated)
-                # if not isfile(f_sep):
-                #     sep_data = self._write_and_get_separation_points(f_sep, alpha_interp, sep_points_scheme,
-                #                                                      adjust_attached, adjust_separated)
-                # else:
-                #     sep_data = pd.read_csv(f_sep)
-
-                if "f_n" in sep_data:
-                    self._f_n = interpolate.interp1d(sep_data["alpha_n"], sep_data["f_n"])
-                if "f_t" in sep_data:
-                    self._f_t = interpolate.interp1d(sep_data["alpha_t"], sep_data["f_t"])
-                if "f_l" in sep_data:
-                    self._f_l = interpolate.interp1d(sep_data["alpha_l"], sep_data["f_l"])
-
-                if "BL_openFAST" in scheme:  # calculate fully separated polar
-                    for param in sep_data.keys():
-                        direction = param[-1]
-                        save_as = join(dir_BL_data, f"C_fs_{sep_points_scheme}_{direction}.dat")
-                        # if isfile(save_as):
-                        #     df_fs = pd.read_csv(save_as)
-                        # else:
-                        if True:
-                            if "alpha" in param or param == "f_t":
-                                continue
-                            raoa = np.deg2rad(alpha_interp)
-                            if param == "f_n":
-                                coeff = self.C_l(alpha_interp)*np.cos(raoa)+(self.C_d(alpha_interp)-self._C_d_0)*np.sin(raoa)
-                                alpha_0 = self._alpha_0N
-                                slope = self._C_n_slope
-                            elif param == "f_l":
-                                coeff = self.C_l(alpha_interp)
-                                alpha_0 = self._alpha_0L
-                                slope = self._C_l_slope
-                            else:
-                                raise NotImplementedError(f"For param '{param}'")
-                            df_fs = self._C_l_fs(sep_data[f"alpha_{direction}"], sep_data[param], alpha_interp, coeff,
-                                                 alpha_0, slope, save_as)
-                        self._C_fs = interpolate.interp1d(df_fs["alpha"], df_fs["C_fs"]) 
-            case "BL_Staeblein":
-                # self._C_l_slope = np.rad2deg(0.12493650014276078)
-                # self._alpha_0L = np.deg2rad(-3.0253288636075264)
-                self._C_l_slope = 7.15
-                self._alpha_0L = 0
-
-    def _write_and_get_separation_points(
-            self,
-            save_as: str,
-            alpha_interp: np.ndarray,
-            scheme: int=0,
-            adjust_attached: bool=True,
-            adjust_separated: bool=True
-            ) -> pd.DataFrame:
-        """_summary_
-
-        :param alpha_0: _description_
-        :type alpha_0: float
-        :param save_as: _description_
-        :type save_as: str
-        :param res: _description_, defaults to 100
-        :type res: int, optional
-        :param scheme: 
-        1: X. Liu, uses f_t and f_n, uses sin() in both
-        2: Bangga, uses f_n to get C_n and C_t, uses linear a-a_0 
-        3: Chinese paper, uses f_t and f_n, f_n based on linear, f_t based on linear*tan
-        4: openFAST, HAWC2, f_l, based on linear, 
-        , defaults to 0
-        5: openFAST, HAWC2, f_n, based on linear
-        :type scheme: int, optional
-        :param limits: _description_, defaults to (None, None)
-        :type limits: tuple, optional
-        :return: _description_
-        :rtype: pd.DataFrame
-        """
-        data = {}
-        
-        match scheme:
-            case 1:
-                def sqrt_of_f_t(alpha):
-                    raoa = np.deg2rad(alpha)
-                    C_t = self.C_l(alpha)*np.sin(raoa)-(self.C_d(alpha)-self._C_d_0)*np.cos(raoa)
-                    return C_t/(self._C_n_slope*np.sin(raoa-self._alpha_0N)**2)
-                
-                def sqrt_of_f_n(alpha):
-                    raoa = np.deg2rad(alpha)
-                    C_n = self.C_l(alpha)*np.cos(raoa)+(self.C_d(alpha)-self._C_d_0)*np.sin(raoa)
-                    return 2*np.sqrt(C_n/(self._C_n_slope*np.sin(raoa-self._alpha_0N)))-1
-
-                data["alpha_t"], data["f_t"] = self._adjust_f(alpha_interp, sqrt_of_f_t, adjust_attached, False)
-                data["alpha_n"], data["f_n"] = self._adjust_f(alpha_interp, sqrt_of_f_n, adjust_attached, 
-                                                              adjust_separated)
-            case 2:
-                def sqrt_of_f_n(alpha):
-                    raoa = np.deg2rad(alpha)
-                    C_n = self.C_l(alpha)*np.cos(raoa)+(self.C_d(alpha)-self._C_d_0)*np.sin(raoa)
-                    return 2*np.sqrt(C_n/(self._C_n_slope*(raoa-self._alpha_0N)))-1
-                
-                data["alpha_n"], data["f_n"] = self._adjust_f(alpha_interp, sqrt_of_f_n, adjust_attached, 
-                                                              adjust_separated)
-            case 3:
-                def sqrt_of_f_t(alpha):
-                    raoa = np.deg2rad(alpha)
-                    C_t = self.C_l(alpha)*np.sin(raoa)-(self.C_d(alpha)-self._C_d_0)*np.cos(raoa)
-                    return C_t/(self._C_n_slope*(raoa-self._alpha_0N)*np.tan(raoa))
-                
-                def sqrt_of_f_n(alpha):
-                    raoa = np.deg2rad(alpha)
-                    C_n = self.C_l(alpha)*np.cos(raoa)+(self.C_d(alpha)-self._C_d_0)*np.sin(raoa)
-                    return 2*np.sqrt(C_n/(self._C_n_slope*(raoa-self._alpha_0N)))-1
-                
-                data["alpha_t"], data["f_t"] = self._adjust_f(alpha_interp, sqrt_of_f_t, adjust_attached, 
-                                                              False)
-                data["alpha_n"], data["f_n"] = self._adjust_f(alpha_interp, sqrt_of_f_n, adjust_attached, 
-                                                              adjust_separated)
-            case 4:
-                def sqrt_of_f(alpha):
-                    raoa = np.deg2rad(alpha)
-                    return 2*np.sqrt(self.C_l(alpha)/(self._C_l_slope*(raoa-self._alpha_0L)))-1
-                
-                data["alpha_l"], data["f_l"] = self._adjust_f(alpha_interp, sqrt_of_f, adjust_attached, 
-                                                              adjust_separated)
-            case 5:
-                def sqrt_of_f(alpha):
-                    raoa = np.deg2rad(alpha)
-                    C_n = self.C_l(alpha)*np.cos(raoa)+(self.C_d(alpha)-self._C_d_0)*np.sin(raoa)
-                    return 2*np.sqrt(C_n/(self._C_n_slope*(raoa-self._alpha_0N)))-1
-                data["alpha_n"], data["f_n"] = self._adjust_f(alpha_interp, sqrt_of_f, adjust_attached, 
-                                                              adjust_separated)
-        
-        for param, values in data.items():
-            if "alpha" in param or values is None:
-                continue
-            idx_last_dot = save_as.rfind(".")
-            file_name = save_as[:idx_last_dot]+f"_{param}"+save_as[idx_last_dot:]
-            direction = param[-1]
-            df = pd.DataFrame({f"alpha_{direction}": data[f"alpha_{direction}"], f"{param}": values})
-            df.to_csv(file_name, index=None)
-        return data
     
-    def _adjust_f(
-            self,
-            alpha: np.ndarray,
-            sqrt_of_f: Callable,
-            adjust_attached: bool=True,
-            adjust_separated: bool=True,
-            keep_sign: bool=True,
-            attached_region: tuple=(-60, 60)
-    ) -> pd.DataFrame:
-        def resiude_separated(alpha):
-            return sqrt_of_f(alpha)
-
-        def residue_attached(alpha):
-            return resiude_separated(alpha)-1
-        
-        def handle_sign(sqrt_f: np.ndarray):
-            return sqrt_f**2*np.sign(sqrt_f) if keep_sign else sqrt_f**2
-        
-        if not adjust_attached and not adjust_separated:
-            return alpha, handle_sign(sqrt_of_f(alpha))
-        
-        alpha_sub = alpha[np.logical_and(alpha>=attached_region[0], alpha<=attached_region[1])]
-        res_sep = resiude_separated(alpha_sub)
-        res_att = res_sep-1
-
-        if adjust_separated:
-            id_begin_attachement = (res_sep>0).argmax()
-            begin_attachement = brentq(resiude_separated, alpha_sub[id_begin_attachement-2], 
-                                    alpha_sub[id_begin_attachement])
-            id_end_attched = res_att.size-(res_sep[::-1]>0).argmax()-1
-            end_attachement = brentq(resiude_separated, alpha_sub[id_end_attched], alpha_sub[id_end_attched+2])
-            
-        if adjust_attached:
-            id_fully_attached = (res_att>0).argmax()
-            begin_fully_attached = brentq(residue_attached, alpha_sub[id_fully_attached-2], 
-                                          alpha_sub[id_fully_attached])
-
-            id_end_fully_attached = res_att.size-(res_att[::-1]>0).argmax()-1
-            end_fully_attached = brentq(residue_attached, alpha_sub[id_end_fully_attached], 
-                                        alpha_sub[id_end_fully_attached+2])
-
-        if adjust_separated and adjust_attached:
-            alpha_begins_attaching = alpha_sub[np.logical_and(alpha_sub>begin_attachement, 
-                                                              alpha_sub<begin_fully_attached)]
-            alpha_ends_attached = alpha_sub[np.logical_and(alpha_sub>end_fully_attached, alpha_sub<end_attachement)]
-            f = np.r_[0, 0, handle_sign(resiude_separated(alpha_begins_attaching)), 1, 1, 
-                      handle_sign(resiude_separated(alpha_ends_attached)), 0, 0]
-            alpha = np.r_[alpha.min(), begin_attachement, alpha_begins_attaching, begin_fully_attached, 
-                          end_fully_attached, alpha_ends_attached, end_attachement, alpha.max()]
-        elif adjust_attached:
-            alpha_below_fully_attached = alpha[alpha<begin_fully_attached]
-            alpha_above_fully_attached = alpha[alpha>end_fully_attached]
-            f = np.r_[handle_sign(resiude_separated(alpha_below_fully_attached)), 1, 1, 
-                      handle_sign(resiude_separated(alpha_above_fully_attached))]
-            alpha = np.r_[alpha_below_fully_attached, begin_fully_attached, end_fully_attached, 
-                          alpha_above_fully_attached]
-        elif adjust_separated:
-            alpha_attached = alpha[np.logical_and(alpha>begin_attachement, alpha<end_attachement)]
-            f = np.r_[0, handle_sign(resiude_separated(alpha_attached)), 0]
-            alpha = np.r_[alpha.min(), alpha_attached, alpha.max()]
-        return alpha, f
-    
-    @staticmethod
-    def _C_l_fs(
-            alpha_f: np.ndarray,
-            f: np.ndarray,
-            alpha_coeff: np.ndarray,
-            coeff: np.ndarray,
-            alpha_0: float,
-            slope: float,
-            save_as: str
-    ):
-        i_attach = (f>0).argmax()
-        alpha_begin_attachement = alpha_f[i_attach]
-        alpha = alpha_coeff[alpha_coeff<alpha_begin_attachement]
-        C_fs = coeff[alpha_coeff<alpha_begin_attachement]
-        
-        # at: attach process
-        i_fully_attached = (f==1).argmax()
-        alpha_at = alpha_f[i_attach:i_fully_attached]
-        f_at = f[i_attach:i_fully_attached]
-        coeff_at = coeff[np.logical_and(alpha_coeff>=alpha_at[0], alpha_coeff<=alpha_at[-1])]
-        alpha = np.r_[alpha, alpha_at]
-        C_fs = np.r_[C_fs, (coeff_at-np.deg2rad(slope)*(alpha_at-np.rad2deg(alpha_0))*f_at)/(1-f_at)]
-        
-        # fa: fully attached
-        i_end_fully_attached = (f[i_fully_attached:]<1).argmax()+i_fully_attached
-        alpha_begin_fully_attached = alpha_f[i_fully_attached]
-        alpha_end_fully_attached = alpha_f[i_end_fully_attached] 
-        ids_coeff_fully_attached = np.logical_and(alpha_coeff>=alpha_begin_fully_attached,
-                                                  alpha_coeff<=alpha_end_fully_attached)
-        alpha = np.r_[alpha, alpha_coeff[ids_coeff_fully_attached]]
-        C_fs = np.r_[C_fs, coeff[ids_coeff_fully_attached]/2]
-
-        # dt: detach process
-        i_end_attachement = (f[i_end_fully_attached:]==0).argmax()+i_end_fully_attached
-        alpha_dt = alpha_f[i_end_fully_attached+1:i_end_attachement]
-        f_dt = f[i_end_fully_attached+1:i_end_attachement]
-        coeff_dt = coeff[np.logical_and(alpha_coeff>=alpha_dt[0], alpha_coeff<=alpha_dt[-1])]
-        alpha = np.r_[alpha, alpha_dt]
-        C_fs = np.r_[C_fs, (coeff_dt-np.deg2rad(slope)*(alpha_dt-np.rad2deg(alpha_0))*f_dt)/(1-f_dt)]
-        
-        alpha_end_attachement = alpha_f[i_end_attachement]
-        ids_fully_separated = alpha_coeff>=alpha_end_attachement
-        alpha_fs = alpha_coeff[ids_fully_separated]
-        alpha = np.r_[alpha, alpha_fs]
-        C_fs = np.r_[C_fs, coeff[ids_fully_separated]]
-        df = pd.DataFrame({"alpha": alpha, "C_fs": C_fs})
-        df.to_csv(save_as, index=None)
-        return df
-
     def _quasi_steady(
             self,
             sim_res: ThreeDOFsAirfoil,
@@ -805,45 +514,216 @@ class AeroForce(SimulationSubRoutine, Rotations):
                             (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
         
         dynamic_pressure = density/2*rel_speed**2
-        alpha_qs_deg = np.rad2deg(sim_res.alpha_qs[i])
-        coefficients = np.asarray([self.C_d(alpha_qs_deg), self.C_l(alpha_qs_deg), -self.C_m(alpha_qs_deg)*chord])
+        coefficients = np.asarray([self.C_d_polar(sim_res.alpha_qs[i]), 
+                                   self.C_l_polar(sim_res.alpha_qs[i]), 
+                                   -self.C_m_polar(sim_res.alpha_qs[i])*chord])
         return dynamic_pressure*chord*rot@coefficients
     
     @staticmethod
     def _init_quasi_steady(sim_res:ThreeDOFsAirfoil, **kwargs):
         pass
 
-    def _BL_chinese(self, 
+    def _BL_first_order_IAG2(self, 
+            sim_res: ThreeDOFsAirfoil,
+            i: int,
+            A1: float, A2: float, b1: float, b2: float,
+            chord: float=1, density: float=1.225, pitching_around: float=0.25, alpha_at: float=0.75,
+            a: float=343, K_alpha: float=0.75, K_fC: float=0.1, K_v: float=0.2,
+            T_p: float=1.7, T_bl: float=3, T_v: float=6, T_MU: float=1.5, T_MD: float=1.5,
+            tau_vortex_pure_decay: float=6, alpha_critical=None):
+        sim_res.alpha_steady[i] = -sim_res.pos[i, 2]+sim_res.inflow_angle[i]
+        # --------- general calculations
+        qs_flow_angle, v_x, v_y = self._quasi_steady_flow_angle(sim_res.vel[i, :], sim_res.pos[i, :],
+                                                                sim_res.inflow[i, :], chord, pitching_around, alpha_at)
+        sim_res.alpha_qs[i] = -sim_res.pos[i, 2]+qs_flow_angle
+        rel_flow_vel = np.sqrt(v_x**2+v_y**2)
+        sim_res.ds[i] = 2*sim_res.dt[i]*rel_flow_vel/chord 
+
+        # --------- MODULE unsteady attached flow
+        d_alpha_qs = sim_res.alpha_qs[i]-sim_res.alpha_qs[i-1]
+        # d_alpha_qs = sim_res.alpha_steady[i]-sim_res.alpha_steady[i-1]
+        sim_res.X_lag[i] = sim_res.X_lag[i-1]*np.exp(-b1*sim_res.ds[i-1])+d_alpha_qs*A1*np.exp(-0.5*b1*sim_res.ds[i-1])
+        sim_res.Y_lag[i] = sim_res.Y_lag[i-1]*np.exp(-b2*sim_res.ds[i-1])+d_alpha_qs*A2*np.exp(-0.5*b2*sim_res.ds[i-1])
+        sim_res.alpha_eff[i] = sim_res.alpha_qs[i]-sim_res.X_lag[i]-sim_res.Y_lag[i]
+        if sim_res.f_n[i-1] != 0:
+            sim_res.C_nc[i] = self._C_n_slope*(sim_res.alpha_eff[i]-self._alpha_0n_inv) 
+        else:
+            sim_res.C_nc[i] = 4*self._C_n_visc(sim_res.alpha_eff[i])
+
+        # impulsive (non-circulatory) normal force coefficient
+        tmp = -a*sim_res.dt[i]/(K_alpha*chord)
+        tmp_2 = -(sim_res.vel[i, 2]-sim_res.vel[i-1, 2])  # minus here needed because of coordinate system
+        sim_res.D_i[i] = sim_res.D_i[i-1]*np.exp(tmp)+tmp_2*np.exp(0.5*tmp)
+        sim_res.C_ni[i] = 4*K_alpha*chord/rel_flow_vel*(-sim_res.vel[i, 2]-sim_res.D_i[i])  # -vel because of CS
+
+        # add circulatory and impulsive
+        sim_res.C_npot[i] = sim_res.C_nc[i]+sim_res.C_ni[i]
+
+        # --------- MODULE nonlinear trailing edge separation
+        #todo why does the impulsive part of the potential flow solution go into the lag term?
+        sim_res.D_p[i] = sim_res.D_p[i-1]*np.exp(-sim_res.ds[i-1]/T_p)
+        sim_res.D_p[i] += (sim_res.C_npot[i]-sim_res.C_npot[i-1])*np.exp(-0.5*sim_res.ds[i-1]/T_p)
+        sim_res.C_nsEq[i] = sim_res.C_npot[i]-sim_res.D_p[i]
+        sim_res.alpha_sEq[i] = sim_res.C_nsEq[i]/self._C_n_slope+self._alpha_0n_inv
+        
+        sim_res.f_n[i] = self._f_n(sim_res.alpha_sEq[i])
+        tmp_bl = -sim_res.ds[i-1]/T_bl
+        sim_res.D_bl_n[i] = sim_res.D_bl_n[i-1]*np.exp(tmp_bl)+(sim_res.f_n[i]-sim_res.f_n[i-1])*np.exp(0.5*tmp_bl)
+        sim_res.f_n_Dp[i] = sim_res.f_n[i]-sim_res.D_bl_n[i]
+
+        sim_res.C_nvisc[i] = self._C_n_slope*(sim_res.alpha_eff[i]-self._alpha_0n_visc)
+        sim_res.C_nvisc[i] *= ((1+np.sqrt(sim_res.f_n_Dp[i]))/2)**2
+        sim_res.C_nf[i] = sim_res.C_nvisc[i]+sim_res.C_ni[i]
+
+        sim_res.C_tf[i] = self._C_t_visc(sim_res.alpha_sEq[i])
+        
+        # --------- MODULE leading-edge vortex position
+        sim_res.tau_vortex[i] = sim_res.tau_vortex[i-1]
+        if sim_res.C_nsEq[i] > self._C_n_crit:
+            sim_res.tau_vortex[i] += 0.225*sim_res.ds[i-1]  # 0.225 because sim_res.ds[i-1]/2
+        elif sim_res.C_nsEq[i] < self._C_n_crit and d_alpha_qs >= 0:
+            sim_res.tau_vortex[i] *= np.exp(-sim_res.ds[i-1])
+        
+        # --------- MODULE leading-edge vortex lift
+        sim_res.C_nv_instant[i] = sim_res.C_nc[i]*(1-((1+np.sqrt(sim_res.f_n_Dp[i]))/2)**2)
+        sim_res.C_nv[i] = sim_res.C_nv[i-1]*np.exp(-sim_res.ds[i-1]/T_v)
+        if 0 < sim_res.tau_vortex[i] and sim_res.tau_vortex[i] < tau_vortex_pure_decay:
+            sim_res.C_nv[i] += (sim_res.C_nv_instant[i]-sim_res.C_nv_instant[i-1])*np.exp(-0.5*sim_res.ds[i-1]/T_v)
+        
+        # --------- MODULE moment coefficient
+        # viscous
+        sim_res.C_mf[i] = self.C_m_polar(sim_res.alpha_eff[i])
+
+        # vortex
+        C_Pv = K_v*(1-np.cos(np.pi*sim_res.tau_vortex[i]/tau_vortex_pure_decay))
+        sim_res.C_mV[i] = -C_Pv*sim_res.C_nv[i]  # vortex
+
+        # circulatory
+        C_Pf = K_fC*self._C_n_crit
+        if (sim_res.tau_vortex[i] < tau_vortex_pure_decay) and (d_alpha_qs >= 0):
+            tmp = -sim_res.ds[i-1]/T_MU  # T_MU!
+            tmp2 = C_Pf*(sim_res.C_nv_instant[i]-sim_res.C_nv_instant[i-1])
+            sim_res.C_mC[i] = sim_res.C_mC[i]*np.exp(tmp)-tmp2*np.exp(tmp/2)
+        elif d_alpha_qs < 0:
+            tmp = -sim_res.ds[i-1]/T_MD  # T_MD!
+            tmp2 = C_Pf*(sim_res.C_nv_instant[i]-sim_res.C_nv_instant[i-1])
+            sim_res.C_mC[i] = sim_res.C_mC[i]*np.exp(tmp)-tmp2*np.exp(tmp/2)
+        else:
+            sim_res.C_mC[i] = sim_res.C_mC[i-1]
+
+
+        # --------- Combining everything
+        coefficients = np.asarray([sim_res.C_tf[i], 
+                                   sim_res.C_nf[i]+sim_res.C_nv[i], 
+                                   sim_res.C_mf[i]+sim_res.C_mV[i]+sim_res.C_mC[i]])
+        # not -pos[i, 2] in the next line because for pos[i, 2]=0, the C_t axis is opposite to the
+        # x axis.
+        rot = self.passive_3D_planar(sim_res.pos[i, 2])  # since it's C_t and C_n
+        coeffs = rot@coefficients
+        coeffs[0] = -coeffs[0]
+        C_d_polar = self.C_d_polar(sim_res.alpha_eff[i])
+        if coeffs[0] < C_d_polar and sim_res.alpha_eff[i]<self._alpha_crit:
+            coeffs[0] = C_d_polar
+
+        # for return of [C_d, C_l, C_m]
+        # return coeffs
+
+        # for return of [f_x, f_y, mom]
+        dynamic_pressure = density/2*rel_flow_vel**2
+        forces = dynamic_pressure*np.asarray([chord, chord, -chord**2])*coefficients
+        return forces  # for [f_x, f_y, mom]
+
+    def _init_BL_first_order_IAG2(
+            self,
+            sim_res: SimulationResults,
+            chord: float=1,
+            alpha_critical: float=15.1,
+            pitching_around: float=0.25,
+            alpha_at: float=0.75,
+            resolution: int=1000,
+            **kwargs
+            ):
+        # define C_n, C_t, alpha_0n_inv, alpha_0n_visc, C_n_slope
+        alpha_interp = np.linspace(self._raoa_given.min(), self._raoa_given.max(), resolution)
+        C_d = self.C_d_polar(alpha_interp)
+        C_l = self.C_l_polar(alpha_interp)
+
+        def C_n_visc(alpha):
+            return np.cos(alpha)*self.C_l_polar(alpha)+np.sin(alpha)*self.C_d_polar(alpha)  
+        self._C_n_visc = C_n_visc
+
+        def C_t_visc(alpha):
+            return np.sin(alpha)*self.C_l_polar(alpha)-np.cos(alpha)*self.C_d_polar(alpha) 
+        self._C_t_visc = C_t_visc 
+
+        C_n_inv = np.cos(alpha_interp)*C_l+np.sin(alpha_interp)*(C_d-C_d.min())      
+        dir_BL_data = helper.create_dir(join(self.dir_polar, "preparation", "BL_first_order_IAG2"))[0]
+        ff_aero_characteristics = join(dir_BL_data, "aero_characteristics.json")
+        # if not isfile(ff_aero_characteristics):
+        if True:
+            self._save_aero_characteristics(ff_aero_characteristics, alpha_interp,
+                                            {"C_n_visc": self._C_n_visc(alpha_interp), "C_n_inv": C_n_inv}, 
+                                            {"C_d": C_d})
+        
+        with open(ff_aero_characteristics, "r") as ff_aero:
+            aero_characteristics = json.load(ff_aero)
+
+        self._alpha_0n_visc = aero_characteristics["C_n_visc_root"]
+        self._alpha_0n_inv = aero_characteristics["C_n_inv_root"]
+        self._C_n_slope = aero_characteristics["C_n_inv_max_slope"]
+        self._C_d0 = aero_characteristics["C_d_min"]
+        self._alpha_crit = np.deg2rad(alpha_critical)
+        self._C_n_crit = self._C_n_slope*(np.deg2rad(alpha_critical)-self._alpha_0n_inv)
+
+        # define f_n
+        def sqrt_of_f_n(alpha):
+            return 2*np.sqrt(self._C_n_visc(alpha)/(self._C_n_slope*(alpha-self._alpha_0n_visc)))-1
+        
+        alpha_f_n, f_n = self._adjust_f(alpha_interp, sqrt_of_f_n, True, True)
+        self._f_n = interpolate.interp1d(alpha_f_n, f_n)
+        pd.DataFrame({"alpha_n": alpha_f_n, "f_n": f_n}).to_csv(join(dir_BL_data, "f_n.dat"), index=None)
+
+        # now initialise more parameters
+        qs_flow_angle, v_x, v_y = self._quasi_steady_flow_angle(sim_res.vel[0, :], sim_res.pos[0, :],
+                                                                sim_res.inflow[0, :], chord, pitching_around, alpha_at)
+        sim_res.alpha_qs[-1] = -sim_res.pos[0, 2]+qs_flow_angle
+        sim_res.C_npot[-1] = self._C_n_slope*(sim_res.alpha_qs[-1]-self._alpha_0n_inv)
+        sim_res.X_lag[-1] = 0
+        sim_res.Y_lag[-1] = 0
+        sim_res.f_n[-1] = self._f_n(sim_res.alpha_qs[-1])
+        
+        if sim_res.f_n[-1] != 0:
+            sim_res.C_nc[-1] = self._C_n_slope*(sim_res.alpha_qs[-1]-self._alpha_0n_inv) 
+        else:
+            sim_res.C_nc[-1] = 4*self._C_n_visc(sim_res.alpha_qs[-1])
+                 
+    def _BL_AEROHOR(self, 
             sim_res: ThreeDOFsAirfoil,
             i: int,
             A1: float, A2: float, b1: float, b2: float,
             chord: float=1, density: float=1.225, pitching_around: float=0.25, alpha_at: float=0.75,
             a: float=343, K_alpha: float=0.75,
-            T_p: float=1.5, T_bl: float=5,
-            Cn_vortex_detach: float=1.0093, tau_vortex_pure_decay: float=11, T_v: float=5):
+            T_p: float=1.7, T_bl: float=3, T_v: float=6, tau_vortex_pure_decay: float=6, alpha_critical=None):
         sim_res.alpha_steady[i] = -sim_res.pos[i, 2]+sim_res.inflow_angle[i]
+        # --------- general calculations
+        qs_flow_angle, v_x, v_y = self._quasi_steady_flow_angle(sim_res.vel[i, :], sim_res.pos[i, :],
+                                                                sim_res.inflow[i, :], chord, pitching_around, alpha_at)
+        sim_res.alpha_qs[i] = -sim_res.pos[i, 2]+qs_flow_angle
+        rel_flow_vel = np.sqrt(v_x**2+v_y**2)
+        sim_res.ds[i] = 2*sim_res.dt[i]*rel_flow_vel/chord 
 
         # --------- MODULE unsteady attached flow
-        flow_vel_last = np.sqrt(sim_res.inflow[i-1, :]@sim_res.inflow[i-1, :].T)
-        ds_last = 2*sim_res.dt[i-1]*flow_vel_last/chord  #todo this should probably be the total velocity
-        sim_res.s[i] = sim_res.s[i-1]+ds_last
-        flow_vel = np.sqrt(sim_res.inflow[i, :]@sim_res.inflow[i, :].T)
-
-        qs_flow_angle, _, _ = self._quasi_steady_flow_angle(sim_res.vel[i, :], sim_res.pos[i, :], sim_res.inflow[i, :], 
-                                                            chord, pitching_around, alpha_at)
-        sim_res.alpha_qs[i] = -sim_res.pos[i, 2]+qs_flow_angle
         d_alpha_qs = sim_res.alpha_qs[i]-sim_res.alpha_qs[i-1]
-        sim_res.X_lag[i] = sim_res.X_lag[i-1]*np.exp(-b1*ds_last)+d_alpha_qs*A1*np.exp(-0.5*b1*ds_last)
-        sim_res.Y_lag[i] = sim_res.Y_lag[i-1]*np.exp(-b2*ds_last)+d_alpha_qs*A2*np.exp(-0.5*b2*ds_last)
+        sim_res.X_lag[i] = sim_res.X_lag[i-1]*np.exp(-b1*sim_res.ds[i-1])+d_alpha_qs*A1*np.exp(-0.5*b1*sim_res.ds[i-1])
+        sim_res.Y_lag[i] = sim_res.Y_lag[i-1]*np.exp(-b2*sim_res.ds[i-1])+d_alpha_qs*A2*np.exp(-0.5*b2*sim_res.ds[i-1])
         sim_res.alpha_eff[i] = sim_res.alpha_qs[i]-sim_res.X_lag[i]-sim_res.Y_lag[i]
-        sim_res.C_nc[i] = self._C_n_slope*(sim_res.alpha_eff[i]-self._alpha_0N)  #todo check that this sin() is
-        #todo also correct for high aoa in potential flow
+        sim_res.C_nc[i] = self._C_n_slope*(sim_res.alpha_eff[i]-self._alpha_0n_inv)
 
         # impulsive (non-circulatory) normal force coefficient
         tmp = -a*sim_res.dt[i]/(K_alpha*chord)
         tmp_2 = -(sim_res.vel[i, 2]-sim_res.vel[i-1, 2])
         sim_res.D_i[i] = sim_res.D_i[i-1]*np.exp(tmp)+tmp_2*np.exp(0.5*tmp)
-        sim_res.C_ni[i] = 4*K_alpha*chord/flow_vel*(-sim_res.vel[i, 2]-sim_res.D_i[i])
+        sim_res.C_ni[i] = 4*K_alpha*chord/rel_flow_vel*(-sim_res.vel[i, 2]-sim_res.D_i[i])
 
         # add circulatory and impulsive
         sim_res.C_npot[i] = sim_res.C_nc[i]+sim_res.C_ni[i]
@@ -851,77 +731,115 @@ class AeroForce(SimulationSubRoutine, Rotations):
 
         # --------- MODULE nonlinear trailing edge separation
         #todo why does the impulsive part of the potential flow solution go into the lag term?
-        sim_res.D_p[i] = sim_res.D_p[i-1]*np.exp(-ds_last/T_p)
-        sim_res.D_p[i] += (sim_res.C_npot[i]-sim_res.C_npot[i-1])*np.exp(-0.5*ds_last/T_p)
-        if i == 0: 
-            sim_res.D_p[i] = 0
+        sim_res.D_p[i] = sim_res.D_p[i-1]*np.exp(-sim_res.ds[i-1]/T_p)
+        sim_res.D_p[i] += (sim_res.C_npot[i]-sim_res.C_npot[i-1])*np.exp(-0.5*sim_res.ds[i-1]/T_p)
         sim_res.C_nsEq[i] = sim_res.C_npot[i]-sim_res.D_p[i]
-        sim_res.alpha_sEq[i] = sim_res.C_nsEq[i]/self._C_n_slope+self._alpha_0N
-        
-        # sim_res.f_t_Dp[i] = self._f_t(np.rad2deg(sim_res.alpha_sEq[i]))
-        aoa = np.rad2deg(sim_res.alpha_sEq[i])
-        coefficients = np.c_[self.C_d(aoa)-self._C_d_0, self.C_l(aoa)]
+        sim_res.alpha_sEq[i] = sim_res.C_nsEq[i]/self._C_n_slope+self._alpha_0n_inv
 
-        rot = self.passive_2D(-sim_res.alpha_sEq[i])
-        coeff_rot = rot@coefficients.T
-        C_t, C_n = -coeff_rot[0], coeff_rot[1]
+        sim_res.f_t[i] = self._f_t(sim_res.alpha_sEq[i])
+        sim_res.f_n[i] = self._f_n(sim_res.alpha_sEq[i])
 
-        sim_res.f_t_Dp[i] = self._f_t(np.rad2deg(sim_res.alpha_sEq[i]))
-        sim_res.f_n_Dp[i] = self._f_n(np.rad2deg(sim_res.alpha_sEq[i]))
+        tmp_bl = -sim_res.ds[i-1]/T_bl
+        sim_res.D_bl_t[i] = sim_res.D_bl_t[i-1]*np.exp(tmp_bl)+(sim_res.f_t[i]-sim_res.f_t[i-1])*np.exp(0.5*tmp_bl)
+        sim_res.D_bl_n[i] = sim_res.D_bl_n[i-1]*np.exp(tmp_bl)+(sim_res.f_n[i]-sim_res.f_n[i-1])*np.exp(0.5*tmp_bl)
+                
+        sim_res.f_t_Dp[i] = sim_res.f_t[i]-sim_res.D_bl_t[i]
+        sim_res.f_n_Dp[i] = sim_res.f_n[i]-sim_res.D_bl_n[i]
 
-        sim_res.D_bl_t[i] = sim_res.D_bl_t[i-1]*np.exp(-ds_last/T_bl)+\
-            (sim_res.f_t_Dp[i]-sim_res.f_t_Dp[i-1])*np.exp(-0.5*ds_last/T_bl)
-        sim_res.D_bl_n[i] = sim_res.D_bl_n[i-1]*np.exp(-ds_last/T_bl)+\
-            (sim_res.f_n_Dp[i]-sim_res.f_n_Dp[i-1])*np.exp(-0.5*ds_last/T_bl)
-        if i == 0:
-            sim_res.D_bl_t[i] = 0
-            sim_res.D_bl_n[i] = 0
-        
-        sim_res.f_t[i] = sim_res.f_t_Dp[i]-sim_res.D_bl_t[i]
-        sim_res.f_n[i] = sim_res.f_n_Dp[i]-sim_res.D_bl_n[i]
-
-        C_nqs = sim_res.C_nc[i]*((1+np.sign(sim_res.f_n[i])*np.sqrt(np.abs(sim_res.f_n[i])))/2)**2
+        sim_res.C_tf[i] = sim_res.C_tpot[i]*np.sign(sim_res.f_t_Dp[i])*np.sqrt(np.abs(sim_res.f_t_Dp[i]))
+        C_nqs = sim_res.C_nc[i]*((1+np.sign(sim_res.f_n_Dp[i])*np.sqrt(np.abs(sim_res.f_n_Dp[i])))/2)**2
         sim_res.C_nf[i] = C_nqs+sim_res.C_ni[i]
-        sim_res.C_tf[i] = self._C_n_slope*(sim_res.alpha_eff[i]-self._alpha_0N)*np.tan(sim_res.alpha_eff[i])*\
-            np.sign(sim_res.f_t[i])*np.sqrt(np.abs(sim_res.f_t[i]))
         
         # --------- MODULE leading-edge vortex position
-        if sim_res.C_nsEq[i] >= Cn_vortex_detach or d_alpha_qs < 0:
-            sim_res.tau_vortex[i] = sim_res.tau_vortex[i-1]+0.45*ds_last
+        if sim_res.C_nsEq[i] >= self._C_n_crit:
+            sim_res.tau_vortex[i] = sim_res.tau_vortex[i-1]+0.225*sim_res.ds[i-1]
         else:
-            sim_res.tau_vortex[i] = 0
-
-        # --------- MODULE leading-edge vortex lift
-        sim_res.C_nv_instant[i] = sim_res.C_nc[i]*(1-((1+np.sign(sim_res.f_n[i])*np.sqrt(np.abs(sim_res.f_n[i])))/2)**2)
-        sim_res.C_nv[i] = sim_res.C_nv[i-1]*np.exp(-ds_last/T_v)
-        if sim_res.tau_vortex[i] < tau_vortex_pure_decay:
-            if i != 0:
-                sim_res.C_nv[i] += (sim_res.C_nv_instant[i]-sim_res.C_nv_instant[i-1])*np.exp(-0.5*ds_last/T_v)
+            if d_alpha_qs >= 0:
+                sim_res.tau_vortex[i] = 0
+            else:
+                sim_res.tau_vortex[i] = sim_res.tau_vortex[i-1]
         
-
-        # --------- MODULE moment coefficient
-        rel_speed = np.sqrt((sim_res.inflow[i, 0]-sim_res.vel[i, 0])**2+
-                            (sim_res.inflow[i, 1]-sim_res.vel[i, 1])**2)
-        sim_res.C_mqs[i] = self.C_m(np.rad2deg(sim_res.alpha_eff[i]))
-        sim_res.C_mnc[i] = -0.5*np.pi*chord*(alpha_at-pitching_around)/rel_speed*(-sim_res.vel[i, 2])
-        C_m = sim_res.C_mqs[i]+sim_res.C_mnc[i]
+        # --------- MODULE leading-edge vortex lift
+        sim_res.C_nv_instant[i] = sim_res.C_nc[i]*(1-((1+np.sqrt(sim_res.f_n_Dp[i]))/2)**2)
+        sim_res.C_nv[i] = sim_res.C_nv[i-1]*np.exp(-sim_res.ds[i-1]/T_v)
+        if 0 < sim_res.tau_vortex[i] and sim_res.tau_vortex[i] < tau_vortex_pure_decay:
+            sim_res.C_nv[i] += (sim_res.C_nv_instant[i]-sim_res.C_nv_instant[i-1])*np.exp(-0.5*sim_res.ds[i-1]/T_v)
 
         # --------- Combining everything
-        # for return of [C_d, C_l, C_m]
-        coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], C_m])
-        rot = self.passive_3D_planar(sim_res.pos[i, 2]+sim_res.inflow_angle[i])
-        coeffs = rot@coefficients-np.asarray([self._C_d_0, 0, 0])
-        coeffs[0] = -coeffs[0] 
-        return coeffs
+        coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], 0])
+        # not -pos[i, 2] in the next line because for pos[i, 2]=0, the C_t axis is opposite to the
+        # x axis.
+        rot = self.passive_3D_planar(sim_res.pos[i, 2])
+        coeffs = rot@coefficients
+        coeffs[0] = -coeffs[0]+self._C_d0  # C_t is facing forwards, C_d backwards
+        print(coeffs[0], sim_res.alpha_eff[0])
+        exit()
 
-        # for return of [f_x, f_y, mom]
-        # C_t and C_d point in opposite directions!
-        # coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], -C_m*chord])
-        # rot = self.passive_3D_planar(-sim_res.pos[i, 2]) 
-        # dynamic_pressure = density/2*rel_speed**2
-        # forces = dynamic_pressure*chord*rot@coefficients  # for [-f_x, f_y, mom]
-        # forces[0] *= -1
-        # return forces  # for [f_x, f_y, mom]
+        # for return of [C_d, C_l, C_m] uncomment next line
+        # return coeffs
+
+        # for return of [f_x, f_y, mom] uncommmet next lines
+        dynamic_pressure = density/2*rel_flow_vel**2
+        forces = dynamic_pressure*np.asarray([chord, chord, -chord**2])*coefficients 
+        return forces  # for [f_x, f_y, mom]
+
+    def _init_BL_AEROHOR(
+            self,
+            sim_res: SimulationResults,
+            alpha_critical: float=14.1,
+            chord: float=1,
+            pitching_around: float=0.25,
+            alpha_at: float=0.75,
+            resolution: int=101,
+            **kwargs):
+        # define C_n, C_t, alpha_0n_inv, alpha_0n_visc, C_n_slope
+        alpha_interp = np.linspace(self._raoa_given.min(), self._raoa_given.max(), resolution)
+        C_d = self.C_d_polar(alpha_interp)
+        C_d0 = np.min(C_d)
+        C_l = self.C_l_polar(alpha_interp)
+        C_n_inv = np.cos(alpha_interp)*C_l+np.sin(alpha_interp)*(C_d-C_d0)
+        
+        dir_BL_data = helper.create_dir(join(self.dir_polar, "preparation", "BL_AEROHOR"))[0]
+        ff_aero_characteristics = join(dir_BL_data, "aero_characteristics.json")
+        if not isfile(ff_aero_characteristics):
+            self._save_aero_characteristics(ff_aero_characteristics, alpha_interp, {"C_n_inv": C_n_inv})
+        
+        with open(ff_aero_characteristics, "r") as ff_aero:
+            aero_characteristics = json.load(ff_aero)
+
+        self._alpha_0n_inv = aero_characteristics["C_n_inv_root"]
+        self._C_n_slope = aero_characteristics["C_n_inv_max_slope"]
+        self._C_d0 = C_d0
+        self._C_n_crit = self._C_n_slope*(np.deg2rad(alpha_critical)-self._alpha_0n_inv)
+
+        # define f_n
+        def sqrt_of_f_n(alpha):
+            C_n_inv = np.cos(alpha_interp)*C_l+np.sin(alpha_interp)*(C_d-C_d0)
+            return 2*np.sqrt(C_n_inv/(self._C_n_slope*(alpha-self._alpha_0n_inv)))-1
+        
+        alpha_f_n, f_n = self._adjust_f(alpha_interp, sqrt_of_f_n, adjust_attached=False, adjust_separated=False)
+        self._f_n = interpolate.interp1d(alpha_f_n, f_n)
+        pd.DataFrame({"alpha_n": alpha_f_n, "f_n": f_n}).to_csv(join(dir_BL_data, "f_n.dat"), index=None)
+
+        def sqrt_of_f_t(alpha):
+            C_t_inv = np.sin(alpha_interp)*C_l-np.cos(alpha_interp)*(C_d-C_d0)
+            return C_t_inv/(self._C_n_slope*(alpha-self._alpha_0n_inv)*np.tan(alpha))
+        
+        alpha_f_t, f_t = self._adjust_f(alpha_interp, sqrt_of_f_t, adjust_attached=False, adjust_separated=False)
+        f_t[f_t>1] = 1
+        f_t[f_t< -1] = -1
+        self._f_t = interpolate.interp1d(alpha_f_t, f_t)
+        pd.DataFrame({"alpha_t": alpha_f_t, "f_t": f_t}).to_csv(join(dir_BL_data, "f_t.dat"), index=None)
+
+        # init BL params
+        sim_res.X_lag[-1] = 0
+        sim_res.Y_lag[-1] = 0
+        qs_flow_angle, _, _ = self._quasi_steady_flow_angle(sim_res.vel[0, :], sim_res.pos[0, :],
+                                                                sim_res.inflow[0, :], chord, pitching_around, alpha_at)
+        sim_res.alpha_qs[-1] = -sim_res.pos[0, 2]+qs_flow_angle
+        sim_res.C_npot[-1] = self._C_n_slope*(sim_res.alpha_qs[-1]-self._alpha_0n_inv) 
+        sim_res.f_t[-1] = self._f_t(sim_res.alpha_qs[-1])
+        sim_res.f_n[-1] = self._f_n(sim_res.alpha_qs[-1])
 
     def _BL_openFAST_Cl_disc(
             self, 
@@ -932,9 +850,64 @@ class AeroForce(SimulationSubRoutine, Rotations):
             T_p: float=1.5, T_f: float=6):
         lcs = {param: value for param, value in locals().items() if param != "self"}
         lcs["C_slope"] = self._C_l_slope
-        lcs["alpha_0"] = self._alpha_0L
+        lcs["alpha_0"] = self._alpha_0l
         return self._BL_openFAST_disc(**lcs)
     
+    def _init_BL_openFAST_Cl_disc(
+            self,
+            sim_res: SimulationResults,
+            chord: float=1,
+            pitching_around: float=0.25,
+            alpha_at: float=0.75,
+            resolution: int=1000,
+            **kwargs
+            ):
+        # define alpha_0l_inv, C_l_slope   
+        dir_BL_data = helper.create_dir(join(self.dir_polar, "preparation", "BL_first_order_IAG2"))[0]
+        ff_aero_characteristics = join(dir_BL_data, "aero_characteristics.json")
+        if not isfile(ff_aero_characteristics):
+            self._save_aero_characteristics(ff_aero_characteristics, self._raoa_given,
+                                            {"C_l_visc": self.C_l_polar(self._raoa_given)})
+        
+        with open(ff_aero_characteristics, "r") as ff_aero:
+            aero_characteristics = json.load(ff_aero)
+
+        self._alpha_0l_visc = aero_characteristics["C_l_visc_root"]
+        self._C_l_slope = aero_characteristics["C_l_visc_max_slope"]
+
+        # define f_l
+        def sqrt_of_f_l(alpha):
+            return 2*np.sqrt(self.C_l_polar(alpha)/(self._C_l_slope*(alpha-self._alpha_0l_visc)))-1
+
+        alpha_interp = np.linspace(self._raoa_given.min(), self._raoa_given.max(), resolution)
+        alpha_f_l, f_l = self._adjust_f(alpha_interp, sqrt_of_f_l)
+        self._f_l = interpolate.interp1d(alpha_f_l, f_l)
+
+        # define C_lfs
+        ff_C_l_fs = join(dir_BL_data, "C_l_fs.dat")
+        if not isfile(ff_C_l_fs):
+            alpha_fs, C_l_fs = self._get_C_fs(alpha_f_l, f_l, alpha_interp, self.C_l_polar(alpha_interp), 
+                                              self._alpha_0l_visc, self._C_l_slope)
+            pd.DataFrame({"alpha_fs": alpha_fs, "C_l_fs": C_l_fs}).to_csv(ff_C_l_fs, index=None)
+        else:
+            df_C_l_fs = pd.read_csv(ff_C_l_fs)
+            alpha_fs = df_C_l_fs["alpha_fs"].to_numpy().flatten()
+            C_l_fs = df_C_l_fs["C_l_fs"].to_numpy().flatten()
+        self._C_fs = interpolate.interp1d(alpha_fs, C_l_fs)
+
+        # currently does not support an initial non-zero velocity of the airfoil
+        alpha_steady = -sim_res.pos[0, 2]+sim_res.inflow_angle[0]
+        qs_flow_angle, _, _ = self._quasi_steady_flow_angle(sim_res.vel[0, :], sim_res.pos[0, :], 
+                                                                sim_res.inflow[0, :], chord, pitching_around, alpha_at)
+        alpha_qs = -sim_res.pos[0, 2]+qs_flow_angle
+        sim_res.alpha_qs[-1] = alpha_qs
+        sim_res.x1[-1] = alpha_qs*kwargs["A1"]
+        sim_res.x2[-1] = alpha_qs*kwargs["A2"]
+        sim_res.C_lpot[-1] = self._C_l_slope*(alpha_qs-self._alpha_0l)
+        sim_res.x3[-1] = self._C_l_slope*(alpha_qs-self._alpha_0l)
+        sim_res.x4[-1] = self._f_l(alpha_steady)
+        sim_res.f_steady[-1] = self._f_l(alpha_steady)
+
     def _BL_openFAST_Cn_disc(
             self, 
             sim_res: SimulationResults,
@@ -979,21 +952,21 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.alpha_eq[i] = sim_res.x3[i]/C_slope+alpha_0
 
         tmp4 = np.exp(-sim_res.dt[i-1]/(T_u_last*T_f))
-        sim_res.f_steady[i] = self._f_l(np.rad2deg(sim_res.alpha_eq[i]))
+        sim_res.f_steady[i] = self._f_l(sim_res.alpha_eq[i])
         sim_res.x4[i] = sim_res.x4[i-1]*tmp4+0.5*(sim_res.f_steady[i-1]+sim_res.f_steady[i])*(1-tmp4)
 
         sim_res.C_lc[i] = sim_res.x4[i]*C_slope*(sim_res.alpha_eff[i]-alpha_0)
-        sim_res.C_lc[i] += (1-sim_res.x4[i])*self._C_fs(np.rad2deg(sim_res.alpha_eff[i]))
+        sim_res.C_lc[i] += (1-sim_res.x4[i])*self._C_fs(sim_res.alpha_eff[i])
         sim_res.C_lnc[i] = -np.pi*T_u_current*sim_res.vel[i, 2]
         sim_res.C_lus[i] = sim_res.C_lc[i]+sim_res.C_lnc[i]
 
-        sim_res.C_ds[i] = self.C_d(np.rad2deg(sim_res.alpha_eff[i]))
+        sim_res.C_ds[i] = self.C_d_polar(sim_res.alpha_eff[i])
         tmp = (np.sqrt(sim_res.f_steady[i])-np.sqrt(sim_res.x4[i]))/2-(sim_res.f_steady[i]-sim_res.x4[i])/4
         sim_res.C_dsep[i] = (sim_res.C_ds[i]-self._C_d_0)*tmp
         sim_res.C_dc[i] = (sim_res.alpha_qs[i]-sim_res.alpha_eff[i]-T_u_current*sim_res.vel[i, 2])*sim_res.C_lc[i]
         sim_res.C_dus[i] = sim_res.C_ds[i]+sim_res.C_dc[i]+sim_res.C_dsep[i]
 
-        sim_res.C_ms[i] = self.C_m(np.rad2deg(sim_res.alpha_eff[i]))
+        sim_res.C_ms[i] = self.C_m_polar(sim_res.alpha_eff[i])
         sim_res.C_mnc[i] = 0.5*np.pi*T_u_current*sim_res.vel[i, 2]
         sim_res.C_mus[i] = sim_res.C_ms[i]+sim_res.C_mnc[i]
 
@@ -1021,9 +994,67 @@ class AeroForce(SimulationSubRoutine, Rotations):
             T_p: float=1.5, T_f: float=6):
         lcs = {param: value for param, value in locals().items() if param != "self"}
         lcs["C_slope"] = self._C_l_slope
-        lcs["alpha_0"] = self._alpha_0L
+        lcs["alpha_0"] = self._alpha_0l
         return self._BL_openFAST_disc_f_scaled(**lcs)
     
+    def _init_BL_openFAST_f_scaled(
+            self,
+            sim_res: SimulationResults,
+            chord: float=1,
+            pitching_around: float=0.25,
+            alpha_at: float=0.75,
+            resolution: int=1000,
+            **kwargs
+            ):
+        # define alpha_0l_inv, C_l_slope   
+        dir_BL_data = helper.create_dir(join(self.dir_polar, "preparation", "BL_first_order_IAG2"))[0]
+        ff_aero_characteristics = join(dir_BL_data, "aero_characteristics.json")
+        if not isfile(ff_aero_characteristics):
+            self._save_aero_characteristics(ff_aero_characteristics, self._raoa_given,
+                                            {"C_l_visc": self.C_l_polar(self._raoa_given)})
+        
+        with open(ff_aero_characteristics, "r") as ff_aero:
+            aero_characteristics = json.load(ff_aero)
+
+        self._alpha_0l_visc = aero_characteristics["C_l_visc_root"]
+        self._C_l_slope = aero_characteristics["C_l_visc_max_slope"]
+
+        # define f_l
+        def sqrt_of_f_l(alpha):
+            return 2*np.sqrt(self.C_l_polar(alpha)/(self._C_l_slope*(alpha-self._alpha_0l_visc)))-1
+
+        alpha_interp = np.linspace(self._raoa_given.min(), self._raoa_given.max(), resolution)
+        alpha_f_l, f_l = self._adjust_f(alpha_interp, sqrt_of_f_l)
+        self._f_l = interpolate.interp1d(alpha_f_l, f_l)
+
+        # define C_lfs
+        ff_C_l_fs = join(dir_BL_data, "C_l_fs.dat")
+        if not isfile(ff_C_l_fs):
+            alpha_fs, C_l_fs = self._get_C_fs(alpha_f_l, f_l, alpha_interp, self.C_l_polar(alpha_interp), 
+                                              self._alpha_0l_visc, self._C_l_slope)
+            pd.DataFrame({"alpha_fs": alpha_fs, "C_l_fs": C_l_fs}).to_csv(ff_C_l_fs, index=None)
+        else:
+            df_C_l_fs = pd.read_csv(ff_C_l_fs)
+            alpha_fs = df_C_l_fs["alpha_fs"].to_numpy().flatten()
+            C_l_fs = df_C_l_fs["C_l_fs"].to_numpy().flatten()
+        self._C_fs = interpolate.interp1d(alpha_fs, C_l_fs)
+
+        # currently does not support an initial non-zero velocity of the airfoil
+        alpha_steady = -sim_res.pos[0, 2]+sim_res.inflow_angle[0]
+        qs_flow_angle, _, _ = self._quasi_steady_flow_angle(sim_res.vel[0, :], sim_res.pos[0, :], sim_res.inflow[0, :], 
+                                                            chord, pitching_around, alpha_at)
+        alpha_qs = -sim_res.pos[0, 2]+qs_flow_angle
+        sim_res.alpha_qs[-1] = alpha_qs
+        sim_res.x1[-1] = 0
+        sim_res.x2[-1] = 0
+        sim_res.rel_inflow_speed[-1] = np.sqrt(sim_res.inflow[0, :]@sim_res.inflow[0, :].T)
+        sim_res.dt[-1] = sim_res.dt[0]
+        sim_res.C_lpot[-1] = self._C_l_slope*(alpha_qs-self._alpha_0l)
+        sim_res.x3[-1] = self._C_l_slope*(alpha_qs-self._alpha_0l)
+        sim_res.x4[-1] = self._f_l(alpha_steady)
+        sim_res.f_steady[-1] = self._f_l(alpha_steady)
+        sim_res.T_u[-1] = 2*sim_res.rel_inflow_speed[-1]*sim_res.dt[-1]/chord
+  
     def _BL_openFAST_disc_f_scaled(
             self, 
             C_slope: float, alpha_0: float,
@@ -1054,21 +1085,21 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.alpha_eq[i] = sim_res.x3[i]/C_slope+alpha_0
 
         tmp4 = np.exp(-sim_res.dt[i-1]/(sim_res.T_u[i-1]*T_f))
-        sim_res.f_steady[i] = self._f_l(np.rad2deg(sim_res.alpha_eq[i]))
+        sim_res.f_steady[i] = self._f_l(sim_res.alpha_eq[i])
         sim_res.x4[i] = sim_res.x4[i-1]*tmp4+0.5*(sim_res.f_steady[i-1]+sim_res.f_steady[i])*(1-tmp4)
 
         sim_res.C_lc[i] = sim_res.x4[i]*C_slope*(sim_res.alpha_eff[i]-alpha_0)
-        sim_res.C_lc[i] += (1-sim_res.x4[i])*self._C_fs(np.rad2deg(sim_res.alpha_eff[i]))
+        sim_res.C_lc[i] += (1-sim_res.x4[i])*self._C_fs(sim_res.alpha_eff[i])
         sim_res.C_lnc[i] = -np.pi*sim_res.T_u[i]*sim_res.vel[i, 2]
         sim_res.C_lus[i] = sim_res.C_lc[i]+sim_res.C_lnc[i]
 
-        sim_res.C_ds[i] = self.C_d(np.rad2deg(sim_res.alpha_eff[i]))
+        sim_res.C_ds[i] = self.C_d_polar(sim_res.alpha_eff[i])
         tmp = (np.sqrt(sim_res.f_steady[i])-np.sqrt(sim_res.x4[i]))/2-(sim_res.f_steady[i]-sim_res.x4[i])/4
         sim_res.C_dsep[i] = (sim_res.C_ds[i]-self._C_d_0)*tmp
         sim_res.C_dc[i] = (sim_res.alpha_qs[i]-sim_res.alpha_eff[i]-sim_res.T_u[i]*sim_res.vel[i, 2])*sim_res.C_lc[i]
         sim_res.C_dus[i] = sim_res.C_ds[i]+sim_res.C_dc[i]+sim_res.C_dsep[i]
 
-        sim_res.C_ms[i] = self.C_m(np.rad2deg(sim_res.alpha_eff[i]))
+        sim_res.C_ms[i] = self.C_m_polar(sim_res.alpha_eff[i])
         sim_res.C_mnc[i] = 0.5*np.pi*sim_res.T_u[i]*sim_res.vel[i, 2]
         sim_res.C_mus[i] = sim_res.C_ms[i]+sim_res.C_mnc[i]
 
@@ -1125,7 +1156,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.x2[i] = sim_res.x2[i-1]*C2+I2
 
         sim_res.alpha_eff[i] = sim_res.alpha_qs[i]*(1-A1-A2)+sim_res.x1[i]+sim_res.x2[i]
-        sim_res.C_lc[i] = self._C_l_slope*(sim_res.alpha_eff[i]-self._alpha_0L)
+        sim_res.C_lc[i] = self._C_l_slope*(sim_res.alpha_eff[i]-self._alpha_0l_inv)
 
         # get circulatory lift
         dynamic_pressure = density/2*sim_res.rel_inflow_speed[i]**2
@@ -1144,7 +1175,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         L_cent = -m_apparent*sim_res.rel_inflow_speed[i]*sim_res.vel[i, 2]
         
         # get drag
-        D_s = base_force*self.C_d(np.rad2deg(sim_res.alpha_eff[i]))
+        D_s = base_force*self.C_d_polar(sim_res.alpha_eff[i])
         D_ind = L_c*(sim_res.alpha_qs[i]-sim_res.alpha_eff[i]-T_u_current*sim_res.vel[i, 2])
         # alpha_quasi_geometric = np.arctan2(sim_res.inflow[i, 1]-sim_res.vel[i, 1],
         #                                    sim_res.inflow[i, 0]-sim_res.vel[i, 0])-sim_res.pos[i, 2]
@@ -1152,7 +1183,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         D = D_s+D_ind
 
         # get moment
-        M_s = -base_force*chord*self.C_m(np.rad2deg(sim_res.alpha_eff[i]))  # minus because a positive C_m means nose
+        M_s = -base_force*chord*self.C_m_polar(sim_res.alpha_eff[i])  # minus because a positive C_m means nose
         # up by definition, but in the CS used here nose down -> include minus to correct direction
         M_lift = chord/2*(L_iner/2+L_cent)  # moment caused by L_iner and L_cent w.r.t. the quarter-chord
         M_iner = m_apparent*chord**2/32*sim_res.accel[i, 2]  # this minus stays because the acceleration term is on the 
@@ -1184,48 +1215,6 @@ class AeroForce(SimulationSubRoutine, Rotations):
         rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])
         return rot@f_aero
 
-    def _init_BL_chinese(
-            self,
-            sim_res: SimulationResults,
-            chord: float=1,
-            pitching_around: float=0.25,
-            alpha_at: float=0.75,
-            **kwargs
-            ):
-        #todo make proper comment later, for now:
-        # in the simulation loop, all values except for the position, velocity, and acceleration of the airfoil
-        # are calculated for the first time step. However, in each simulation loop, the difference of some parameters
-        # (the ones below) needs to be caluculated w.r.t. to the previous time step. At the initial time step, these
-        # differences should be zero. Since the simulation calculates the below parameters for the first time step,
-        # the values need to be set for the one before that. In numpy, this is the same as the value of the very last 
-        # time step. Then, the simulation will calculate the difference of dparam = param[0]-param[-1] = 0.
-        # Only if param[0] != 0 must param[-1] be initialised, since param[-1] = 0 already.
-        qs_flow_angle, _, _ = self._quasi_steady_flow_angle(sim_res.vel[0, :], sim_res.pos[0, :], sim_res.inflow[0, :], 
-                                                      chord, pitching_around, alpha_at)
-        # sim_res.alpha_qs[-1] = -sim_res.pos[0, 2]+qs_flow_angle
-        # sim_res.vel[-1, 2] = sim_res.vel[0, 2]
-
-    def _init_BL_openFAST_Cl_disc(
-            self,
-            sim_res: SimulationResults,
-            chord: float=1,
-            pitching_around: float=0.25,
-            alpha_at: float=0.75,
-            **kwargs
-            ):
-        # currently does not support an initial non-zero velocity of the airfoil
-        alpha_steady = -sim_res.pos[0, 2]+sim_res.inflow_angle[0]
-        qs_flow_angle, _, _ = self._quasi_steady_flow_angle(sim_res.vel[0, :], sim_res.pos[0, :], 
-                                                                sim_res.inflow[0, :], chord, pitching_around, alpha_at)
-        alpha_qs = -sim_res.pos[0, 2]+qs_flow_angle
-        sim_res.alpha_qs[-1] = alpha_qs
-        sim_res.x1[-1] = alpha_qs*kwargs["A1"]
-        sim_res.x2[-1] = alpha_qs*kwargs["A2"]
-        sim_res.C_lpot[-1] = self._C_l_slope*(alpha_qs-self._alpha_0L)
-        sim_res.x3[-1] = self._C_l_slope*(alpha_qs-self._alpha_0L)
-        sim_res.x4[-1] = self._f_l(np.rad2deg(alpha_steady))
-        sim_res.f_steady[-1] = self._f_l(np.rad2deg(alpha_steady))
-
     def _init_BL_Staeblein(
             self,
             sim_res: SimulationResults,
@@ -1234,6 +1223,8 @@ class AeroForce(SimulationSubRoutine, Rotations):
             alpha_at: float=0.75,
             **kwargs
     ):
+        self._C_l_slope = 7.15
+        self._alpha_0l_inv = 0
         # currently does not support an initial non-zero velocity of the airfoil
         init_inflow_vel = np.linalg.norm(sim_res.inflow[0, :])
         next_inflow_vel = np.linalg.norm(sim_res.inflow[1, :])
@@ -1248,48 +1239,25 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.x1[-1] = alpha_qs*kwargs["A1"]
         sim_res.x2[-1] = alpha_qs*kwargs["A2"]
 
-    def _init_BL_openFAST_f_scaled(
+    def _save_aero_characteristics(
             self,
-            sim_res: SimulationResults,
-            chord: float=1,
-            pitching_around: float=0.25,
-            alpha_at: float=0.75,
-            **kwargs
-            ):
-        # currently does not support an initial non-zero velocity of the airfoil
-        alpha_steady = -sim_res.pos[0, 2]+sim_res.inflow_angle[0]
-        qs_flow_angle, _, _ = self._quasi_steady_flow_angle(sim_res.vel[0, :], sim_res.pos[0, :], sim_res.inflow[0, :], 
-                                                            chord, pitching_around, alpha_at)
-        alpha_qs = -sim_res.pos[0, 2]+qs_flow_angle
-        sim_res.alpha_qs[-1] = alpha_qs
-        sim_res.x1[-1] = 0
-        sim_res.x2[-1] = 0
-        sim_res.rel_inflow_speed[-1] = np.sqrt(sim_res.inflow[0, :]@sim_res.inflow[0, :].T)
-        sim_res.dt[-1] = sim_res.dt[0]
-        sim_res.C_lpot[-1] = self._C_l_slope*(alpha_qs-self._alpha_0L)
-        sim_res.x3[-1] = self._C_l_slope*(alpha_qs-self._alpha_0L)
-        sim_res.x4[-1] = self._f_l(np.rad2deg(alpha_steady))
-        sim_res.f_steady[-1] = self._f_l(np.rad2deg(alpha_steady))
-        sim_res.T_u[-1] = 2*sim_res.rel_inflow_speed[-1]*sim_res.dt[-1]/chord
-    
-    def _zero_forces(self, alpha: dict[str, np.ndarray], coeffs: dict[str, np.ndarray], save_as: str, add: dict,
-                     alpha0_in: tuple=(-10, 5)):
-        zero_data = {}
-        for coeff_name, coeff in coeffs.items():
-            aoa = alpha[coeff_name]
-            ids_subset = np.logical_and(aoa>=alpha0_in[0], aoa<=alpha0_in[1])
-            alpha_subset = aoa[ids_subset]
-            coeff_subset = coeff[ids_subset]
-            find_sign_change = coeff_subset[1:]*coeff_subset[:-1]
-            if np.all(find_sign_change>0):
-                raise ValueError(f"The given '{coeff_name}' does not have a sign change in the current AoA interval of "
-                                f"{alpha0_in} degree. Linear interpolation can thus not find alpha_0.")
-            alpha_0, slope = self._get_zero_crossing(alpha_subset, coeff_subset)
-            zero_data[f"alpha_0_{coeff_name.split("_")[-1]}"] = alpha_0
-            zero_data[f"{coeff_name}_slope"] = slope
-        with open(save_as, "w") as f:
-            json.dump(zero_data|add, f, indent=4)
-        return zero_data
+            save_to: str,
+            alpha: np.ndarray,
+            coefficients: dict[str, np.ndarray],
+            min_of: dict[str, np.ndarray]={}
+    ):
+        aero = {}
+        for coeff, values in coefficients.items():
+            root, root_slope, max_slope = self._get_zero_crossing_and_max_slope(alpha, values)
+            aero[coeff+"_root"] = root
+            aero[coeff+"_root_slope"] = root_slope
+            aero[coeff+"_max_slope"] = max_slope
+        
+        for coeff, values in min_of.items():
+            aero[coeff+"_min"] = values.min()
+        
+        with open(save_to, "w") as ff_aero:
+            json.dump(aero, ff_aero, indent=4)
 
     @staticmethod
     def _quasi_steady_flow_angle(
@@ -1309,12 +1277,136 @@ class AeroForce(SimulationSubRoutine, Rotations):
         return np.arctan2(v_y, v_x), v_x, v_y
     
     @staticmethod
-    def _get_zero_crossing(x: np.ndarray, y: np.ndarray, gradient: str="pos") -> tuple[float, float]:
+    def _get_zero_crossing_and_max_slope(x: np.ndarray, y: np.ndarray, gradient: str="pos") -> tuple[float, float]:
+        """Returns the root, the slope at root, and the maximum slope from the root to any other point.
+        Could currently only work for functions with positive gradients at the root.
+        :param x: _description_
+        :type x: np.ndarray
+        :param y: _description_
+        :type y: np.ndarray
+        :param gradient: _description_, defaults to "pos"
+        :type gradient: str, optional
+        :return: _description_
+        :rtype: tuple[float, float]
+        """
         idx_greater_0 = np.argmax(y > 0) if gradient == "pos" else np.argmax(y < 0)
-        dy = y[idx_greater_0]-y[idx_greater_0-1]
-        dx = x[idx_greater_0]-x[idx_greater_0-1]
-        x_0 = x[idx_greater_0]-y[idx_greater_0]*dx/dy
-        return x_0, dy/dx
+        dy_zero = y[idx_greater_0]-y[idx_greater_0-1]
+        dx_zero = x[idx_greater_0]-x[idx_greater_0-1]
+        x_0 = x[idx_greater_0]-y[idx_greater_0]*dx_zero/dy_zero
+        max_dy_dx = 0
+        for i in range(0, x.size-idx_greater_0-1):
+            dy = y[idx_greater_0+i]-y[idx_greater_0-1]
+            dx = x[idx_greater_0+i]-x[idx_greater_0-1]
+            max_dy_dx = max(max_dy_dx, dy/dx)
+        return x_0, dy_zero/dx_zero, max_dy_dx
+    
+    @staticmethod
+    def _adjust_f(
+            alpha: np.ndarray,
+            sqrt_of_f: Callable,
+            adjust_attached: bool=True,
+            adjust_separated: bool=True,
+            keep_sign: bool=True,
+            attached_region: tuple=(-1.05, 1.05)  # approx from -60deg to 60deg
+    ) -> pd.DataFrame:
+        def resiude_separated(alpha):
+            return sqrt_of_f(alpha)
+
+        def residue_attached(alpha):
+            return resiude_separated(alpha)-1
+        
+        def handle_sign(sqrt_f: np.ndarray):
+            return sqrt_f**2*np.sign(sqrt_f) if keep_sign else sqrt_f**2
+        
+        if not adjust_attached and not adjust_separated:
+            return alpha, handle_sign(sqrt_of_f(alpha))
+        
+        alpha_sub = alpha[np.logical_and(alpha>=attached_region[0], alpha<=attached_region[1])]
+        res_sep = resiude_separated(alpha_sub)
+        res_att = res_sep-1
+
+        if adjust_separated:
+            id_begin_attachement = (res_sep>0).argmax()
+            begin_attachement = brentq(resiude_separated, alpha_sub[id_begin_attachement-2], 
+                                    alpha_sub[id_begin_attachement])
+            id_end_attched = res_att.size-(res_sep[::-1]>0).argmax()-1
+            end_attachement = brentq(resiude_separated, alpha_sub[id_end_attched], alpha_sub[id_end_attched+2])
+            
+        if adjust_attached:
+            id_fully_attached = (res_att>0).argmax()
+            begin_fully_attached = brentq(residue_attached, alpha_sub[id_fully_attached-2], 
+                                          alpha_sub[id_fully_attached])
+
+            id_end_fully_attached = res_att.size-(res_att[::-1]>0).argmax()-1
+            end_fully_attached = brentq(residue_attached, alpha_sub[id_end_fully_attached], 
+                                        alpha_sub[id_end_fully_attached+2])
+
+        if adjust_separated and adjust_attached:
+            alpha_begins_attaching = alpha_sub[np.logical_and(alpha_sub>begin_attachement, 
+                                                              alpha_sub<begin_fully_attached)]
+            alpha_ends_attached = alpha_sub[np.logical_and(alpha_sub>end_fully_attached, alpha_sub<end_attachement)]
+            f = np.r_[0, 0, handle_sign(resiude_separated(alpha_begins_attaching)), 1, 1, 
+                      handle_sign(resiude_separated(alpha_ends_attached)), 0, 0]
+            alpha = np.r_[alpha.min(), begin_attachement, alpha_begins_attaching, begin_fully_attached, 
+                          end_fully_attached, alpha_ends_attached, end_attachement, alpha.max()]
+        elif adjust_attached:
+            alpha_below_fully_attached = alpha[alpha<begin_fully_attached]
+            alpha_above_fully_attached = alpha[alpha>end_fully_attached]
+            f = np.r_[handle_sign(resiude_separated(alpha_below_fully_attached)), 1, 1, 
+                      handle_sign(resiude_separated(alpha_above_fully_attached))]
+            alpha = np.r_[alpha_below_fully_attached, begin_fully_attached, end_fully_attached, 
+                          alpha_above_fully_attached]
+        elif adjust_separated:
+            alpha_attached = alpha[np.logical_and(alpha>begin_attachement, alpha<end_attachement)]
+            f = np.r_[0, handle_sign(resiude_separated(alpha_attached)), 0]
+            alpha = np.r_[alpha.min(), alpha_attached, alpha.max()]
+        return alpha, f
+    
+    @staticmethod
+    def _get_C_fs(
+            alpha_f: np.ndarray,
+            f: np.ndarray,
+            alpha_coeff: np.ndarray,
+            coeff: np.ndarray,
+            alpha_0: float,
+            slope: float
+    ):
+        i_attach = (f>0).argmax()
+        alpha_begin_attachement = alpha_f[i_attach]
+        alpha = alpha_coeff[alpha_coeff<alpha_begin_attachement]
+        C_fs = coeff[alpha_coeff<alpha_begin_attachement]
+        
+        # at: attach process
+        i_fully_attached = (f==1).argmax()
+        alpha_at = alpha_f[i_attach:i_fully_attached]
+        f_at = f[i_attach:i_fully_attached]
+        coeff_at = coeff[np.logical_and(alpha_coeff>=alpha_at[0], alpha_coeff<=alpha_at[-1])]
+        alpha = np.r_[alpha, alpha_at]
+        C_fs = np.r_[C_fs, (coeff_at-slope*(alpha_at-alpha_0)*f_at)/(1-f_at)]
+        
+        # fa: fully attached
+        i_end_fully_attached = (f[i_fully_attached:]<1).argmax()+i_fully_attached
+        alpha_begin_fully_attached = alpha_f[i_fully_attached]
+        alpha_end_fully_attached = alpha_f[i_end_fully_attached] 
+        ids_coeff_fully_attached = np.logical_and(alpha_coeff>=alpha_begin_fully_attached,
+                                                  alpha_coeff<=alpha_end_fully_attached)
+        alpha = np.r_[alpha, alpha_coeff[ids_coeff_fully_attached]]
+        C_fs = np.r_[C_fs, coeff[ids_coeff_fully_attached]/2]
+
+        # dt: detach process
+        i_end_attachement = (f[i_end_fully_attached:]==0).argmax()+i_end_fully_attached
+        alpha_dt = alpha_f[i_end_fully_attached+1:i_end_attachement]
+        f_dt = f[i_end_fully_attached+1:i_end_attachement]
+        coeff_dt = coeff[np.logical_and(alpha_coeff>=alpha_dt[0], alpha_coeff<=alpha_dt[-1])]
+        alpha = np.r_[alpha, alpha_dt]
+        C_fs = np.r_[C_fs, (coeff_dt-slope*(alpha_dt-alpha_0)*f_dt)/(1-f_dt)]
+        
+        alpha_end_attachement = alpha_f[i_end_attachement]
+        ids_fully_separated = alpha_coeff>=alpha_end_attachement
+        alpha_fs = alpha_coeff[ids_fully_separated]
+        alpha = np.r_[alpha, alpha_fs]
+        C_fs = np.r_[C_fs, coeff[ids_fully_separated]]
+        return alpha, C_fs
 
     
 class StructForce(SimulationSubRoutine, Rotations):
