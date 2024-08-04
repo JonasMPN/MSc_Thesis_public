@@ -71,9 +71,9 @@ sim_type = "free"
 n_processes = 1  # for sim_type="forced"
 
 # aero_scheme = "qs"
-# aero_scheme = "BL_openFAST_Cl_disc"
+aero_scheme = "BL_openFAST_Cl_disc"
 # aero_scheme = "BL_openFAST_Cl_disc_f_scaled"
-aero_scheme = "BL_AEROHOR"
+# aero_scheme = "BL_AEROHOR"
 # aero_scheme = "BL_first_order_IAG2"
 # aero_scheme = "BL_Staeblein"
 
@@ -87,7 +87,7 @@ alpha_lift = "alpha_qs" if aero_scheme == "qs" else "alpha_eff"
 # case_name = "initial_y_and_tors_set"
 # case_name = "initial_at_steady_state"
 # case_name = "LCO_tries_25"
-case_name = "LCO_tries_25_187"
+case_name = "test"
 # case_name = "LCO_tries_25_polar_staeblein"
 # case_name = "flutter"
 # case_name = "val_staeblein_main_polar"
@@ -169,7 +169,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         if sim_type == "free":
             with open(join(case_dir, "section_data.json"), "w") as f:
                 json.dump(structure_def, f, indent=4)
-            alpha = 1
+            alpha = 10
             # alpha = None
 
             inflow = get_inflow(t, [(0, 0, 20, alpha)], init_velocity=0.1)
@@ -177,13 +177,10 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             approx_steady_y = True
             approx_steady_tors = True if aero_scheme != "BL_AEROHOR" else False
             ffile_polar = join(root, file_polar)
-            if "AEROHOR" in aero_scheme or "IAG" in aero_scheme:
-                coeff_direction = "airfoil"
-            else:
-                coeff_direction = "inflow"
+    
             init_data = NACA_643_618.approximate_steady_state(ffile_polar, inflow[0, :], structure_def["chord"],  
                                                               structure_def["stiffness"], x=approx_steady_x,  
-                                                              y=approx_steady_y, torsion=approx_steady_tors, alpha=alpha, coeff_direction=coeff_direction)
+                                                              y=approx_steady_y, torsion=approx_steady_tors, alpha=alpha)
             init_pos, f_init, inflow_angle = init_data
             NACA_643_618.aero[-1, :] = f_init  # needed if an HHT-alpha algorithm is used
             
