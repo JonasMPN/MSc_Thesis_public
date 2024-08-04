@@ -570,6 +570,9 @@ class _DefaultMeasurement(_BaseDefaultPltSettings):
     def _linestyles(params):
         return {param: "" for param in params}
     _linestyles = _linestyles(_params)
+    _linestyles["C_l"] = "-"
+    _linestyles["C_d"] = "-"
+    _linestyles["C_m"] = "-"
 
     def __init__(self) -> None:
         _BaseDefaultPltSettings.__init__(self, "line")
