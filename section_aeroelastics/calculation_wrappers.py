@@ -29,6 +29,7 @@ def prepare_multiprocessing_input(
         idx_advanced += 1 if n < n_not_accounted else 0
         idx_end = split_size*(n+1)+idx_advanced
         process_input = [arg[idx_start:idx_end] if len(arg) != 0 else [] for arg in args]
+        process_input += [n]
         if add_call_number:
             process_input += [[i+call_numbers_start for i in range(idx_start, idx_end)]]
         process_input += always_use 
@@ -39,6 +40,7 @@ def prepare_multiprocessing_input(
 def run_forced(
         amplitude: list[float]|float,
         angle_of_attack: list[float]|float,
+        process_id: int,
         case_id: list[int],
         dir_airfoil: str,
         file_polar: str,
@@ -57,8 +59,9 @@ def run_forced(
         helper: Helper,
         ):
     # changes in the order of the arguments must be reflected in prepare_multiprocessing_input() and calls thereof!'
-    for ampl, aoa, i in zip(amplitude, angle_of_attack, case_id):
-        case_dir = helper.create_dir(join(root, str(i)))[0]
+    n_jobs = len(amplitude)
+    for i_job, (ampl, aoa, i_case) in enumerate(zip(amplitude, angle_of_attack, case_id)):
+        case_dir = helper.create_dir(join(root, str(i_case)))[0]
         with open(join(case_dir, "section_data.json"), "w") as f:
             json.dump(structure_data, f, indent=4)
 
@@ -92,6 +95,8 @@ def run_forced(
         NACA_643_618.simulate_along_path(inflow, coordinate_system, 0, 0, pos, vel)  # perform simulation
         NACA_643_618.save(case_dir)  # save simulation results
 
+        print(f"Process {process_id} done with job {i_job+1} of {n_jobs} jobs ({np.round((i_job+1)/n_jobs*1e2, 1)}%, "
+              f"case_id: {i_case}).")
 
 def _run_forced_parallel(
         dir_airfoil: str,
@@ -227,6 +232,7 @@ def run_forced_parallel_from_free_case(
 def _run_free(
         velocities: list[float]|float,
         aoas: list[float]|float,
+        process_id: int,
         case_id: list[int],
         dir_airfoil: str,
         file_polar: str,
@@ -245,22 +251,33 @@ def _run_free(
     fac_x = 1.3
     fac_y = 1
     fac_tors = 1
-    for vel, aoa, i in zip(velocities, aoas, case_id):
-        case_dir = helper.create_dir(join(root, str(i)))[0]
+    
+    n_jobs = len(velocities)
+    for i_job, (vel, aoa, i_case) in enumerate(zip(velocities, aoas, case_id)):
+        case_dir = helper.create_dir(join(root, str(i_case)))[0]
         with open(join(case_dir, "section_data.json"), "w") as f:
             json.dump(structure_data, f, indent=4)
 
         NACA_643_618 = ThreeDOFsAirfoil(time, verbose=False)
         # set the calculation scheme for the aerodynamic forces
         if aero_scheme == "qs":
-            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="quasi_steady", 
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="quasi_steady",
                                        chord=structure_data["chord"], pitching_around=0.25, alpha_at=0.75)
-        elif aero_scheme == "BL_chinese":
-            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_chinese", A1=0.3, A2=0.7, b1=0.14,
-                                       b2=0.53, pitching_around=0.25, alpha_at=0.75, chord=structure_data["chord"])
+        elif aero_scheme == "BL_AEROHOR":
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_AEROHOR", A1=0.3, A2=0.7, b1=0.14,
+                                       b2=0.53, pitching_around=0.25, alpha_at=0.75, chord=structure_data["chord"], 
+                                       alpha_critical=14.2)
+        elif aero_scheme == "BL_first_order_IAG2":
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_first_order_IAG2", A1=0.3, 
+                                       A2=0.7, b1=0.7, b2=0.53, pitching_around=0.25, alpha_at=0.75, 
+                                       chord=structure_data["chord"], alpha_critical=14.2)
         elif aero_scheme == "BL_openFAST_Cl_disc":
-            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_openFAST_Cl_disc", A1=0.165, #
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_openFAST_Cl_disc", A1=0.165, 
                                        A2=0.335, b1=0.0445, b2=0.3, pitching_around=0.25, alpha_at=0.75, 
+                                       chord=structure_data["chord"])
+        elif aero_scheme == "BL_openFAST_Cl_disc_f_scaled":
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_openFAST_Cl_disc_f_scaled",
+                                       A1=0.165, A2=0.335, b1=0.0445, b2=0.3, pitching_around=0.25, alpha_at=0.75,
                                        chord=structure_data["chord"])
         
         inflow = get_inflow(time, [(0, 0, vel, aoa)], init_velocity=vel)
@@ -284,6 +301,9 @@ def _run_free(
         NACA_643_618.set_time_integration("HHT-alpha-xy-adapted", alpha=0.1, dt=time[1], **structure_data)
         NACA_643_618.simulate(inflow, init_pos, init_vel)  # perform simulation
         NACA_643_618.save(case_dir, save_last=save_last)  # save simulation results
+        
+        print(f"Process {process_id} done with job {i_job+1} of {n_jobs} jobs ({np.round((i_job+1)/n_jobs*1e2, 1)}%, "
+              f"case_id: {i_case}).")
 
 
 def run_free_parallel(
