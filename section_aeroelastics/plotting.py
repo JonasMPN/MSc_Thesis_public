@@ -561,6 +561,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             time_ids = np.logical_and(self.time >= time_frame[0], self.time <= time_frame[1])
             base_time = self.time[time_ids]
         else:
+            time_ids = np.arange(self.time.size)
             base_time = self.time
         apply_to_axs = apply.keys()
         for ax, cols in plot.items():
@@ -1551,7 +1552,8 @@ def combined_forced(root_dir: str):
 
 
 def combined_LOC_amplitude(
-        root_dir: str
+        root_dir: str,
+        add_resolution: bool=True
 ):
     df_combinations = pd.read_csv(join(root_dir, "combinations.dat"))
     velocities = np.sort(df_combinations["velocity"].unique())
@@ -1576,7 +1578,7 @@ def combined_LOC_amplitude(
         ampl_last = np.abs(pos_x[ppeaks[-1]]-pos_x[npeaks[-1]])/2
         amplitudes[aoa_to_ind[aoa], vel_to_ind[vel]] = abs(ampl_last)
 
-        ampl_second_to_last = np.abs(pos_x[ppeaks[-2]]-pos_x[npeaks[-2]])
+        ampl_second_to_last = np.abs(pos_x[ppeaks[-2]]-pos_x[npeaks[-2]])/2
         converg = (ampl_last-ampl_second_to_last)/(ampl_second_to_last)
         convergence[aoa_to_ind[aoa], vel_to_ind[vel]] = converg
 
@@ -1590,23 +1592,24 @@ def combined_LOC_amplitude(
     dir_plots = helper.create_dir(join(root_dir, "plots"))[0]
     levels = 20
     v, a = np.meshgrid(velocities, aoas)
+    points = np.c_[(v.ravel(), a.ravel())]
 
     fig, ax = plt.subplots()
     cf = ax.contourf(v, a, amplitudes, cmap=plt.get_cmap("OrRd"), levels=levels)
     fig.colorbar(cf, ax=ax, label="LCO amplitude (m)")
     handler = PlotHandler(fig, ax)
     handler.update(x_labels="velocity (m/s)", y_labels="angle of attack (°)")
+    if add_resolution:
+        ax.plot(points[:, 0], points[:, 1], "ok", ms=0.4)
     handler.save(join(dir_plots, "LCO_amplitude_contourf.pdf"), close=False)
-
-    points = np.c_[(v.ravel(), a.ravel())]
-    ax.plot(points[:, 0], points[:, 1], "ok", ms=0.4)
-    handler.save(join(dir_plots, "resolution.pdf"))
 
     fig, ax = plt.subplots()
     cf = ax.contourf(v, a, convergence*1e2, cmap=plt.get_cmap("RdYlGn_r"), levels=levels)
     fig.colorbar(cf, ax=ax, label="% rel. change in amplitude (-)")
     handler = PlotHandler(fig, ax)
     handler.update(x_labels="velocity (m/s)", y_labels="angle of attack (°)")
+    if add_resolution:
+        ax.plot(points[:, 0], points[:, 1], "ok", ms=0.4)
     handler.save(join(dir_plots, "LCO_amplitude_convergence_contourf.pdf"))
     
     aoa_label = {"alpha_qs": r"$\alpha_{qs}$", "alpha_eff": r"$\alpha_{eff}$"}
@@ -1616,6 +1619,8 @@ def combined_LOC_amplitude(
         fig.colorbar(cf, ax=ax, label="max "+ aoa_label[aoa_type]+ " during last period (°)")
         handler = PlotHandler(fig, ax)
         handler.update(x_labels="velocity (m/s)", y_labels="angle of attack (°)")
+        if add_resolution:
+            ax.plot(points[:, 0], points[:, 1], "ok", ms=0.4)
         handler.save(join(dir_plots, f"max_{aoa_type}.pdf"))
 
 
