@@ -1124,7 +1124,7 @@ class BLValidationPlotter(DefaultPlot, Rotations):
         
         if any([specifier in BL_scheme for specifier in ["IAG", "AEROHOR"]]):
             self._BL_preparation(dir_preparation, file_polar, BL_scheme)
-        elif any([specifier in BL_scheme for specifier in ["IAG", "AEROHOR"]]):
+        elif any([specifier in BL_scheme for specifier in ["openFAST"]]):
             self._BL_openFAST_preparation(dir_preparation, file_polar, "data/FFA_WA3_221/general_openFAST")
 
     def _BL_preparation(
@@ -1134,7 +1134,7 @@ class BLValidationPlotter(DefaultPlot, Rotations):
             BL_scheme: str
             ):
         df_polar = pd.read_csv(file_polar, delim_whitespace=True)
-        if "alpha_steady" not in df_polar:
+        if "alpha" not in df_polar:
             df_polar = pd.read_csv(file_polar)
 
         f_data = {}
@@ -1200,17 +1200,25 @@ class BLValidationPlotter(DefaultPlot, Rotations):
         df_C_fs_paper = pd.read_csv(join(dir_paper_data, "Cl_fs.dat"))
         df_f_paper = pd.read_csv(join(dir_paper_data, "f_s.dat"))
         for file in listdir(dir_preparation):
-            if "C_fs" in file:
+            if "_fs" in file:
                 df_C_fs = pd.read_csv(join(dir_preparation, file))
-            elif "sep_points" in file:
+                alpha_fs = df_C_fs["alpha_fs"].to_numpy().flatten()
+                C_col = [col for col in df_C_fs if "C" in col][0]
+                C_fs = df_C_fs[C_col].to_numpy().flatten()
+            elif "f_" in file:
                 df_f = pd.read_csv(join(dir_preparation, file))
                 cols = df_f.columns
                 alpha_f = [col for col in cols if "alpha" in col][0]
 
+        aoa_f = df_f[alpha_f].to_numpy()
+        ids_C_fs = np.logical_and(alpha_fs>=aoa_f[1], alpha_fs<=aoa_f[-2])
+        alpha_fs = np.rad2deg(alpha_fs[ids_C_fs])
+        C_fs = C_fs[ids_C_fs]
+
         dir_plots = helper.create_dir(join(dir_preparation, "plots"))[0]
 
         fig, ax = plt.subplots()
-        ax.plot(df_f[alpha_f], df_f["f_l"], **self.plt_settings["section"])
+        ax.plot(np.rad2deg(df_f[alpha_f]), df_f["f_l"], **self.plt_settings["section"])
         ax.plot(df_f_paper["alpha"], df_f_paper["f_l"], **self.plt_settings[model_of_paper])
         handler = PlotHandler(fig, ax)
         handler.update(x_labels=r"$\alpha$ (°)", y_labels=r"$f$ (-)", x_lims=[-50, 50], y_lims=[-0.1, 1.1],
@@ -1220,12 +1228,13 @@ class BLValidationPlotter(DefaultPlot, Rotations):
         fig, ax = plt.subplots()
         alpha_paper = df_C_fs_paper["alpha"].sort_values()
         ax.plot(df_polar["alpha"], df_polar["C_l"], **self.plt_settings["C_l_specify"])
-        ax.plot(df_C_fs["alpha"], df_C_fs["C_fs"], **self.plt_settings["section"])
+        ax.plot(alpha_fs, C_fs, **self.plt_settings["section"])
         ax.plot(alpha_paper.values, df_C_fs_paper["C_lfs"].loc[alpha_paper.index], **self.plt_settings[model_of_paper])
         handler = PlotHandler(fig, ax)
         handler.update(x_labels=r"$\alpha$ (°)", y_labels=r"$C_{l\text{,fs}}$ (-)", x_lims=[-50, 50], 
                        y_lims=[-1.5, 1.85], legend=True)
         handler.save(join(dir_plots, "C_fully_sep.pdf"))
+        
         
     def plot_meas_comparison(
         self,
@@ -1233,6 +1242,7 @@ class BLValidationPlotter(DefaultPlot, Rotations):
         files_unsteady_data: dict[str],
         dir_results: str,
         period_res: int,
+        coeffs_polar: dict[str, np.ndarray]=None
         ):
         map_measurement = {"AOA": "alpha", "CL": "C_l", "CD": "C_d", "CM": "C_m"}
         data_meas = {coeff: {} for coeff in ["C_d", "C_l", "C_m"]}
@@ -1250,9 +1260,11 @@ class BLValidationPlotter(DefaultPlot, Rotations):
         for coeff in ["C_d", "C_l", "C_m"]:
             fig, ax = plt.subplots()
             handler = PlotHandler(fig, ax)
+            if coeff in coeffs_polar:
+                ax.plot(*coeffs_polar[coeff], **self.plt_settings[coeff])
             for tool, data in data_meas[coeff].items():
-                # ax.plot(data[0], data[1], **self.plt_settings[coeff+f"_{tool}"])
-                ax.plot(data[0], data[1], **self.plt_settings[coeff])
+                ax.plot(data[0], data[1], **self.plt_settings[coeff+f"_{tool}"])
+                # ax.plot(data[0], data[1], **self.plt_settings[coeff])
             # if coef != "C_m":
                 # ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
                 #         **self.plt_settings["aerohor"])
@@ -1271,7 +1283,7 @@ class BLValidationPlotter(DefaultPlot, Rotations):
         alpha_buffer: float=3,
         ):
         df_polar = pd.read_csv(file_polar, delim_whitespace=True)
-        if "alpha_steady" not in df_polar:
+        if "alpha" not in df_polar:
             df_polar = pd.read_csv(file_polar)
         # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
         df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
@@ -1280,6 +1292,7 @@ class BLValidationPlotter(DefaultPlot, Rotations):
 
         alpha_min = case_data["mean"]-case_data["amplitude"]-alpha_buffer
         alpha_max = case_data["mean"]+case_data["amplitude"]+alpha_buffer
+        # print(alpha_min, alpha_max)
         df_sliced = df_polar.loc[(df_polar["alpha"] >= alpha_min) & (df_polar["alpha"] <= alpha_max)]
         
         for coef in ["C_d", "C_l", "C_m"]:
