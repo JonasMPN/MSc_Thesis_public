@@ -394,7 +394,7 @@ class PlotPreparation:
         y_labels = {
             "profile": "tangential (m)",
             "total": "energy (Nm)",
-            "power": "power (Nm)",
+            "power": "power (Nm/s)",
             "kinetic": "kinetic energy (Nm)",
             "potential": "potential energy (Nm)",
         }
