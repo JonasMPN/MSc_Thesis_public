@@ -47,10 +47,10 @@ do = {
     "post_calc": False,  # peform post calculations
     "plot_results": False,  # plot results,
     "plot_results_fill": False,
-    "plot_coupled_timeseries": False,
+    "plot_coupled_timeseries": True,
     "animate_results": False,
     "plot_combined_forced": False,
-    "plot_combined_LOC_amplitude": True
+    "plot_combined_LOC_amplitude": False
 }
 
 do = set_do(do=do,
@@ -65,15 +65,15 @@ do = set_do(do=do,
 # root = "data/NACA_643_618"  # set which airfoil polars to use. Simulatenously defines to root for the simulation data
 root = "data/FFA_WA3_221"  # set which airfoil polars to use. Simulatenously defines to root for the simulation data
 
-# sim_type = "free"
-sim_type = "free_parallel"
+sim_type = "free"
+# sim_type = "free_parallel"
 # sim_type = "forced"
-n_processes = 6  # for sim_type="forced" and sim_type="free_parallel".
+n_processes = 8  # for sim_type="forced" and sim_type="free_parallel".
 
 # aero_scheme = "qs"
-# aero_scheme = "BL_openFAST_Cl_disc"
+aero_scheme = "BL_openFAST_Cl_disc"
 # aero_scheme = "BL_openFAST_Cl_disc_f_scaled"
-aero_scheme = "BL_AEROHOR"
+# aero_scheme = "BL_AEROHOR"
 # aero_scheme = "BL_first_order_IAG2"
 # aero_scheme = "BL_Staeblein"
 
@@ -86,7 +86,8 @@ alpha_lift = "alpha_qs" if aero_scheme == "qs" else "alpha_eff"
 # case_name = "test_qs"
 # case_name = "initial_y_and_tors_set"
 # case_name = "initial_at_steady_state"
-case_name = "LCO_25"
+# case_name = "LCO_25"
+case_name = "v_15_angle_17_5"
 # case_name = "test"
 # case_name = "LCO_tries_25_polar_staeblein"
 # case_name = "flutter"
@@ -129,7 +130,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         # Otherwise, the NACA definition is used for "free" and "free_parallel" (not yet, do in future).
         dt = 0.01  # if dt<1e-5, the dt rounding in compress_oscillation() in calculation_utils.py needs to be adapted
         t_end = 600
-        save_last = 200  # the last 'save_last' seconds of the simulation will be saved
+        save_last = 600  # the last 'save_last' seconds of the simulation will be saved
         t = dt*np.arange(int(t_end/dt))  # set the time array for the simulation
         NACA_643_618 = ThreeDOFsAirfoil(t, verbose=False)
         # set the calculation scheme for the aerodynamic forces
@@ -138,7 +139,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             NACA_643_618.set_aero_calc(root, file_polar=file_polar, scheme="quasi_steady", chord=chord, 
                                        pitching_around=0.25, alpha_at=0.75)
         elif aero_scheme == "BL_AEROHOR":
-            NACA_643_618.set_aero_calc(root, file_polar=file_polar, scheme="BL_AEROHOR", A1=0.3, A2=0.7, b1=0.14,
+            NACA_643_618.set_aero_calc(root, file_polar=file_polar, scheme="BL_AEROHOR", A1=0.3, A2=0.7, b1=0.7,
                                        b2=0.53, pitching_around=0.25, alpha_at=0.75, chord=chord, alpha_critical=14.2)
         elif aero_scheme == "BL_first_order_IAG2":
             NACA_643_618.set_aero_calc(root, file_polar=file_polar, scheme="BL_first_order_IAG2", A1=0.3, A2=0.7, 
@@ -170,10 +171,10 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         if sim_type == "free":
             with open(join(case_dir, "section_data.json"), "w") as f:
                 json.dump(structure_def, f, indent=4)
-            alpha = 10
+            alpha = 17.5
             # alpha = None
 
-            inflow = get_inflow(t, [(0, 0, 20, alpha)], init_velocity=0.1)
+            inflow = get_inflow(t, [(0, 0, 15, alpha)], init_velocity=0.1)
             approx_steady_x = True
             approx_steady_y = True
             approx_steady_tors = True if aero_scheme != "BL_AEROHOR" else False
@@ -193,7 +194,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             # init_pos = np.zeros(3)
             # init_pos[0] += 5*np.cos(init_pos[2])
             # init_pos[0] *= 1.3
-            # init_pos[0] += 1.3
+            init_pos[0] += 1.3
             # init_pos[1] += 5*np.sin(init_pos[2])
             # init_pos[1] += 4
             # init_pos[2] -= 0.0001
@@ -275,7 +276,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             # post_calculations_parallel(root_cases, alpha_lift, n_processes, aoa_thresholds)
 
             # to do post calculations on only one, use the following lines
-            case_id = 170
+            case_id = 81
             post_calc = PostCaluculations(dir_sim_res=join(root, "simulation", sim_type, aero_scheme, case_name, 
                                                            str(case_id)),
                                           alpha_lift=alpha_lift, coordinate_system_structure=coordinate_system)
@@ -289,12 +290,12 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
 
     if plot_results:
         trailing_every = 5
-        time_frame = (560, 600)
+        time_frame = (598, 600)
         file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
         if sim_type == "free":
             dir_sim = join(root, "simulation", "free", aero_scheme, case_name)  # define path to the root of the simulation results
         elif "forced" in sim_type or "parallel" in sim_type:
-            case_id = "170"
+            case_id = "81"
             dir_sim = join(root, "simulation", sim_type, aero_scheme, case_name, case_id)
         dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
         plotter = Plotter(file_profile, dir_sim, dir_plots, structure_def["coordinate_system"]) 
