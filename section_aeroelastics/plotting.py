@@ -8,7 +8,7 @@ import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 import matplotlib
-from os.path import join
+from os.path import join, isdir
 from os import listdir
 from scipy.signal import find_peaks
 from scipy.interpolate import interp1d
@@ -364,6 +364,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                 alpha_thresholds: tuple[float, list], 
                 time_frame: tuple[float, float]=None,
                 polar: tuple[str, list[float]|int]=None,
+                amplitude_range: tuple[float, float]=(1e-2, 1e2),
+                transient_time: float=30,
                 colours: list[str]=["chocolate", "grey", "orangered", "forestgreen", "royalblue", "crimson"]):
         use_ids = np.arange(self.time.size)
         time = self.time
@@ -414,6 +416,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         damping_ratio = []
         amplitude = [(pos_x[ppeaks[0]]-pos_x[npeaks[0]])/2]
         damping_ratio = []
+        transient_end = None
         for i, (idx_ppeak, idx_npeak) in enumerate(zip(ppeaks[1:], npeaks[1:]), 1):
             # mean = pos_x[ppeaks[max(0, i-4)]:ppeaks[min(ppeaks.size-1, i+4)]].mean()
             # ampl = pos_x[idx_ppeak]-mean
@@ -422,6 +425,9 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             amplitude.append((pos_x[idx_ppeak]-pos_x[idx_npeak])/2)
             log_dec = np.log(amplitude[i-1]/amplitude[i])
             damping_ratio.append(log_dec/(2*np.pi))
+            if transient_time is not None and transient_time > time[0]:
+                if time[idx_ppeak] > transient_time and transient_end is None:
+                    transient_end = amplitude[-1]
         amplitude = np.asarray(amplitude)  # for consistency in the following code
         
         if polar is not None:
@@ -447,6 +453,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                     
         fig, ax = plt.subplots()
         ax.semilogx(amplitude[:-1], damping_ratio, linewidth=2)
+        if transient_end is not None:
+            ax.axvline(transient_end, color="k", linestyle="--", label=f"t={transient_time}s")
         if polar is not None:
             for colour_idx, polar_idx in enumerate(polar_ids):
                 ax.semilogx(amplitude[polar_idx[0]], damping_ratio[polar_idx[0]], marker="o", color=colours[colour_idx])
@@ -458,17 +466,22 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                 ax.axvspan(amplitude[begin_above], amplitude[end_above], color=colour_mapping[alpha_threshold], 
                            alpha=0.3)
         ax.grid(which="both")
-                
+        
         handler = PlotHandler(fig, ax)
         x_lim = ax.get_xlim()
         x_lim = (max(x_lim[0], amplitude_range[0]), min(x_lim[1], amplitude_range[1]))
+        if x_lim[1] <= amplitude_range[0]:
+            title = f"No amplitude larger than 'amplitude_range[0]={amplitude_range[0]}'."
+        else:
+            thresholds = np.rad2deg(thresholds[::-1])
+            title = (rf"orange $\left(\alpha_{{eff}}>{np.round(thresholds[0], 1)}^{{\circ}}\right)$, "
+                    rf"red $\left(\alpha_{{eff}}>{np.round(thresholds[1], 1)}^{{\circ}}\right)$"
+                    "\n"
+                    rf"last period: $\alpha_{{eff,\text{{max}}}}\approx{np.round(max_aoa,1)}^{{\circ}}$")
+
         handler.update(x_labels="oscillation amplitude (m)", 
-                       y_labels=r"normal ($\approx$edgewise) damping ratio (-)", x_lims=x_lim)
-        thresholds = np.rad2deg(thresholds[::-1])
-        plt.title(rf"orange $\left(\alpha_{{eff}}>{np.round(thresholds[0], 1)}^{{\circ}}\right)$, "
-                rf"red $\left(\alpha_{{eff}}>{np.round(thresholds[1], 1)}^{{\circ}}\right)$"
-                "\n"
-                rf"last period: $\alpha_{{eff,\text{{max}}}}\approx{np.round(max_aoa,1)}^{{\circ}}$")
+                       y_labels=r"normal ($\approx$edgewise) damping ratio (-)", x_lims=x_lim, title=title,
+                       legend=True)
         handler.save(join(self.dir_plots, "damping.pdf"))
 
         if polar is not None:
@@ -483,7 +496,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                 alpha_ids = np.logical_and(alpha_polar>=alpha_lim[0], alpha_polar<=alpha_lim[1])
                 ax.plot(alpha_polar[alpha_ids], df_polar[coeff_name].iloc[alpha_ids], "--k")
                 handler = PlotHandler(fig, ax)
-                handler.update(x_labels=r"$\alpha$ (°)", y_labels=rf"${coeff_name}$ (-)")
+                handler.update(x_labels=r"$\alpha_{\text{eff}}$ (°)", y_labels=rf"${coeff_name}$ (-)")
                 handler.save(join(self.dir_plots, f"{coeff_name}_loops.pdf"))
 
 
@@ -1299,7 +1312,6 @@ class BLValidationPlotter(DefaultPlot, Rotations):
                        y_lims=[-1.5, 1.85], legend=True)
         handler.save(join(dir_plots, "C_fully_sep.pdf"))
         
-        
     def plot_meas_comparison(
         self,
         root_unsteady_data: str,
@@ -1383,7 +1395,7 @@ class BLValidationPlotter(DefaultPlot, Rotations):
             handler.save(join(dir_save, f"{coef}.pdf"))
 
     @staticmethod
-    def plot_model_comparison(dir_results: str):
+    def plot_model_comparison(dir_results: str):  # legacy, prob not used anymore
         dir_plots = helper.create_dir(join(dir_results, "plots", "model_comp"))[0]
         df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
         df_section_general = pd.read_csv(join(dir_results, "general.dat"))
@@ -1428,6 +1440,46 @@ class BLValidationPlotter(DefaultPlot, Rotations):
             handler.update(x_labels="t (s)", y_labels=y_labels[plot_param], legend=True)
             handler.save(join(dir_plots, f"model_comp_{plot_param}.pdf"))
     
+    @staticmethod
+    def BL_comparison(dir_validation: str, validation_type: str, ff_cases_result: str, period_res: int, ff_polar: str):
+        map_measurement_cols = {"C_dus": "CD", "C_lus": "CL", "C_mus": "CM"}
+        map_BLs = {"BL_AEROHOR": "AEROHOR", 
+                   "BL_first_order_IAG2": r"$1^{\text{st}}$ order IAG",
+                   "BL_openFAST_Cl_disc": "MGH openFAST",
+                   "BL_openFAST_Cl_disc_f_scaled": "MGH $f$-scaled"}
+        df_polar = pd.read_csv(ff_polar, delim_whitespace=True)
+        if "alpha" not in df_polar:
+            df_polar = pd.read_csv(ff_polar)
+        alpha_polar = df_polar["alpha"].to_numpy().flatten()
+
+        df_cases = pd.read_csv(ff_cases_result)
+        coeffs = ["C_dus", "C_lus", "C_mus"]
+        dir_comp = helper.create_dir(join(dir_validation, validation_type+f"_comparison"))[0]
+        for i_row, row in df_cases.iterrows():
+            has_measurement = False
+            if "measurement" in row:
+                has_measurement = True
+                df_measurement = pd.read_csv(join(dir_validation, "..", "unsteady", "unsteady_data", 
+                                                  row["measurement"]))
+            plots = {coeff: plt.subplots() for coeff in coeffs}
+            for BL_kind in listdir(dir_validation):
+                dir_BL = join(dir_validation, BL_kind)
+                if isdir(dir_BL) and "comparison" not in dir_BL:
+                    df_aero = pd.read_csv(join(dir_BL, validation_type, str(i_row), "f_aero.dat"))
+                    for coeff in coeffs:
+                        plots[coeff][1].plot(np.rad2deg(df_aero["alpha_steady"].iloc[-period_res-1:]),
+                                             df_aero[coeff].iloc[-period_res-1:], label=map_BLs[BL_kind])
+            for coeff, (fig, ax) in plots.items():
+                alpha_lim = ax.get_xlim()
+                polar_ids = np.logical_and(alpha_polar>=alpha_lim[0]-3, alpha_polar<=alpha_lim[1]+3)
+                ax.plot(alpha_polar[polar_ids], df_polar[coeff[:-2]].iloc[polar_ids], "k--", label="steady")
+                if has_measurement:
+                    if map_measurement_cols[coeff] in df_measurement:
+                        ax.plot(df_measurement["AOA"], df_measurement[map_measurement_cols[coeff]], "kx", ms=3)
+                handler = PlotHandler(fig, ax)
+                handler.update(x_labels=r"$\alpha_{\text{eff}}$", y_labels=coeff, legend=True)
+                handler.save(join(dir_comp, str(i_row)+f"_{coeff}.pdf"))
+
     @staticmethod
     def _reconstruct_force_coeffs(
         BL_scheme: str, 
