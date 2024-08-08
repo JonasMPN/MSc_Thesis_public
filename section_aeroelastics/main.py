@@ -45,12 +45,12 @@ def set_do(
 do = {
     "simulate": False,  # run a simulation
     "post_calc": False,  # peform post calculations
-    "plot_results": False,  # plot results,
+    "plot_results": True,  # plot results,
     "plot_results_fill": False,
     "plot_coupled_timeseries": False,
     "animate_results": False,
     "plot_combined_forced": False,
-    "plot_combined_LOC_amplitude": True
+    "plot_combined_LOC_amplitude": False
 }
 
 do = set_do(do=do,
@@ -65,15 +65,15 @@ do = set_do(do=do,
 # root = "data/NACA_643_618"  # set which airfoil polars to use. Simulatenously defines to root for the simulation data
 root = "data/FFA_WA3_221"  # set which airfoil polars to use. Simulatenously defines to root for the simulation data
 
-# sim_type = "free"
-sim_type = "free_parallel"
+sim_type = "free"
+# sim_type = "free_parallel"
 # sim_type = "forced"
 n_processes = 6  # for sim_type="forced" and sim_type="free_parallel".
 
 # aero_scheme = "qs"
-# aero_scheme = "BL_openFAST_Cl_disc"
+aero_scheme = "BL_openFAST_Cl_disc"
 # aero_scheme = "BL_openFAST_Cl_disc_f_scaled"
-aero_scheme = "BL_AEROHOR"
+# aero_scheme = "BL_AEROHOR"
 # aero_scheme = "BL_first_order_IAG2"
 # aero_scheme = "BL_Staeblein"
 
@@ -128,8 +128,8 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         # definition has no influence on "run_forced_parallel". It only influences "free" and "free_parallel".
         # Otherwise, the NACA definition is used for "free" and "free_parallel" (not yet, do in future).
         dt = 0.01  # if dt<1e-5, the dt rounding in compress_oscillation() in calculation_utils.py needs to be adapted
-        t_end = 600
-        save_last = 200  # the last 'save_last' seconds of the simulation will be saved
+        t_end = 400
+        save_last = 400  # the last 'save_last' seconds of the simulation will be saved
         t = dt*np.arange(int(t_end/dt))  # set the time array for the simulation
         NACA_643_618 = ThreeDOFsAirfoil(t, verbose=False)
         # set the calculation scheme for the aerodynamic forces
@@ -170,7 +170,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         if sim_type == "free":
             with open(join(case_dir, "section_data.json"), "w") as f:
                 json.dump(structure_def, f, indent=4)
-            alpha = 10
+            alpha = 17.5
             # alpha = None
 
             inflow = get_inflow(t, [(0, 0, 20, alpha)], init_velocity=0.1)
@@ -192,7 +192,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             # initial conditions for position in [x, y, rotation in rad]
             # init_pos = np.zeros(3)
             # init_pos[0] += 5*np.cos(init_pos[2])
-            # init_pos[0] *= 1.3
+            init_pos[0] *= 1.3
             # init_pos[0] += 1.3
             # init_pos[1] += 5*np.sin(init_pos[2])
             # init_pos[1] += 4
@@ -289,7 +289,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
 
     if plot_results:
         trailing_every = 5
-        time_frame = (560, 600)
+        time_frame = (0, 400)
         file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
         if sim_type == "free":
             dir_sim = join(root, "simulation", "free", aero_scheme, case_name)  # define path to the root of the simulation results
@@ -298,11 +298,11 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             dir_sim = join(root, "simulation", sim_type, aero_scheme, case_name, case_id)
         dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
         plotter = Plotter(file_profile, dir_sim, dir_plots, structure_def["coordinate_system"]) 
-        plotter.force(trailing_every=trailing_every, time_frame=time_frame)  # plot various forces of the simulation
-        plotter.energy(trailing_every=trailing_every, time_frame=time_frame)  # plot various energies and work done by forces of the simulation
+        # plotter.force(trailing_every=trailing_every, time_frame=time_frame)  # plot various forces of the simulation
+        # plotter.energy(trailing_every=trailing_every, time_frame=time_frame)  # plot various energies and work done by forces of the simulation
         if "BL" in aero_scheme:
             plotter.Beddoes_Leishman(trailing_every=trailing_every, time_frame=time_frame)
-        plotter.damping(("alpha_eff", [25, 35]))
+        plotter.damping(("alpha_eff", [25, 35]), polar=["data/FFA_WA3_221/polars_new.dat", 5])
     
     if plot_results_fill:
         trailing_every = 5
