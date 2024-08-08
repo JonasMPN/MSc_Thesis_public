@@ -581,7 +581,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         # --------- MODULE leading-edge vortex position
         sim_res.tau_vortex[i] = sim_res.tau_vortex[i-1]
         if sim_res.C_nsEq[i] > self._C_n_crit:
-            sim_res.tau_vortex[i] += 0.225*sim_res.ds[i-1]  # 0.225 because sim_res.ds[i-1]/2
+            sim_res.tau_vortex[i] += 0.45*sim_res.ds[i-1]
         elif sim_res.C_nsEq[i] < self._C_n_crit and d_alpha_qs >= 0:
             sim_res.tau_vortex[i] *= np.exp(-sim_res.ds[i-1])
         
@@ -593,7 +593,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         
         # --------- MODULE moment coefficient
         # viscous
-        sim_res.C_mf[i] = self.C_m_polar(sim_res.alpha_eff[i])
+        sim_res.C_mf[i] = self.C_m_polar(sim_res.alpha_sEq[i])
 
         # vortex
         C_Pv = K_v*(1-np.cos(np.pi*sim_res.tau_vortex[i]/tau_vortex_pure_decay))
@@ -622,7 +622,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         rot = self.passive_3D_planar(sim_res.pos[i, 2])  # since it's C_t and C_n
         coeffs = rot@coefficients
         coeffs[0] = -coeffs[0]
-        C_d_polar = self.C_d_polar(sim_res.alpha_eff[i])
+        C_d_polar = self.C_d_polar(sim_res.alpha_qs[i])
         if coeffs[0] < C_d_polar and sim_res.alpha_qs[i]<self._alpha_crit:
             coeffs[0] = C_d_polar
 
@@ -762,7 +762,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         
         # --------- MODULE leading-edge vortex position
         if sim_res.C_nsEq[i] >= self._C_n_crit:
-            sim_res.tau_vortex[i] = sim_res.tau_vortex[i-1]+0.225*sim_res.ds[i-1]
+            sim_res.tau_vortex[i] = sim_res.tau_vortex[i-1]+0.45*sim_res.ds[i-1]
         else:
             if d_alpha_qs >= 0:
                 sim_res.tau_vortex[i] = 0

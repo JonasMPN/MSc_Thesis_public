@@ -79,15 +79,25 @@ def run_forced(
         NACA_643_618 = ThreeDOFsAirfoil(time, verbose=False)
         # set the calculation scheme for the aerodynamic forces
         if aero_scheme == "qs":
-            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="quasi_steady", 
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="quasi_steady",
                                        chord=structure_data["chord"], pitching_around=0.25, alpha_at=0.75)
-        elif aero_scheme == "BL_chinese":
-            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_chinese", A1=0.3, A2=0.7, b1=0.14,
-                                       b2=0.53, pitching_around=0.25, alpha_at=0.75, chord=structure_data["chord"])
+        elif aero_scheme == "BL_AEROHOR":
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_AEROHOR", A1=0.3, A2=0.7, b1=0.7,
+                                       b2=0.53, pitching_around=0.25, alpha_at=0.75, chord=structure_data["chord"], 
+                                       alpha_critical=14.2)
+        elif aero_scheme == "BL_first_order_IAG2":
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_first_order_IAG2", A1=0.3, 
+                                       A2=0.7, b1=0.7, b2=0.53, pitching_around=0.25, alpha_at=0.75, 
+                                       chord=structure_data["chord"], alpha_critical=14.2)
         elif aero_scheme == "BL_openFAST_Cl_disc":
-            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_openFAST_Cl_disc", A1=0.165, #
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_openFAST_Cl_disc", A1=0.165, 
                                        A2=0.335, b1=0.0445, b2=0.3, pitching_around=0.25, alpha_at=0.75, 
                                        chord=structure_data["chord"])
+        elif aero_scheme == "BL_openFAST_Cl_disc_f_scaled":
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_openFAST_Cl_disc_f_scaled",
+                                       A1=0.165, A2=0.335, b1=0.0445, b2=0.3, pitching_around=0.25, alpha_at=0.75,
+                                       chord=structure_data["chord"])
+        
         # set the calculation scheme for the structural damping and stiffness forces
         NACA_643_618.set_struct_calc("linear_xy", **structure_data)
         # set the time integration scheme
@@ -95,7 +105,7 @@ def run_forced(
         NACA_643_618.simulate_along_path(inflow, coordinate_system, 0, 0, pos, vel)  # perform simulation
         NACA_643_618.save(case_dir)  # save simulation results
 
-        print(f"Process {process_id} done with job {i_job+1} of {n_jobs} jobs ({np.round((i_job+1)/n_jobs*1e2, 1)}%, "
+        print(f"Process {process_id} done with job {i_job+1} of {n_jobs} ({np.round((i_job+1)/n_jobs*1e2, 1)}%, "
               f"case_id: {i_case}).")
 
 def _run_forced_parallel(
@@ -264,7 +274,7 @@ def _run_free(
             NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="quasi_steady",
                                        chord=structure_data["chord"], pitching_around=0.25, alpha_at=0.75)
         elif aero_scheme == "BL_AEROHOR":
-            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_AEROHOR", A1=0.3, A2=0.7, b1=0.14,
+            NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_AEROHOR", A1=0.3, A2=0.7, b1=0.7,
                                        b2=0.53, pitching_around=0.25, alpha_at=0.75, chord=structure_data["chord"], 
                                        alpha_critical=14.2)
         elif aero_scheme == "BL_first_order_IAG2":

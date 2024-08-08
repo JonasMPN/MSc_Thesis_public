@@ -96,8 +96,13 @@ def run_BeddoesLeishman(
     pitch_around = 0.5
     alpha_at = 0.75
     airfoil.set_aero_calc(dir_polar=dir_airfoil, file_polar=file_polar, scheme=BL_scheme, A1=A1, A2=A2, b1=b1, 
-                          b2=b2, pitching_around=pitch_around, alpha_at=alpha_at)
-    airfoil._init_aero_force(airfoil, chord=chord, pitching_around=pitch_around, alpha_at=alpha_at, A1=A1, A2=A2)
+                          b2=b2, pitching_around=pitch_around, alpha_at=alpha_at,
+                          alpha_critical=15.1,
+                          )
+    airfoil._init_aero_force(airfoil, chord=chord, pitching_around=pitch_around, alpha_at=alpha_at, A1=A1, A2=A2,
+                             b1=b1, b2=b2,
+                             alpha_critical=15.1,
+                          )
     coeffs = np.zeros((t.size, 3))
     for i in range(overall_res):
         coeffs[i, :] = airfoil._aero_force(airfoil, i, A1=A1, A2=A2, b1=b1, b2=b2, chord=chord, 
@@ -486,8 +491,8 @@ if __name__ == "__main__":
     dir_airfoil = "data/S801/"
     file_polar = "polars/polars_G075.dat"
     dir_HHT_alpha_validation = "data/HHT_alpha_validation"
-    # BL_scheme = "BL_AEROHOR"
-    BL_scheme = "BL_first_order_IAG2"
+    BL_scheme = "BL_AEROHOR"
+    # BL_scheme = "BL_first_order_IAG2"
     # BL_scheme = "BL_openFAST_Cl_disc"
     # BL_scheme = "BL_openFAST_Cl_disc_f_scaled"
     # BL_scheme = "BL_Staeblein"
@@ -517,7 +522,7 @@ if __name__ == "__main__":
         ffile_polar = join(dir_airfoil, file_polar)
         aoa_buffer = 3
         plotter = BLValidationPlotter()
-        plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), ffile_polar)
+        # plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), ffile_polar)
         dir_validations = join(dir_airfoil, "validation", BL_scheme, "measurement")
         dir_unsteady = join(dir_airfoil, "unsteady")
         df_cases = pd.read_csv(join(dir_unsteady, "cases.dat"))
@@ -545,7 +550,7 @@ if __name__ == "__main__":
             
     if do["plot_BL_results_polar"]:
         ffile_polar = join(dir_airfoil, file_polar)
-        # file_polar = join(dir_airfoil, "polars/polars_G075.dat")
+        file_polar = join(dir_airfoil, "polars/polars_G075.dat")
         plotter = BLValidationPlotter()
         plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), ffile_polar)
         dir_validations = join(dir_airfoil, "validation", BL_scheme, "polar")

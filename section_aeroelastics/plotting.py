@@ -78,6 +78,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         use_ids = None
         if time_frame is not None:
             use_ids = np.logical_and(self.time >= time_frame[0], self.time <= time_frame[1])
+            if use_ids.sum() == self.time.size:
+                postfix = ""
+            else:
+                postfix = f"_{time_frame[0]}_{time_frame[1]}"
         pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
         pos = pos if use_ids is None else pos[use_ids, :]
         rot = self._rot.active_2D(pos[-1, 2])
@@ -108,7 +112,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         
         axs = self._plot_to_mosaic(axs, plot, dfs, param_name, time_frame=time_frame)
         handler.update(legend=True)
-        fig.savefig(join(self.dir_plots, "forces.pdf"))
+        handler.save(join(self.dir_plots, f"forces{postfix}.pdf"))
                     
     def force_fill(self, equal_y: tuple[str]=None, trailing_every: int=40, alpha: int=0.2, peak_distance: int=400,
                    time_frame: tuple[float, float]=None):
@@ -156,7 +160,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         axs = self._plot_and_fill_to_mosaic(axs, plot, dfs, param_name, alpha=alpha, peak_distance=peak_distance,
                                             time_frame=time_frame)
         handler.update(legend=True)
-        fig.savefig(join(self.dir_plots, "forces_fill.pdf"))
+        handler.save(join(self.dir_plots, "forces_fill.pdf"))
 
     def energy(self, equal_y: tuple[str]=None, trailing_every: int=40, time_frame: tuple[float, float]=None):
         """Plots the history of the airfoil movement and different energies/power.
@@ -174,6 +178,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         use_ids = None
         if time_frame is not None:
             use_ids = np.logical_and(self.time >= time_frame[0], self.time <= time_frame[1])
+            if use_ids.sum() == self.time.size:
+                postfix = ""
+            else:
+                postfix = f"_{time_frame[0]}_{time_frame[1]}"
         pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
         pos = pos if use_ids is None else pos[use_ids, :]
         rot = self._rot.active_2D(pos[-1, 2])
@@ -214,7 +222,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         n_data_points = pos.shape[0]
         axs = self._plot_to_mosaic(axs, plot, dfs, param_name, time_frame=time_frame)
         handler.update(legend=True)
-        fig.savefig(join(self.dir_plots, "energy.pdf"))
+        handler.save(join(self.dir_plots, f"energy{postfix}.pdf"))
     
     def energy_fill(self, equal_y: tuple[str]=None, trailing_every: int=40, alpha: int=0.2, peak_distance: int=400,
                     time_frame: tuple[float, float]=None):
@@ -271,7 +279,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         axs = self._plot_and_fill_to_mosaic(axs, plot, dfs, param_name, alpha=alpha, peak_distance=peak_distance,
                                             time_frame=time_frame)
         handler.update(legend=True)
-        fig.savefig(join(self.dir_plots, "energy_fill.pdf"))
+        handler.save(join(self.dir_plots, "energy_fill.pdf"))
 
     def Beddoes_Leishman(self, equal_y: tuple[str]=None, trailing_every: int=40, time_frame: tuple[float, float]=None):
         """Plots the history of the airfoil movement and different BL parameters.
@@ -290,6 +298,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         use_ids = None
         if time_frame is not None:
             use_ids = np.logical_and(self.time >= time_frame[0], self.time <= time_frame[1])
+            if use_ids.sum() == self.time.size:
+                postfix = ""
+            else:
+                postfix = f"_{time_frame[0]}_{time_frame[1]}"
         pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
         pos = pos if use_ids is None else pos[use_ids, :]
         rot = self._rot.active_2D(pos[-1, 2])
@@ -309,7 +321,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         n_data_points = pos.shape[0]
         axs = self._plot_to_mosaic(axs, plot, dfs, param_name, time_frame=time_frame)
         handler.update(legend=True)
-        fig.savefig(join(self.dir_plots, "BL.pdf"))
+        handler.save(join(self.dir_plots, f"BL{postfix}.pdf"))
 
     def Beddoes_Leishman_fill(self, equal_y: tuple[str]=None, trailing_every: int=40, alpha: int=0.2, 
                               peak_distance: int=400, time_frame: tuple[float, float]=None):
@@ -346,7 +358,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         axs = self._plot_and_fill_to_mosaic(axs, plot, dfs, param_name, alpha=alpha, peak_distance=peak_distance,
                                             time_frame=time_frame)
         handler.update(legend=True)
-        fig.savefig(join(self.dir_plots, "BL_fill.pdf"))
+        handler.save(join(self.dir_plots, "BL_fill.pdf"))
 
     def damping(self, 
                 alpha_thresholds: tuple[float, list], 
@@ -368,7 +380,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         ppeaks = find_peaks(pos_x)[0]
         npeaks = find_peaks(-pos_x)[0]
         max_aoa = np.rad2deg(alpha_th[ppeaks[-2]:ppeaks[-1]]).max()
-
+        
         thresholds = alpha_thresholds[1]  # deg
         thresholds = np.deg2rad(thresholds[::-1])
         alpha_above_threshold = {alpha: [] for alpha in thresholds}
@@ -388,6 +400,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                     end_above[alpha_threshold] = peak_id
             for alpha_threshold in thresholds:
                 if start_above[alpha_threshold] < end_above[alpha_threshold] and above_set[alpha_threshold]:
+                    alpha_above_threshold[alpha_threshold].append((start_above[alpha_threshold], 
+                                                                   end_above[alpha_threshold]))
                     alpha_above_threshold[alpha_threshold].append((start_above[alpha_threshold], 
                                                                    end_above[alpha_threshold]))
                     above_set[alpha_threshold] = False
@@ -446,8 +460,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         ax.grid(which="both")
                 
         handler = PlotHandler(fig, ax)
+        x_lim = ax.get_xlim()
+        x_lim = (max(x_lim[0], amplitude_range[0]), min(x_lim[1], amplitude_range[1]))
         handler.update(x_labels="oscillation amplitude (m)", 
-                       y_labels=r"normal ($\approx$edgewise) damping ratio (-)")
+                       y_labels=r"normal ($\approx$edgewise) damping ratio (-)", x_lims=x_lim)
         thresholds = np.rad2deg(thresholds[::-1])
         plt.title(rf"orange $\left(\alpha_{{eff}}>{np.round(thresholds[0], 1)}^{{\circ}}\right)$, "
                 rf"red $\left(\alpha_{{eff}}>{np.round(thresholds[1], 1)}^{{\circ}}\right)$"
@@ -493,7 +509,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                         (self.df_general, "general", "pos_flap", r"$x_{\text{flap}}$ (m)"),
                         (self.df_general, "general", "vel_flap_xy", r"$u_{\text{flap}}$ (m/s)"),
                         (self.df_general, "general", "pos_tors", r"$x_{\text{torsion}}$ (deg)")]
-        couples = [(a, b), (c, b), (d, b), (f, b), (b, from_general[0])]
+        # couples = [(a, b), (c, b), (d, b), (f, b), (b, from_general[0])]
+        couples = [(b, a), (b, c), (b, d), (b, f), (from_general[0], b)]
         # couples = [(from_general[1], from_general[0]), (from_general[2], from_general[0]), (from_general[2], from_general[1])]
         # couples = [(b, from_general[1])]
         # couples = [p for p in product(from_f_aero, from_general)] + [p for p in product(from_power, from_general)]
@@ -513,7 +530,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             val_specifc = df_specific[col_specific].to_numpy()
             
             val_general = np.rad2deg(val_general)
-            # val_specifc = np.rad2deg(val_specifc)
+            val_specifc = np.rad2deg(val_specifc)
             add = None
             if col_specific == "C_lus" and "alpha" in col_general:
                 add = (df_polar["alpha"], df_polar["C_l"])
@@ -1292,34 +1309,44 @@ class BLValidationPlotter(DefaultPlot, Rotations):
         coeffs_polar: dict[str, np.ndarray]=None
         ):
         map_measurement = {"AOA": "alpha", "CL": "C_l", "CD": "C_d", "CM": "C_m"}
-        data_meas = {coeff: {} for coeff in ["C_d", "C_l", "C_m"]}
+        data_meas = {cat: {coeff: {} for coeff in ["C_d", "C_l", "C_m"]} for cat in ["first", "second"]}
+        sep_set = False
         for param, file in files_unsteady_data.items():
+            if param.startswith("sep_"):
+                sep_set = True
+                cat = "second"
+                param = param[4:]
+            else:
+                cat = "first"
             param = param if len(param.split("_")) == 1 else param.split("_")[0]
             delim_whitespace = False if param != "HAWC2" else True
             df = pd.read_csv(join(root_unsteady_data, file), delim_whitespace=delim_whitespace)
             for coeff in df.columns[1:]:
-                data_meas[map_measurement[coeff]][param] = [df["AOA"], df[coeff]]
+                data_meas[cat][map_measurement[coeff]][param] = [df["AOA"], df[coeff]]
                 
         # df_aerohor = pd.read_csv(join(dir_results, "aerohor_res.dat"))
         df_section = pd.read_csv(join(dir_results, "f_aero.dat"))
         
         dir_save = helper.create_dir(join(dir_results, "plots"))[0]
-        for coeff in ["C_d", "C_l", "C_m"]:
-            fig, ax = plt.subplots()
-            handler = PlotHandler(fig, ax)
-            if coeff in coeffs_polar:
-                ax.plot(*coeffs_polar[coeff], **self.plt_settings[coeff])
-            for tool, data in data_meas[coeff].items():
-                ax.plot(data[0], data[1], **self.plt_settings[coeff+f"_{tool}"])
-                # ax.plot(data[0], data[1], **self.plt_settings[coeff])
-            # if coef != "C_m":
-                # ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
-                #         **self.plt_settings["aerohor"])
-            ax.plot(np.rad2deg(df_section["alpha_steady"][-period_res-1:]), df_section[coeff][-period_res-1:], 
-                    **self.plt_settings["section"])
-            handler.update(x_labels=r"$\alpha_{\text{steady}}$ (°)", y_labels=rf"${{{coeff[0]}}}_{{{coeff[2]}}}$ (-)",
-                           legend=True)
-            handler.save(join(dir_save, f"{coeff}.pdf"))
+        cats = ["first"] if not sep_set else ["first", "second"]
+        prefixes = [""] if not sep_set else ["", "sep_"]
+        for cat, prefix in zip(cats, prefixes):
+            for coeff in ["C_d", "C_l", "C_m"]:
+                fig, ax = plt.subplots()
+                handler = PlotHandler(fig, ax)
+                if coeff in coeffs_polar:
+                    ax.plot(*coeffs_polar[coeff], **self.plt_settings[coeff])
+                for tool, data in data_meas[cat][coeff].items():
+                    ax.plot(data[0], data[1], **self.plt_settings[coeff+f"_{tool}"])
+                    # ax.plot(data[0], data[1], **self.plt_settings[coeff])
+                # if coef != "C_m":
+                    # ax.plot(df_aerohor["alpha_steady"][-period_res-1:], df_aerohor[coef][-period_res-1:], 
+                    #         **self.plt_settings["aerohor"])
+                ax.plot(np.rad2deg(df_section["alpha_steady"][-period_res-1:]), df_section[coeff][-period_res-1:], 
+                        **self.plt_settings["section"])
+                handler.update(x_labels=r"$\alpha_{\text{steady}}$ (°)", y_labels=rf"${{{coeff[0]}}}_{{{coeff[2]}}}$ (-)",
+                            legend=True)
+                handler.save(join(dir_save, f"{prefix}{coeff}.pdf"))
 
     def plot_over_polar(
         self,

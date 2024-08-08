@@ -531,6 +531,12 @@ class _DefaultMeasurement(_BaseDefaultPltSettings):
         "C_l_openFAST",
         "C_d_openFAST",
         "C_m_openFAST",
+        "C_l_measurement",
+        "C_d_measurement",
+        "C_m_measurement",
+        "C_l_IAG",
+        "C_d_IAG",
+        "C_m_IAG",
     ]
 
     _labels = {
@@ -545,20 +551,32 @@ class _DefaultMeasurement(_BaseDefaultPltSettings):
         "C_l_openFAST": "openFAST",
         "C_d_openFAST": "openFAST",
         "C_m_openFAST": "openFAST",
+        "C_l_IAG": "IAG",
+        "C_d_IAG": "IAG",
+        "C_m_IAG": "IAG",
+        "C_l_measurement": "measurement",
+        "C_d_measurement": "measurement",
+        "C_m_measurement": "measurement",
     }
 
     _markers = {
-        "C_l": "x",
-        "C_d": "x",
+        "C_l": "o",
+        "C_d": "o",
         "C_l_specify": "x",
         "C_d_specify": "+",
-        "C_m": "x",
+        "C_m": "o",
         "C_l_HAWC2": "+",
         "C_d_HAWC2": "+",
         "C_m_HAWC2": "+",
         "C_l_openFAST": "x",
         "C_d_openFAST": "x",
         "C_m_openFAST": "x",
+        "C_l_IAG": "x",
+        "C_d_IAG": "x",
+        "C_m_IAG": "x",
+        "C_l_measurement": "+",
+        "C_d_measurement": "+",
+        "C_m_measurement": "+",
     }
 
     _marker_size = {
