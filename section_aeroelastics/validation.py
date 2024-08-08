@@ -71,9 +71,9 @@ def run_BeddoesLeishman(
         dir_profile: str, BL_scheme: str, validation_against: str, index_unsteady_data: int,
         k: float, inflow_speed: float, chord: float, amplitude: float, mean: float, 
         period_res: int=1000, file_polar: str="polars_new.dat",
-        A1: float=0.3, A2: float=0.7, b1: float=0.7, b2: float=0.53 # IAG2
+        # A1: float=0.3, A2: float=0.7, b1: float=0.7, b2: float=0.53 # IAG2
         # A1: float=0.3, A2: float=0.7, b1: float=0.14, b2: float=0.53 # AEROHOR
-        # A1: float=0.165, A2: float=0.335, b1: float=0.0445, b2: float=0.3 #HAWC2
+        A1: float=0.165, A2: float=0.335, b1: float=0.0445, b2: float=0.3 #HAWC2
         ):
     n_periods = 8
     overall_res = n_periods*period_res
@@ -473,9 +473,10 @@ if __name__ == "__main__":
     do = {
         "separation_point_calculation": False,
         "separation_point_plots": False,
-        "BL": True,
-        "plot_BL_results_meas": True,
+        "BL": False,
+        "plot_BL_results_meas": False,
         "plot_BL_results_polar": False,
+        "plot_BL_comparison": True,
         "calc_HHT_alpha_response": False,
         "plot_HHT_alpha_response": False,
         "HHT_alpha_undamped": False,
@@ -486,15 +487,15 @@ if __name__ == "__main__":
         "HHT_alpha_rotation": False,
         "ef_vs_xy": False
     }
-    # dir_airfoil = "data/FFA_WA3_221"
-    # file_polar = "polars_new.dat"
-    dir_airfoil = "data/S801/"
-    file_polar = "polars/polars_G075.dat"
+    dir_airfoil = "data/FFA_WA3_221"
+    file_polar = "polars_new.dat"
+    # dir_airfoil = "data/S801/"
+    # file_polar = "polars/polars_G075.dat"
     dir_HHT_alpha_validation = "data/HHT_alpha_validation"
-    BL_scheme = "BL_AEROHOR"
+    # BL_scheme = "BL_AEROHOR"
     # BL_scheme = "BL_first_order_IAG2"
     # BL_scheme = "BL_openFAST_Cl_disc"
-    # BL_scheme = "BL_openFAST_Cl_disc_f_scaled"
+    BL_scheme = "BL_openFAST_Cl_disc_f_scaled"
     # BL_scheme = "BL_Staeblein"
     HHT_alpha_case = "test"
     sep_point_test_res = 202
@@ -550,7 +551,6 @@ if __name__ == "__main__":
             
     if do["plot_BL_results_polar"]:
         ffile_polar = join(dir_airfoil, file_polar)
-        file_polar = join(dir_airfoil, "polars/polars_G075.dat")
         plotter = BLValidationPlotter()
         plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), ffile_polar)
         dir_validations = join(dir_airfoil, "validation", BL_scheme, "polar")
@@ -558,6 +558,14 @@ if __name__ == "__main__":
         for case_name in listdir(dir_validations):
             dir_case = join(dir_validations, case_name)
             plotter.plot_over_polar(ffile_polar, dir_case, period_res, df_cases.iloc[int(case_name)])
+    
+    if do["plot_BL_comparison"]:
+        val_type = "measurement"
+        dir_val_root = join(dir_airfoil, "validation")
+        ff_cases = join(dir_airfoil, "unsteady", "cases_results.dat")
+        ffile_polar = join(dir_airfoil, file_polar)
+        plotter = BLValidationPlotter()
+        plotter.BL_comparison(dir_val_root, "measurement", ff_cases, period_res, ffile_polar)
   
     if do["calc_HHT_alpha_response"] or do["plot_HHT_alpha_response"]:
         T = 1
