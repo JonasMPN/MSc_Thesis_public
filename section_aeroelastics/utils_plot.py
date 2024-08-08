@@ -38,6 +38,7 @@ class PlotHandler(Helper):
             self,
             x_labels: str | dict[str, str]=_default,
             y_labels: str | dict[str, str]=_default,
+            title: str | dict[str, str]=_default,
             x_lims: tuple | dict[str, tuple]=_default,
             y_lims: tuple | dict[str, tuple]=_default,
             x_lims_from: tuple | dict=_default,
@@ -102,7 +103,8 @@ class PlotHandler(Helper):
             "y_lims": "set_ylim",
             "legend": "legend",
             "aspect": "set_aspect",
-            "grid": "grid"
+            "grid": "grid",
+            "title": "set_title",
         }
         self._handle_axes(**{map_params_to_axs_methods[param]: values for param, values in filled.items()})
         return self.fig, self.axs
@@ -118,6 +120,7 @@ class PlotHandler(Helper):
             self,
             set_xlabel: dict[str]=_default,
             set_ylabel: dict[str]=_default,
+            set_title: dict[str]=_default,
             set_xlim: dict[tuple]=_default,
             set_ylim: dict[tuple]=_default,
             legend: dict[bool]=_default,
