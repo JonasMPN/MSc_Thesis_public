@@ -408,11 +408,13 @@ class AeroForce(SimulationSubRoutine, Rotations):
                                 "alpha_qs", "X_lag", "Y_lag", "alpha_eff", "alpha_sEq",
                                 "C_nc", "C_nf", "C_nsEq", "C_nv_instant", "C_nv", "C_ni", "C_npot", "C_nvisc",
                                 "C_tf",    
-                                "C_mf", "C_mV", "C_mC"],
+                                "C_mf", "C_mV", "C_mC",
+                                "C_dus", "C_lus", "C_mus"],
         "BL_AEROHOR": ["ds", "tau_vortex", "D_bl_n", "D_bl_t", "f_n_Dp", "f_n", "f_t_Dp", "f_t", "D_p", "D_i",
                        "alpha_qs", "X_lag", "Y_lag", "alpha_eff", "alpha_sEq",
                        "C_nc", "C_nf", "C_nsEq", "C_nv_instant", "C_nv", "C_ni", "C_npot", 
-                       "C_tf", "C_tpot"],
+                       "C_tf", "C_tpot",
+                       "C_dus", "C_lus", "C_mus"],
         "BL_openFAST_Cl_disc": ["alpha_qs", "alpha_eff", "x1", "x2", "x3", "x4", "C_lpot", "C_lc", "C_lnc", "C_ds", 
                                 "C_dc", "C_dsep", "C_ms", "C_mnc", "f_steady", "alpha_eq", "C_dus", "C_lus", "C_mus"],
         "BL_Staeblein": ["alpha_qs", "alpha_eff", "x1", "x2", "C_lc", "rel_inflow_speed", "rel_inflow_accel",
@@ -622,17 +624,20 @@ class AeroForce(SimulationSubRoutine, Rotations):
         rot = self.passive_3D_planar(sim_res.pos[i, 2])  # since it's C_t and C_n
         coeffs = rot@coefficients
         coeffs[0] = -coeffs[0]
-        C_d_polar = self.C_d_polar(sim_res.alpha_qs[i])
-        if coeffs[0] < C_d_polar and sim_res.alpha_qs[i]<self._alpha_crit:
-            coeffs[0] = C_d_polar
-
+        # C_d_polar = self.C_d_polar(sim_res.alpha_qs[i])
+        # if coeffs[0] < C_d_polar and sim_res.alpha_qs[i]<self._alpha_crit:
+        #     coeffs[0] = C_d_polar
+        
+        sim_res.C_dus[i] = coeffs[0]
+        sim_res.C_lus[i] = coeffs[1]
+        sim_res.C_mus[i] = coeffs[2]
         # for return of [C_d, C_l, C_m]
-        # return coeffs
+        return coeffs
 
         # for return of [f_x, f_y, mom]
-        dynamic_pressure = density/2*rel_flow_vel**2
-        forces = dynamic_pressure*np.asarray([chord, chord, -chord**2])*coefficients
-        return forces  # for [f_x, f_y, mom]
+        # dynamic_pressure = density/2*rel_flow_vel**2
+        # forces = dynamic_pressure*np.asarray([chord, chord, -chord**2])*coefficients
+        # return forces  # for [f_x, f_y, mom]
 
     def _init_BL_first_order_IAG2(
             self,
@@ -783,13 +788,16 @@ class AeroForce(SimulationSubRoutine, Rotations):
         coeffs = rot@coefficients
         coeffs[0] = -coeffs[0]+self._C_d0  # C_t is facing forwards, C_d backwards
 
+        sim_res.C_dus[i] = coeffs[0]
+        sim_res.C_lus[i] = coeffs[1]
+        sim_res.C_mus[i] = coeffs[2]
         # for return of [C_d, C_l, C_m] uncomment next line
-        # return coeffs
+        return coeffs
 
         # for return of [f_x, f_y, mom] uncommmet next lines
-        dynamic_pressure = density/2*rel_flow_vel**2
-        forces = dynamic_pressure*np.asarray([chord, chord, -chord**2])*coeffs 
-        return forces  # for [f_x, f_y, mom]
+        # dynamic_pressure = density/2*rel_flow_vel**2
+        # forces = dynamic_pressure*np.asarray([chord, chord, -chord**2])*coeffs 
+        # return forces  # for [f_x, f_y, mom]
 
     def _init_BL_AEROHOR(
             self,
