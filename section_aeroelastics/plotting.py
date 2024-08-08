@@ -348,7 +348,11 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         handler.update(legend=True)
         fig.savefig(join(self.dir_plots, "BL_fill.pdf"))
 
-    def damping(self, alpha_thresholds: tuple[float, list], time_frame: tuple[float, float]=None):
+    def damping(self, 
+                alpha_thresholds: tuple[float, list], 
+                time_frame: tuple[float, float]=None,
+                polar: tuple[str, list[float]|int]=None,
+                colours: list[str]=["chocolate", "grey", "orangered", "forestgreen", "royalblue", "crimson"]):
         use_ids = np.arange(self.time.size)
         time = self.time
         if time_frame is not None:
@@ -384,7 +388,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                     end_above[alpha_threshold] = peak_id
             for alpha_threshold in thresholds:
                 if start_above[alpha_threshold] < end_above[alpha_threshold] and above_set[alpha_threshold]:
-                    alpha_above_threshold[alpha_threshold].append((start_above[alpha_threshold], end_above[alpha_threshold]))
+                    alpha_above_threshold[alpha_threshold].append((start_above[alpha_threshold], 
+                                                                   end_above[alpha_threshold]))
                     above_set[alpha_threshold] = False
 
         for alpha_threshold in thresholds:
@@ -403,12 +408,37 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             amplitude.append((pos_x[idx_ppeak]-pos_x[idx_npeak])/2)
             log_dec = np.log(amplitude[i-1]/amplitude[i])
             damping_ratio.append(log_dec/(2*np.pi))
-
-
+        amplitude = np.asarray(amplitude)  # for consistency in the following code
+        
+        if polar is not None:
+            df_polar = pd.read_csv(polar[0], delim_whitespace=True)
+            if "alpha" not in df_polar:
+                df_polar = pd.read_csv(polar[0])
+            C_lus = self.df_f_aero["C_lus"]
+            C_dus = self.df_f_aero["C_dus"]
+            alpha_eff = self.df_f_aero["alpha_eff"]
+            if isinstance(polar[1], list):
+                polar_ids = [(idx, idx+1) for idx in ppeaks[polar[1]]]
+            else:
+                ampl_min, ampl_max = min(amplitude), max(amplitude)
+                if polar[1] >= len(colours):
+                    raise ValueError(f"Missing {polar[1]-len(colours)} 'colours'. Add more to the method call.")
+                ampls = np.exp(np.linspace(np.log(ampl_min), np.log(ampl_max), polar[1]))
+                polar_ids = []
+                for ampl in ampls:
+                    idx_greater = (amplitude>=ampl).argmax()
+                    idx_smaller = (amplitude<=ampl).argmax()
+                    idx = max(idx_greater, idx_smaller)
+                    polar_ids.append((idx, idx+1))
+                    
         fig, ax = plt.subplots()
         ax.semilogx(amplitude[:-1], damping_ratio, linewidth=2)
-        colours = ["darkorange", "orangered"]
-        colour_mapping = {alpha_threshold: colours[i] for i, alpha_threshold in enumerate(thresholds[::-1])}
+        if polar is not None:
+            for colour_idx, polar_idx in enumerate(polar_ids):
+                ax.semilogx(amplitude[polar_idx[0]], damping_ratio[polar_idx[0]], marker="o", color=colours[colour_idx])
+        
+        colours_AoA_range = ["darkorange", "orangered"]
+        colour_mapping = {alpha_threshold: colours_AoA_range[i] for i, alpha_threshold in enumerate(thresholds[::-1])}
         for alpha_threshold in thresholds:
             for begin_above, end_above in alpha_above_threshold[alpha_threshold]:
                 ax.axvspan(amplitude[begin_above], amplitude[end_above], color=colour_mapping[alpha_threshold], 
@@ -424,6 +454,22 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                 "\n"
                 rf"last period: $\alpha_{{eff,\text{{max}}}}\approx{np.round(max_aoa,1)}^{{\circ}}$")
         handler.save(join(self.dir_plots, "damping.pdf"))
+
+        if polar is not None:
+            for coeff, coeff_name in zip([C_lus, C_dus], ["C_l", "C_d"]):
+                fig, ax = plt.subplots()
+                for colour_idx, (peak_idx_begin, peak_idx_end) in enumerate(polar_ids):
+                    begin, end = ppeaks[peak_idx_begin], ppeaks[peak_idx_end]
+                    ax.plot(np.rad2deg(alpha_eff.iloc[begin:end+1]), coeff.iloc[begin:end+1], color=colours[colour_idx])
+
+                alpha_lim = ax.get_xlim()
+                alpha_polar = df_polar["alpha"].to_numpy().flatten()
+                alpha_ids = np.logical_and(alpha_polar>=alpha_lim[0], alpha_polar<=alpha_lim[1])
+                ax.plot(alpha_polar[alpha_ids], df_polar[coeff_name].iloc[alpha_ids], "--k")
+                handler = PlotHandler(fig, ax)
+                handler.update(x_labels=r"$\alpha$ (°)", y_labels=rf"${coeff_name}$ (-)")
+                handler.save(join(self.dir_plots, f"{coeff_name}_loops.pdf"))
+
 
     def couple_timeseries(self, cmap="viridis_r", linewidth: float=1.2, skip_points: int=1):
         df_polar = pd.read_csv("data/FFA_WA3_221/polars_new.dat", delim_whitespace=True)
