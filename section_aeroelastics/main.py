@@ -45,12 +45,11 @@ def set_do(
 do = {
     "simulate": False,  # run a simulation
     "post_calc": False,  # peform post calculations
-    "plot_results": True,  # plot results,
-    "plot_results_fill": False,
-    "plot_coupled_timeseries": True,
+    "plot_results": False,  # plot results,
+    "plot_results_fill": True,
+    "plot_coupled_timeseries": False,
     "animate_results": False,
     "plot_combined_forced": False,
-    "plot_combined_LOC_amplitude": False
     "plot_combined_LOC_amplitude": False
 }
 
@@ -68,16 +67,12 @@ root = "data/FFA_WA3_221"  # set which airfoil polars to use. Simulatenously def
 
 sim_type = "free"
 # sim_type = "free_parallel"
-sim_type = "free"
-# sim_type = "free_parallel"
 # sim_type = "forced"
 n_processes = 8  # for sim_type="forced" and sim_type="free_parallel".
 
 # aero_scheme = "qs"
-aero_scheme = "BL_openFAST_Cl_disc"
-aero_scheme = "BL_openFAST_Cl_disc"
-# aero_scheme = "BL_openFAST_Cl_disc_f_scaled"
-# aero_scheme = "BL_AEROHOR"
+# aero_scheme = "BL_openFAST_Cl_disc"
+aero_scheme = "BL_openFAST_Cl_disc_f_scaled"
 # aero_scheme = "BL_AEROHOR"
 # aero_scheme = "BL_first_order_IAG2"
 # aero_scheme = "BL_Staeblein"
@@ -91,8 +86,8 @@ alpha_lift = "alpha_qs" if aero_scheme == "qs" else "alpha_eff"
 # case_name = "test_qs"
 # case_name = "initial_y_and_tors_set"
 # case_name = "initial_at_steady_state"
-# case_name = "LCO_25"
-case_name = "v_15_angle_17_5"
+case_name = "LCO_25"
+# case_name = "v_15_angle_17_5"
 # case_name = "test"
 # case_name = "LCO_tries_25_polar_staeblein"
 # case_name = "flutter"
@@ -133,10 +128,10 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         # the following definition of NACA_643_618 is mostly used for the definition of the structure. The time
         # definition has no influence on "run_forced_parallel". It only influences "free" and "free_parallel".
         # Otherwise, the NACA definition is used for "free" and "free_parallel" (not yet, do in future).
-        dt = 0.01  # if dt<1e-5, the dt rounding in compress_oscillation() in calculation_utils.py needs to be adapted
-        t_end = 400
-        save_last = 400  # the last 'save_last' seconds of the simulation will be saved
-        t = dt*np.arange(int(t_end/dt))  # set the time array for the simulation
+        dt = 0.001  # if dt<1e-5, the dt rounding in compress_oscillation() in calculation_utils.py needs to be adapted
+        t_end = 300
+        save_last = 300  # the last 'save_last' seconds of the simulation will be saved
+        t = dt*np.arange(int(t_end/dt)+1)  # set the time array for the simulation
         NACA_643_618 = ThreeDOFsAirfoil(t, verbose=False)
         # set the calculation scheme for the aerodynamic forces
         chord = structure_def["chord"]
@@ -176,11 +171,10 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         if sim_type == "free":
             with open(join(case_dir, "section_data.json"), "w") as f:
                 json.dump(structure_def, f, indent=4)
-            alpha = 17.5
-            alpha = 17.5
-            # alpha = None
+            # alpha = 17.5
+            alpha = 20
 
-            inflow = get_inflow(t, [(0, 0, 15, alpha)], init_velocity=0.1)
+            inflow = get_inflow(t, [(0, 0, 35, alpha)], init_velocity=0.1)
             approx_steady_x = True
             approx_steady_y = True
             approx_steady_tors = True if aero_scheme != "BL_AEROHOR" else False
@@ -267,12 +261,13 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         if sim_type == "free":
             post_calc = PostCaluculations(dir_sim_res=join(root, "simulation", "free", aero_scheme, case_name),
                                           alpha_lift=alpha_lift, coordinate_system_structure=coordinate_system)
-            post_calc.project_data()  # projects the simulation's x-y-rot_z data into different coordinate systems such as
-            post_calc.check_angle_of_attack(**aoa_thresholds)
-            # edgewise-flapwise-rot_z or drag-lift_rot_z.
-            post_calc.power()  # calculate and save the work done by the aerodynamic and structural damping forces
-            post_calc.kinetic_energy()  # calculate the edgewise, flapwise, and rotational kinetic energy
-            post_calc.potential_energy()  # calculate the edgewise, flapwise, and rotational potential energy
+            # post_calc.project_data()  # projects the simulation's x-y-rot_z data into different coordinate systems such as
+            # post_calc.write_peaks()
+            # post_calc.check_angle_of_attack(**aoa_thresholds)
+            # # edgewise-flapwise-rot_z or drag-lift_rot_z.
+            # post_calc.power()  # calculate and save the work done by the aerodynamic and structural damping forces
+            # post_calc.kinetic_energy()  # calculate the edgewise, flapwise, and rotational kinetic energy
+            # post_calc.potential_energy()  # calculate the edgewise, flapwise, and rotational potential energy
             post_calc.work_per_cycle()
 
         if "forced" in sim_type or sim_type == "free_parallel":
@@ -286,17 +281,18 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             post_calc = PostCaluculations(dir_sim_res=join(root, "simulation", sim_type, aero_scheme, case_name, 
                                                            str(case_id)),
                                           alpha_lift=alpha_lift, coordinate_system_structure=coordinate_system)
-            post_calc.project_data()  # projects the simulation's x-y-rot_z data into different coordinate systems such as
-            post_calc.check_angle_of_attack(**aoa_thresholds)
-            # edgewise-flapwise-rot_z or drag-lift_rot_z.
-            post_calc.power()  # calculate and save the work done by the aerodynamic and structural damping forces
-            post_calc.kinetic_energy()  # calculate the edgewise, flapwise, and rotational kinetic energy
-            post_calc.potential_energy()  # calculate the edgewise, flapwise, and rotational potential energy
+            # post_calc.project_data()  # projects the simulation's x-y-rot_z data into different coordinate systems such as
+            # post_calc.write_peaks()
+            # post_calc.check_angle_of_attack(**aoa_thresholds)
+            # # edgewise-flapwise-rot_z or drag-lift_rot_z.
+            # post_calc.power()  # calculate and save the work done by the aerodynamic and structural damping forces
+            # post_calc.kinetic_energy()  # calculate the edgewise, flapwise, and rotational kinetic energy
+            # post_calc.potential_energy()  # calculate the edgewise, flapwise, and rotational potential energy
             post_calc.work_per_cycle()
 
     if plot_results:
         trailing_every = 5
-        time_frame = (0, 400)
+        time_frame = (295, 300)
         file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
         if sim_type == "free":
             dir_sim = join(root, "simulation", "free", aero_scheme, case_name)  # define path to the root of the simulation results
@@ -307,9 +303,11 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         plotter = Plotter(file_profile, dir_sim, dir_plots, structure_def["coordinate_system"]) 
         # plotter.force(trailing_every=trailing_every, time_frame=time_frame)  # plot various forces of the simulation
         # plotter.energy(trailing_every=trailing_every, time_frame=time_frame)  # plot various energies and work done by forces of the simulation
-        if "BL" in aero_scheme:
-            plotter.Beddoes_Leishman(trailing_every=trailing_every, time_frame=time_frame)
-        plotter.damping(("alpha_eff", [25, 35]), polar=["data/FFA_WA3_221/polars_new.dat", 5])
+        # if "BL" in aero_scheme:
+        #     plotter.Beddoes_Leishman(trailing_every=trailing_every, time_frame=time_frame)
+        plotter.damping(("alpha_eff", [25, 35]), polar=["data/FFA_WA3_221/polars_new.dat", 5], 
+                        time_frame=(40, 300)
+                        )
     
     if plot_results_fill:
         trailing_every = 5
