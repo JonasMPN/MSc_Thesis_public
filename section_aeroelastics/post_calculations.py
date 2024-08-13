@@ -229,6 +229,25 @@ class PostCaluculations(Rotations, DefaultsSimulation):
             columns.sort(key=str.lower)
             df.to_csv(join(self.dir_in, self._dfl_filenames[df_name]), index=None, columns=columns)
 
+    def write_peaks(self, cols: dict[str, list[str]]={"general": ["pos_x"]}):
+        peaks = {}
+        time = pd.read_csv(join(self.dir_in, self._dfl_filenames["general"]))["time"].to_numpy().flatten()
+        ff_peaks = join(self.dir_in, self._dfl_filenames["peaks"])
+        for file, cols in cols.items():
+            df = pd.read_csv(join(self.dir_in, self._dfl_filenames[file]))
+            for col in cols:
+                if col in peaks:
+                    raise NotImplementedError(f"Column '{col}' exists in multiple result files; the peaks "
+                                              f"saved to {ff_peaks} would overwrite one another.")
+                # p_peaks = find_peaks(df[col].to_numpy().flatten())[0]
+                # n_peaks = find_peaks(-df[col].to_numpy().flatten())[0] 
+                # peaks["p_"+col] = [(peak, t) for peak, t in zip([0]+p_peaks.tolist(), np.r_[0, time[p_peaks]].tolist())]
+                # peaks["n_"+col] = [(peak, t) for peak, t in zip([0]+n_peaks.tolist(), np.r_[0, time[n_peaks]].tolist())]
+                peaks["p_"+col] = np.r_[0, find_peaks(df[col].to_numpy().flatten())[0]].tolist()
+                peaks["n_"+col] = np.r_[0, find_peaks(-df[col].to_numpy().flatten())[0]].tolist()
+        with open(ff_peaks, "w") as f_peaks:
+            json.dump(peaks, f_peaks, indent=4)
+
     def _init_calc(func) -> callable:
         """Decorator initialising a PowerAndEnergy instance if it is not already initialised.
 
@@ -318,19 +337,24 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         df["total"] = df.sum(axis=1)
         df.to_csv(join(self.dir_in, self._dfl_filenames["e_pot"]), index=None)
 
-    def work_per_cycle(self, peaks: np.ndarray=None, constant_timestep: bool=True):
+    def work_per_cycle(self, peaks: np.ndarray|str="p_pos_x", constant_timestep: bool=True):
         t = self.df_general["time"].to_numpy()
         dt = t[1:]-t[:-1]
-        if peaks is None:
-            pos_x = self.df_general["pos_y"].to_numpy()
-            peaks = np.r_[0, find_peaks(pos_x)[0]]
+        if isinstance(peaks, str):
+            ff_peaks = join(self.dir_in, self._dfl_filenames["peaks"])
+            if not isfile(ff_peaks):
+                raise RuntimeError("When using 'peaks' as a column indicator for the 'peaks.json' file, "
+                                   "such a file needs to exist. Probably a call to PostCalculations().write_peaks() "
+                                   "is missing.")
+            with open(ff_peaks, "r") as f_peaks:
+                peaks = json.load(f_peaks)[peaks]
 
         df_power = pd.read_csv(join(self.dir_in, self._dfl_filenames["power"]))
         period_power = {}
         for col in df_power.columns:
             timeseries = df_power[col].to_numpy()
-            period_power[col] = [(timeseries[i_begin:i_end]*dt[i_begin:i_end]).sum() for 
-                                 i_begin, i_end in zip(peaks[:-1], peaks[1:])]
+            period_power[col] = [(timeseries[peak_begin:peak_end]*dt[peak_begin:peak_end]).sum() for 
+                                 peak_begin, peak_end in zip(peaks[:-1], peaks[1:])]
         
         df_exceeded = None
         ff_aoa_thresholds = join(self.dir_in, self._dfl_filenames["aoa_threshold"])
@@ -338,22 +362,24 @@ class PostCaluculations(Rotations, DefaultsSimulation):
             df_thresholds = pd.read_csv(ff_aoa_thresholds)
             aoas = df_thresholds.columns
             exceeds_threshold_per_cycle = []
+            periods = np.zeros(len(peaks)-1)
             if constant_timestep:
-                for i_begin, i_end in zip(peaks[:-1], peaks[1:]):
-                    time_steps = i_end-i_begin
-                    exceeds_threshold_per_cycle.append(df_thresholds.iloc[i_begin:i_end].sum()/time_steps)
+                for i_period, (i_begin, i_end) in enumerate(zip(peaks[:-1], peaks[1:])):
+                    period = dt[0]*(i_end-i_begin)
+                    periods[i_period] = period
+                    exceeds_threshold_per_cycle.append(df_thresholds.iloc[i_begin:i_end].sum()/period)
             else:
                 raise NotImplementedError
             columns = {aoa: aoa+"_exceeds_threshold" for aoa in aoas}
             df_exceeded = pd.DataFrame(exceeds_threshold_per_cycle)
             df_exceeded = df_exceeded.rename(columns=columns)
-        data =  {"cycle_no": np.arange(len(peaks)-1), "T": t[peaks[1:]]-t[peaks[:-1]]} | period_power
+        data =  {"cycle_no": np.arange(len(peaks)-1), "T": periods} | period_power
         
         df = pd.DataFrame(data)
         if df_exceeded is not None:
             df = pd.concat((df, df_exceeded), axis=1)
-        df.to_csv(join(self.dir_in, "period_work.dat"), index=None)
-
+        df.to_csv(join(self.dir_in, self._dfl_filenames["period_work"]), index=None)
+        
     def _v_ef(self, velocity, position, coordinate_system: str):
         if coordinate_system == "ef":
             return self._v_ef_calc(velocity[:, 0], velocity[:, 1], velocity[:, 2], 
