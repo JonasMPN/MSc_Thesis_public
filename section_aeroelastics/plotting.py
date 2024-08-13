@@ -53,6 +53,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             self.section_data = json.load(f)
         self.profile *= self.section_data["chord"]
 
+        self.dir_data = dir_data
         self.dir_plots = dir_plots
         helper.create_dir(self.dir_plots)
         self.dt_res = dt_res
@@ -364,23 +365,36 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                 alpha_thresholds: tuple[float, list], 
                 time_frame: tuple[float, float]=None,
                 polar: tuple[str, list[float]|int]=None,
+                work: bool=True,
                 amplitude_range: tuple[float, float]=(1e-2, 1e2),
                 transient_time: float=30,
                 colours: list[str]=["chocolate", "grey", "orangered", "forestgreen", "royalblue", "crimson"]):
-        use_ids = np.arange(self.time.size)
-        time = self.time
-        if time_frame is not None:
-            time_frame = (time_frame[0], min(time_frame[1], time[-1]))
-            use_ids = np.logical_and(self.time >= time_frame[0], self.time <= time_frame[1])
-            time = time[use_ids]
-        else:
-            time_frame = [0, time[-1]]
-
-        pos_x = self.df_general["pos_x"].iloc[use_ids].to_numpy().flatten()
+        dir_damping_plots = join(self.dir_plots, "damping")
+        pos_x = self.df_general["pos_x"].to_numpy().flatten()
         alpha_th = self.df_f_aero[alpha_thresholds[0]].to_numpy()
+        time = self.time
 
-        ppeaks = find_peaks(pos_x)[0]
-        npeaks = find_peaks(-pos_x)[0]
+        with open(join(self.dir_data, self._dfl_filenames["peaks"]), "r") as f_peaks:
+            peaks = json.load(f_peaks)
+            ppeaks = np.asarray(peaks["p_pos_x"])
+            npeaks = np.asarray(peaks["n_pos_x"])
+
+        if time_frame is None:
+            postfix = ""
+            prefix = dir_damping_plots
+            ppeaks = ppeaks[1:]
+            npeaks = npeaks[1:]
+        else:
+            time_frame = (max(time[0], time_frame[0]), min(time_frame[1], time[-1]))
+            ppeaks = ppeaks[np.logical_and(ppeaks*time[1]>=time_frame[0], ppeaks*time[1]<=time_frame[1])]
+            npeaks = npeaks[np.logical_and(npeaks*time[1]>=time_frame[0], npeaks*time[1]<=time_frame[1])]
+            time_ids = np.logical_and(time>=time_frame[0], time<=time_frame[1])
+            time = time[time_ids]
+            postfix = f"_{time_frame[0]}_{time_frame[1]}"
+            dir_time_framed = helper.create_dir(join(dir_damping_plots, "time_framed"))[0]
+            prefix = helper.create_dir(join(dir_time_framed, postfix[1:]))[0]
+
+        
         max_aoa = np.rad2deg(alpha_th[ppeaks[-2]:ppeaks[-1]]).max()
         
         thresholds = alpha_thresholds[1]  # deg
@@ -429,6 +443,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                 if time[idx_ppeak] > transient_time and transient_end is None:
                     transient_end = amplitude[-1]
         amplitude = np.asarray(amplitude)  # for consistency in the following code
+        n_ampls = amplitude.size
         
         if polar is not None:
             df_polar = pd.read_csv(polar[0], delim_whitespace=True)
@@ -446,9 +461,12 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                 ampls = np.exp(np.linspace(np.log(ampl_min), np.log(ampl_max), polar[1]))
                 polar_ids = []
                 for ampl in ampls:
-                    idx_greater = (amplitude>=ampl).argmax()
-                    idx_smaller = (amplitude<=ampl).argmax()
+                    # next factors because of the np.exp(np.log()) precision
+                    idx_greater = (amplitude>=ampl*0.999999).argmax()
+                    idx_smaller = (amplitude<=ampl*1.000001).argmax()
                     idx = max(idx_greater, idx_smaller)
+                    idx = idx if idx < n_ampls-1 else idx-1  # happens if amplitude is still growing/decreasing at the 
+                    # end of the simulation
                     polar_ids.append((idx, idx+1))
                     
         fig, ax = plt.subplots()
@@ -473,16 +491,16 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         if x_lim[1] <= amplitude_range[0]:
             title = f"No amplitude larger than 'amplitude_range[0]={amplitude_range[0]}'."
         else:
-            thresholds = np.rad2deg(thresholds[::-1])
-            title = (rf"orange $\left(\alpha_{{eff}}>{np.round(thresholds[0], 1)}^{{\circ}}\right)$, "
-                    rf"red $\left(\alpha_{{eff}}>{np.round(thresholds[1], 1)}^{{\circ}}\right)$"
+            tshs = np.rad2deg(thresholds[::-1])
+            title = (rf"orange $\left(\alpha_{{eff}}>{np.round(tshs[0], 1)}^{{\circ}}\right)$, "
+                    rf"red $\left(\alpha_{{eff}}>{np.round(tshs[1], 1)}^{{\circ}}\right)$"
                     "\n"
-                    rf"last period: $\alpha_{{eff,\text{{max}}}}\approx{np.round(max_aoa,1)}^{{\circ}}$")
+                    rf"overall: $\alpha_{{eff,\text{{max}}}}\approx{np.round(max_aoa,1)}^{{\circ}}$")
 
         handler.update(x_labels="oscillation amplitude (m)", 
                        y_labels=r"normal ($\approx$edgewise) damping ratio (-)", x_lims=x_lim, title=title,
-                       legend=True)
-        handler.save(join(self.dir_plots, "damping.pdf"))
+                       legend=True if transient_end is not None else False)
+        handler.save(join(prefix, f"damping{postfix}.pdf"))
 
         if polar is not None:
             for coeff, coeff_name in zip([C_lus, C_dus], ["C_l", "C_d"]):
@@ -497,7 +515,58 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                 ax.plot(alpha_polar[alpha_ids], df_polar[coeff_name].iloc[alpha_ids], "--k")
                 handler = PlotHandler(fig, ax)
                 handler.update(x_labels=r"$\alpha_{\text{eff}}$ (°)", y_labels=rf"${coeff_name}$ (-)")
-                handler.save(join(self.dir_plots, f"{coeff_name}_loops.pdf"))
+                handler.save(join(prefix, f"{coeff_name}_loops{postfix}.pdf"))
+        
+        if work:
+            df_work_per_period = pd.read_csv(join(self.dir_data, self._dfl_filenames["period_work"]))[1:]
+            e_pot = pd.read_csv(join(self.dir_data, self._dfl_filenames["e_pot"]))["total"].to_numpy().flatten()
+            e_kin = pd.read_csv(join(self.dir_data, self._dfl_filenames["e_kin"]))["total"].to_numpy().flatten()
+            if time_frame is not None:
+                t_work = df_work_per_period["T"].cumsum().to_numpy().flatten()
+                use_ids_work = np.logical_and(t_work>=time_frame[0], t_work<=time_frame[1])
+                df_work_per_period = df_work_per_period.iloc[use_ids_work]
+                
+            e_mean = np.zeros(n_ampls-1)
+            for i_period, (begin, end) in enumerate(zip(ppeaks[:n_ampls-1], ppeaks[1:n_ampls])):
+                e_mean[i_period] = e_pot[begin:end].mean()+e_kin[begin:end].mean()
+            # e_max = df_e_pot["total"].iloc[ppeaks[:n_ampls]]+df_e_kin["total"].iloc[ppeaks[:n_ampls]]
+            
+            fig, ax = plt.subplots()
+            fig_rel, ax_rel = plt.subplots()
+            for col in ["aero_drag", "aero_lift", "aero_mom"]:
+                ax.semilogx(amplitude, df_work_per_period[col].iloc[:n_ampls], linestyle="--", label=col)
+                ax_rel.semilogx(amplitude[:-1], df_work_per_period[col].iloc[:n_ampls-1]/e_mean, linestyle="--",
+                                label=col)
+            
+            for sum_cols, power_kind in zip([["aero_drag", "aero_lift", "aero_mom"], 
+                                             ["damp_edge", "damp_flap", "damp_tors"]],
+                                             ["aero", "-struct"]):
+                total = np.zeros_like(amplitude)
+                for col in sum_cols:
+                    total += df_work_per_period[col].iloc[:amplitude.size].to_numpy().flatten()
+                if power_kind == "-struct":
+                    total *= -1
+                ax.semilogx(amplitude, total, label=power_kind)
+                ax_rel.semilogx(amplitude[:-1], total[:-1]/e_mean, label=power_kind)
+            
+            for alpha_threshold in thresholds:
+                for begin_above, end_above in alpha_above_threshold[alpha_threshold]:
+                    ax.axvspan(amplitude[begin_above], amplitude[end_above], color=colour_mapping[alpha_threshold], 
+                            alpha=0.3)
+            
+            handler = PlotHandler(fig, ax)
+            handler.update(x_labels="amplitude (m)", y_labels="work per period (Nm)", legend=True, grid=True,
+                           title=title)
+            handler.save(join(prefix, f"work_pp_abs{postfix}.pdf"))
+
+            for alpha_threshold in thresholds:
+                for begin_above, end_above in alpha_above_threshold[alpha_threshold]:
+                    ax_rel.axvspan(amplitude[begin_above], amplitude[end_above], color=colour_mapping[alpha_threshold], 
+                                   alpha=0.3)
+            handler = PlotHandler(fig_rel, ax_rel)
+            handler.update(x_labels="amplitude (m)", y_labels="rel. work per period (-)", legend=True, grid=True,
+                           title=title)
+            handler.save(join(prefix, f"work_pp_rel{postfix}.pdf"))
 
 
     def couple_timeseries(self, cmap="viridis_r", linewidth: float=1.2, skip_points: int=1):
@@ -523,8 +592,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                         (self.df_general, "general", "vel_flap_xy", r"$u_{\text{flap}}$ (m/s)"),
                         (self.df_general, "general", "pos_tors", r"$x_{\text{torsion}}$ (deg)")]
         # couples = [(a, b), (c, b), (d, b), (f, b), (b, from_general[0])]
-        couples = [(b, a), (b, c), (b, d), (b, f), (from_general[0], b)]
-        # couples = [(from_general[1], from_general[0]), (from_general[2], from_general[0]), (from_general[2], from_general[1])]
+        # couples = [(b, a), (b, c), (b, d), (b, f), (from_general[0], b)]
+        couples = [(from_general[1], from_general[0]), (from_general[2], from_general[0]), (from_general[2], from_general[1])]
         # couples = [(b, from_general[1])]
         # couples = [p for p in product(from_f_aero, from_general)] + [p for p in product(from_power, from_general)]
         # couples = [(from_general[1], from_general[0]), (from_general[2], from_general[0]), 
@@ -542,8 +611,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             val_general = val_general if "P_" not in label_specific else val_general[:-1]
             val_specifc = df_specific[col_specific].to_numpy()
             
-            val_general = np.rad2deg(val_general)
-            val_specifc = np.rad2deg(val_specifc)
+            # val_general = np.rad2deg(val_general)
+            # val_specifc = np.rad2deg(val_specifc)
             add = None
             if col_specific == "C_lus" and "alpha" in col_general:
                 add = (df_polar["alpha"], df_polar["C_l"])
@@ -583,7 +652,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             y = add[1] if isinstance(add[1], np.ndarray) else np.asarray(add[1])
             used_ids = np.logical_and(x>=min_x, x<=max_x)
             ax.plot(x[used_ids], y[used_ids], "k", label="polar")
-        
+            
         handler = PlotHandler(fig, ax)
         handler.update(x_labels=x_label, y_labels=y_label, grid=grid)
         if save_to is not None:
@@ -1356,8 +1425,9 @@ class BLValidationPlotter(DefaultPlot, Rotations):
                     #         **self.plt_settings["aerohor"])
                 ax.plot(np.rad2deg(df_section["alpha_steady"][-period_res-1:]), df_section[coeff][-period_res-1:], 
                         **self.plt_settings["section"])
-                handler.update(x_labels=r"$\alpha_{\text{steady}}$ (°)", y_labels=rf"${{{coeff[0]}}}_{{{coeff[2]}}}$ (-)",
-                            legend=True)
+                handler.update(x_labels=r"$\alpha_{\text{steady}}$ (°)", 
+                               y_labels=rf"${{{coeff[0]}}}_{{{coeff[2]}}}$ (-)",
+                               legend=True)
                 handler.save(join(dir_save, f"{prefix}{coeff}.pdf"))
 
     def plot_over_polar(
