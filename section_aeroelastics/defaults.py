@@ -665,7 +665,9 @@ class DefaultStructure:
         "power": "power.dat",
         "e_kin": "e_kin.dat",
         "e_pot": "e_pot.dat",
-        "aoa_threshold": "aoa_thresholds.dat"
+        "aoa_threshold": "aoa_thresholds.dat",
+        "period_work": "period_work.dat",
+        "peaks": "peaks.json"
     }
 
 
