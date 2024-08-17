@@ -45,8 +45,8 @@ def set_do(
 do = {
     "simulate": False,  # run a simulation
     "post_calc": False,  # peform post calculations
-    "plot_results": False,  # plot results,
-    "plot_results_fill": True,
+    "plot_results": True,  # plot results,
+    "plot_results_fill": False,
     "plot_coupled_timeseries": False,
     "animate_results": False,
     "plot_combined_forced": False,
@@ -261,13 +261,13 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         if sim_type == "free":
             post_calc = PostCaluculations(dir_sim_res=join(root, "simulation", "free", aero_scheme, case_name),
                                           alpha_lift=alpha_lift, coordinate_system_structure=coordinate_system)
-            # post_calc.project_data()  # projects the simulation's x-y-rot_z data into different coordinate systems such as
-            # post_calc.write_peaks()
-            # post_calc.check_angle_of_attack(**aoa_thresholds)
-            # # edgewise-flapwise-rot_z or drag-lift_rot_z.
-            # post_calc.power()  # calculate and save the work done by the aerodynamic and structural damping forces
-            # post_calc.kinetic_energy()  # calculate the edgewise, flapwise, and rotational kinetic energy
-            # post_calc.potential_energy()  # calculate the edgewise, flapwise, and rotational potential energy
+            post_calc.project_data()  # projects the simulation's x-y-rot_z data into different coordinate systems such as
+            post_calc.write_peaks()
+            post_calc.check_angle_of_attack(**aoa_thresholds)
+            # edgewise-flapwise-rot_z or drag-lift_rot_z.
+            post_calc.power()  # calculate and save the work done by the aerodynamic and structural damping forces
+            post_calc.kinetic_energy()  # calculate the edgewise, flapwise, and rotational kinetic energy
+            post_calc.potential_energy()  # calculate the edgewise, flapwise, and rotational potential energy
             post_calc.work_per_cycle()
 
         if "forced" in sim_type or sim_type == "free_parallel":
@@ -281,13 +281,13 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             post_calc = PostCaluculations(dir_sim_res=join(root, "simulation", sim_type, aero_scheme, case_name, 
                                                            str(case_id)),
                                           alpha_lift=alpha_lift, coordinate_system_structure=coordinate_system)
-            # post_calc.project_data()  # projects the simulation's x-y-rot_z data into different coordinate systems such as
-            # post_calc.write_peaks()
-            # post_calc.check_angle_of_attack(**aoa_thresholds)
-            # # edgewise-flapwise-rot_z or drag-lift_rot_z.
-            # post_calc.power()  # calculate and save the work done by the aerodynamic and structural damping forces
-            # post_calc.kinetic_energy()  # calculate the edgewise, flapwise, and rotational kinetic energy
-            # post_calc.potential_energy()  # calculate the edgewise, flapwise, and rotational potential energy
+            post_calc.project_data()  # projects the simulation's x-y-rot_z data into different coordinate systems such as
+            post_calc.write_peaks()
+            post_calc.check_angle_of_attack(**aoa_thresholds)
+            # edgewise-flapwise-rot_z or drag-lift_rot_z.
+            post_calc.power()  # calculate and save the work done by the aerodynamic and structural damping forces
+            post_calc.kinetic_energy()  # calculate the edgewise, flapwise, and rotational kinetic energy
+            post_calc.potential_energy()  # calculate the edgewise, flapwise, and rotational potential energy
             post_calc.work_per_cycle()
 
     if plot_results:
@@ -306,12 +306,11 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         # if "BL" in aero_scheme:
         #     plotter.Beddoes_Leishman(trailing_every=trailing_every, time_frame=time_frame)
         plotter.damping(("alpha_eff", [25, 35]), polar=["data/FFA_WA3_221/polars_new.dat", 5], 
-                        time_frame=(40, 300)
-                        )
+                        time_frame=(40, 400))
     
     if plot_results_fill:
         trailing_every = 5
-        peak_distance = 90
+        peak_distance = 1000
         file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
         if sim_type == "free":
             dir_sim = join(root, "simulation", "free", aero_scheme, case_name)  # define path to the root of the simulation results
@@ -369,4 +368,4 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         combined_LOC_amplitude(join(root, "simulation", sim_type, aero_scheme, case_name))
 
 if __name__ == "__main__":
-    main(**do) 
+    main(**do)
