@@ -4,7 +4,7 @@ import numpy as np
 from os import listdir
 from os.path import join, isfile
 from post_calculations import PostCaluculations, PostHHT_alpha
-from utils_plot import PlotHandler
+from plot_utils import PlotHandler
 import numpy as np
 from plotting import HHTalphaPlotter, BLValidationPlotter
 from defaults import DefaultPlot, DefaultStructure
