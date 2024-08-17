@@ -3,7 +3,7 @@ import pandas as pd
 from scipy.signal import find_peaks
 import matplotlib.pyplot as plt
 from helper_functions import Helper
-from utils_plot import PlotHandler
+from plot_utils import PlotHandler
 from os.path import join
 import numpy as np
 helper = Helper()
