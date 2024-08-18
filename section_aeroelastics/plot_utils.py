@@ -38,7 +38,7 @@ class PlotHandler(Helper):
             self,
             x_labels: str | dict[str, str]=_default,
             y_labels: str | dict[str, str]=_default,
-            title: str | dict[str, str]=_default,
+            titles: str | dict[str, str]=_default,
             x_lims: tuple | dict[str, tuple]=_default,
             y_lims: tuple | dict[str, tuple]=_default,
             x_lims_from: tuple | dict=_default,
@@ -49,6 +49,8 @@ class PlotHandler(Helper):
             equal_y_lim: tuple[str] = _default,
             grid: bool | dict[str, bool] = _default,
             scale_limits: float=1,
+            check_latex_rendering: bool=True,
+            unit_specifier: str="(",
             ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]:
         """Function to automate and simplify the annotation of axes created with plt.subplot_mosaic(). Except for 'axs',
         all arguments can be a single value or a dictionary of values. The cases are:
@@ -77,23 +79,29 @@ class PlotHandler(Helper):
         largest y limits of the axes.
         :type: tuple[str]
         """
-        skip = ["skip", "self", "scale_limits", "x_lims_from", "y_lims_from", "equal_x_lim", "equal_y_lim"]
-        lcs = {k: v for k,v in locals().items() if k not in skip}
+        not_settings = ["x_labels", "y_labels", "titles", "x_lims", "y_lims", "legend", "aspect", "grid", ]
+        settings = {k: v for k, v in locals().items() if k in not_settings}
         
         self._check_input_exculsivity(x_lims, y_lims, x_lims_from, y_lims_from)
         if x_lims_from != self._default:
-            lcs["x_lims"] = self._get_limits_from(x_lims_from, scale_limits)
+            settings["x_lims"] = self._get_limits_from(x_lims_from, scale_limits)
         if y_lims_from != self._default:
-            lcs["y_lims"] = self._get_limits_from(y_lims_from, scale_limits)
+            settings["y_lims"] = self._get_limits_from(y_lims_from, scale_limits)
         if equal_x_lim != self._default:
             raise NotImplementedError
         if equal_y_lim != self._default:
             raise NotImplementedError
-
-        # self._check_options_completeness(self._ax_labels, **lcs)  # not used/wanted
+        
+        if check_latex_rendering:
+            x_labels, y_labels, titles = self._adjust_to_latex(x_labels, y_labels, titles,
+                                                               unit_specifier=unit_specifier)
+            # next lines needed because of the deepcopy
+            settings["x_labels"] = x_labels
+            settings["y_labels"] = y_labels
+            settings["titles"] = titles
+            
+        is_set = deepcopy({setting: value for setting, value in settings.items() if value != self._default})
         # filter for parameters that the user wants to update
-        is_set = deepcopy({param: values for param, values in lcs.items() if values not in [self._default, None]})
-        # deepcopy needed because of the mutable input parameters which are changed in the next two lines
         is_set = self._treat_special_options(**is_set)
         filled = self._handle_options(self._ax_labels, **is_set)
         map_params_to_axs_methods = {
@@ -104,7 +112,7 @@ class PlotHandler(Helper):
             "legend": "legend",
             "aspect": "set_aspect",
             "grid": "grid",
-            "title": "set_title",
+            "titles": "set_title",
         }
         self._handle_axes(**{map_params_to_axs_methods[param]: values for param, values in filled.items()})
         return self.fig, self.axs
@@ -151,8 +159,14 @@ class PlotHandler(Helper):
             for ax_label, update_to in values.items():
                 update = getattr(self.axs[ax_label], method)
                 if update_to not in [self._empty_call, self._skip_call]:  # special calls are found as strings
-                    update(*update_to)  # the ->*<-update_to is the reason for turning the values to tuples in 
-                    # _fill_options()
+                    if isinstance(update_to, tuple):                    
+                        update(*update_to)  # the ->*<-update_to is the reason for turning the values to tuples in 
+                    # _handle_options(). The * is needed because some arguments need to be unpacked.
+                    elif isinstance(update_to, dict):
+                        update(**update_to)
+                    else:
+                        raise ValueError(f"Setting '{method}' for axis '{ax_label}' with value '{update_to}' is of "
+                                         f"unexpected type '{type(update)}'. Expected tuple or dict.")
                 elif update_to == self._empty_call:
                     # some axes methods toggle a setting on by an empty call; example: ax.legend()
                     update()
@@ -197,11 +211,9 @@ class PlotHandler(Helper):
             "legend": {True: self._empty_call, False: self._skip_call},
             "grid": {True: self._empty_call, False: self._skip_call}
         }
-        implemented_special_options = map_params.keys()
         for param, values in copy(kwargs).items():
-            if param not in implemented_special_options:
-                if param in map_params.keys():
-                    raise ValueError(f"For coder: update 'map_params' a few lines above to include '{param}'.")
+            if param not in map_params or isinstance(values, dict):
+                # if isinstance(value, dict) means the respective setting gets kwargs set
                 continue
             if not isinstance(values, dict):
                 kwargs[param] = map_params[param][values]
@@ -223,26 +235,27 @@ class PlotHandler(Helper):
         :rtype: _type_
         """
         filled = {}
-        for param, values in kwargs.items():  # values is either a dict with values for each axis label or just a value
-            # that should be used for all axes
-            if not isinstance(values, dict):
+        for setting, values in kwargs.items():  # values is either a dict with values for each axis label or just a 
+            # value that should be used for all axes
+            if not isinstance(values, dict) or all([param not in ax_labels for param in values]):
                 values = {ax_label: values for ax_label in ax_labels}
-            
+                
             for ax_label, value in copy(values).items():  
-                if isinstance(value, tuple): # turn all values into tuples; needed for ._handle_axes()
+                if isinstance(value, tuple) or isinstance(value, dict):
+                    # "value" is expected to be a tuple or a dict in _handle_axes(), so this case is fine already
                     continue  
                 if value in self._special_calls: 
-                    # skip transformation of the special calls into tuples; they must remain strings. Needed for for 
-                    # ._handle_axes().
+                    # a special call must remain a special cal. Needed for ._handle_axes().
                     continue
                 try:
                     if isinstance(value, str):  # because tuple() on a string separates each character
-                        raise TypeError
+                        raise TypeError(f"Setting values cannot be of type 'str'. Set setting '{setting}={value}' as "
+                                        f"a dictionary for axis '{ax_label}'.")
                     value = tuple(value)
                 except TypeError:
                     value = (value,)
                 values[ax_label] = value
-            filled[param] = values
+            filled[setting] = values
         return filled
     
     @staticmethod
@@ -298,10 +311,60 @@ class PlotHandler(Helper):
                 for ax_label in ax_labels:
                     if ax_label not in specified_labels:
                         raise ValueError(f"Parameter '{param}' is missing an entry for axis '{ax_label}'.")
+    
+    def _adjust_to_latex(self, *axes_labels: dict[str, str], 
+                         unit_specifier: str="(") -> dict[str, str]:
+        latex_active = plt.rcParams["text.usetex"]
+        set_colour = True if "\definecolor{updatecolour}" in plt.rcParams["pgf.preamble"] else False
+        offset = 0 if unit_specifier != "(" else 1  #todo add other enclosing specifieres
+        n_specifier = len(unit_specifier)
+        axes_labels = list(axes_labels)
+        for i_label, axis_label in enumerate(axes_labels):
+            if axis_label == self._default or isinstance(axis_label, dict):
+                continue
+            else:
+                axes_labels[i_label] = {"_": axis_label}
+
+        for axis_label in axes_labels:
+            if axis_label == self._default:
+                continue
+
+            for ax_name, label in axis_label.items():
+                if label.startswith("~"):
+                    axis_label[ax_name] = label[1:]
+                    continue
+                adjusted_label = r""
+                while unit_specifier in label:
+                    from_idx = label.find(unit_specifier)+n_specifier
+                    contains_unit = label[from_idx:]
+                    unit = contains_unit.split(" ")[0]
+                    unit = unit[:len(unit)-offset]
+                    n_unit = len(unit)
+                    if latex_active:
+                        unit = r"\unit{"+unit+r"}"
+                        if unit_specifier == "(":
+                            unit = r"$\left("+unit+r"\right)$"
+                    else:
+                        unit = unit.replace(".", "")
+                    
+                    adjusted_label += label[:from_idx-offset] + unit
+                    label = label[from_idx+n_unit+offset:]
+                    
+                if set_colour:
+                    adjusted_label = r"\textcolor{updatecolour}{"+adjusted_label+r"}"
+                axis_label[ax_name] = adjusted_label
+
+        for i, axis_label in enumerate(axes_labels):
+            if axis_label == self._default:
+                continue
+            if "_" in axis_label:
+                axes_labels[i] = axis_label["_"]
+    
+        return [label for label in axes_labels]
 
 
 class Shapes:
-    """Class implementing shapes for pyplots that pyplots doesn't natively support.
+    """Class implementing shapes for pyplots that pyplots doesn'"t" natively support.
     """
     @staticmethod
     def circle_arrow(
@@ -355,20 +418,20 @@ class PlotPreparation:
         handler = PlotHandler(fig, axs)
         x_labels = {
             "profile": "normal (m)",
-            "aoa": "t (s)",
-            "aero": "t (s)",
-            "damp": "t (s)",
-            "stiff": "t (s)",
+            "aoa": "time (s)",
+            "aero": "time (s)",
+            "damp": "time (s)",
+            "stiff": "time (s)",
         }
         y_labels = {
             "profile": "tangential (m)",
-            "aoa": "angle of attack (°)",
-            "aero": "aero (N) or (Nm)",
-            "damp": "struct. damping, (N) or (Nm)",
-            "stiff": "struct. stiffness, (N) or (Nm)",
+            "aoa": r"angle of attack (\degree)",
+            "aero": "aero (N) or (N.m)",
+            "damp": "struct. damping (N) or (N.m)",
+            "stiff": "struct. stiffness (N) or (N.m)",
         }
         aspect = {
-            "profile": "equal"
+            "profile": {"aspect": "equal"}
         }
         return *handler.update(x_labels=x_labels, y_labels=y_labels, aspect=aspect), handler
 
@@ -389,17 +452,17 @@ class PlotPreparation:
         handler = PlotHandler(fig, axs)
         x_labels = {
             "profile": "normal (m)",
-            "total": "t (s)",
-            "power": "t (s)",
-            "kinetic": "t (s)",
-            "potential": "t (s)",
+            "total": "time (s)",
+            "power": "time (s)",
+            "kinetic": "time (s)",
+            "potential": "time (s)",
         }
         y_labels = {
             "profile": "tangential (m)",
-            "total": "energy (Nm)",
-            "power": "power (Nm/s)",
-            "kinetic": "kinetic energy (Nm)",
-            "potential": "potential energy (Nm)",
+            "total": "energy (N.m)",
+            "power": "power (N.m.s^{-1})",
+            "kinetic": "kinetic energy (N.m)",
+            "potential": "potential energy (N.m)",
         }
         aspect = {
             "profile": "equal"
@@ -424,17 +487,17 @@ class PlotPreparation:
         handler = PlotHandler(fig, axs)
         x_labels = {
             "profile": "normal (m)",
-            "aoa": "t (s)",
-            coeffs[0]: "t (s)",
-            coeffs[1]: "t (s)",
-            "C_m": "t (s)",
+            "aoa": "time (s)",
+            coeffs[0]: "time (s)",
+            coeffs[1]: "time (s)",
+            "C_m": "time (s)",
         }
         y_labels = {
             "profile": "tangential (m)",
-            "aoa": "angle of attack (°)",
+            "aoa": r"angle of attack (\degree)",
             coeffs[0]: f"contribution to ${coeffs[0]}$ (-)",
             coeffs[1]: f"contribution to ${coeffs[1]}$ (-)",
-            "C_m": f"contribution to $C_m$ (-)"
+            "C_m": "contribution to $C_m$ (-)"
         }
         aspect = {
             "profile": "equal"

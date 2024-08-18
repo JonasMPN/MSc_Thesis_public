@@ -1,6 +1,6 @@
-from utils_plot import Shapes, PlotPreparation, AnimationPreparation, PlotHandler, get_colourbar
+from plot_utils import Shapes, PlotPreparation, AnimationPreparation, PlotHandler, get_colourbar
 from calculations import Rotations
-from defaults import DefaultPlot, DefaultStructure
+from defaults import DefaultPlot, DefaultStructure, _c, _c_fill
 import pandas as pd
 import numpy as np
 import json
@@ -368,7 +368,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                 work: bool=True,
                 amplitude_range: tuple[float, float]=(1e-2, 1e2),
                 transient_time: float=30,
-                colours: list[str]=["chocolate", "grey", "orangered", "forestgreen", "royalblue", "crimson"]):
+                colours: list[str]=_c):
         dir_damping_plots = join(self.dir_plots, "damping")
         pos_x = self.df_general["pos_x"].to_numpy().flatten()
         alpha_th = self.df_f_aero[alpha_thresholds[0]].to_numpy()
@@ -470,20 +470,18 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                     polar_ids.append((idx, idx+1))
                     
         fig, ax = plt.subplots()
-        ax.semilogx(amplitude[:-1], damping_ratio, linewidth=2)
+        ax.semilogx(amplitude[:-1], damping_ratio, color=colours[-1], linewidth=2)
         if transient_end is not None:
-            ax.axvline(transient_end, color="k", linestyle="--", label=f"t={transient_time}s")
+            ax.axvline(transient_end, color="k", linestyle="--", label=f"time={transient_time}"+r"\unit{s}")
         if polar is not None:
             for colour_idx, polar_idx in enumerate(polar_ids):
                 ax.semilogx(amplitude[polar_idx[0]], damping_ratio[polar_idx[0]], marker="o", color=colours[colour_idx])
         
-        colours_AoA_range = ["darkorange", "orangered"]
-        colour_mapping = {alpha_threshold: colours_AoA_range[i] for i, alpha_threshold in enumerate(thresholds[::-1])}
+        colour_mapping = {alpha_threshold: _c_fill[i] for i, alpha_threshold in enumerate(thresholds[::-1])}
         for alpha_threshold in thresholds:
             for begin_above, end_above in alpha_above_threshold[alpha_threshold]:
                 ax.axvspan(amplitude[begin_above], amplitude[end_above], color=colour_mapping[alpha_threshold], 
                            alpha=0.3)
-        ax.grid(which="both")
         
         handler = PlotHandler(fig, ax)
         x_lim = ax.get_xlim()
@@ -492,14 +490,14 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             title = f"No amplitude larger than 'amplitude_range[0]={amplitude_range[0]}'."
         else:
             tshs = np.rad2deg(thresholds[::-1])
-            title = (rf"orange $\left(\alpha_{{eff}}>{np.round(tshs[0], 1)}^{{\circ}}\right)$, "
-                    rf"red $\left(\alpha_{{eff}}>{np.round(tshs[1], 1)}^{{\circ}}\right)$"
+            title = (r"~blue $\left(\alpha_{\text{eff}}>"+f"{np.round(tshs[0], 1)}"+r"\unit{\degree}\right)$, "
+                     r"red $\left(\alpha_{\text{eff}}>"+f"{np.round(tshs[1], 1)}"+r"\unit{\degree}\right)$"
                     "\n"
-                    rf"overall: $\alpha_{{eff,\text{{max}}}}\approx{np.round(max_aoa,1)}^{{\circ}}$")
+                    r"overall: $\alpha_{\text{eff,max}}\approx"+f"{np.round(max_aoa,1)}"+r"\unit{\degree}$")
 
         handler.update(x_labels="oscillation amplitude (m)", 
-                       y_labels=r"normal ($\approx$edgewise) damping ratio (-)", x_lims=x_lim, title=title,
-                       legend=True if transient_end is not None else False)
+                       y_labels=r"~ total aeroelastic damping ratio (\unit{-})", x_lims=x_lim, 
+                       titles=title, legend=True if transient_end is not None else False, grid={"axis": "y"})
         handler.save(join(prefix, f"damping{postfix}.pdf"))
 
         if polar is not None:
@@ -534,9 +532,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             fig, ax = plt.subplots()
             fig_rel, ax_rel = plt.subplots()
             for col in ["aero_drag", "aero_lift", "aero_mom"]:
-                ax.semilogx(amplitude, df_work_per_period[col].iloc[:n_ampls], linestyle="--", label=col)
-                ax_rel.semilogx(amplitude[:-1], df_work_per_period[col].iloc[:n_ampls-1]/e_mean, linestyle="--",
-                                label=col)
+                plot_settings = self.plt_settings(col, linestyle="--")
+                ax.semilogx(amplitude, df_work_per_period[col].iloc[:n_ampls], **plot_settings)
+                ax_rel.semilogx(amplitude[:-1], df_work_per_period[col].iloc[:n_ampls-1]/e_mean, 
+                                **plot_settings)
             
             for sum_cols, power_kind in zip([["aero_drag", "aero_lift", "aero_mom"], 
                                              ["damp_edge", "damp_flap", "damp_tors"]],
@@ -546,8 +545,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                     total += df_work_per_period[col].iloc[:amplitude.size].to_numpy().flatten()
                 if power_kind == "-struct":
                     total *= -1
-                ax.semilogx(amplitude, total, label=power_kind)
-                ax_rel.semilogx(amplitude[:-1], total[:-1]/e_mean, label=power_kind)
+                ax.semilogx(amplitude, total, **self.plt_settings[power_kind])
+                ax_rel.semilogx(amplitude[:-1], total[:-1]/e_mean, **self.plt_settings[power_kind])
             
             for alpha_threshold in thresholds:
                 for begin_above, end_above in alpha_above_threshold[alpha_threshold]:
@@ -555,8 +554,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                             alpha=0.3)
             
             handler = PlotHandler(fig, ax)
-            handler.update(x_labels="amplitude (m)", y_labels="work per period (Nm)", legend=True, grid=True,
-                           title=title)
+            handler.update(x_labels="amplitude (m)", y_labels="work per period (Nm)", legend=True, titles=title)
             handler.save(join(prefix, f"work_pp_abs{postfix}.pdf"))
 
             for alpha_threshold in thresholds:
@@ -564,8 +562,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                     ax_rel.axvspan(amplitude[begin_above], amplitude[end_above], color=colour_mapping[alpha_threshold], 
                                    alpha=0.3)
             handler = PlotHandler(fig_rel, ax_rel)
-            handler.update(x_labels="amplitude (m)", y_labels="rel. work per period (-)", legend=True, grid=True,
-                           title=title)
+            handler.update(x_labels="amplitude (m)", y_labels="rel. work per period (-)", legend=True, titles=title)
             handler.save(join(prefix, f"work_pp_rel{postfix}.pdf"))
 
 
@@ -1188,7 +1185,7 @@ class HHTalphaPlotter(DefaultStructure):
         fig_err, axs_err = plt.subplot_mosaic(axs_labels_pos, tight_layout=True)
         y_labels = {"pos": "position (m), (°)", "aero": r"$f_{\text{external}}$ (N), (Nm)",
                     "damp": r"$f_{\text{damping}}$ (N), (Nm)", "stiff": r"$f_{\text{stiffness}}$ (N), (Nm)"}
-        y_labels_err = {ax: f"{error_type} error {label[:label.find("(")-1]}" for ax, label in y_labels.items()}
+        y_labels_err = {ax: f"{error_type} error {label[:label.find('(')-1]}" for ax, label in y_labels.items()}
 
         helper.create_dir(dir_plots)
         dfs = {"pos": df_general, "aero": df_f_aero, "damp": df_f_struct, "stiff": df_f_struct}
@@ -1205,7 +1202,7 @@ class HHTalphaPlotter(DefaultStructure):
                                        ["e_kin", "e_pot"]], tight_layout=True)
         y_labels = {"total": "Energy (Nm)", "power": "Work (Nm)",
                    "e_kin": f"Kinetic energy (Nm)", "e_pot": "Potential energy (Nm)"}
-        y_labels_err = {ax: f"{error_type} error {label[:label.find("(")-1]}" for ax, label in y_labels.items()}
+        y_labels_err = {ax: f"{error_type} error {label[:label.find('(')-1]}" for ax, label in y_labels.items()}
         df_total = pd.concat([df_e_kin.sum(axis=1), df_e_pot.sum(axis=1)], keys=["e_kin", "e_pot"], axis=1)
         df_total["e_total"] = df_total.sum(axis=1)
         dfs = {"total": df_total, "power": df_power, "e_kin": df_e_kin, "pot": df_e_pot}

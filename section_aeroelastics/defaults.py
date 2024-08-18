@@ -1,13 +1,100 @@
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from abc import ABC, abstractmethod
 from copy import copy
 import numpy as np
-plt.rcParams.update({"font.size": 10})
+
+
+_plot_backend_latex = True
+if _plot_backend_latex:
+    mpl.use("pgf")
+    plt.rcParams.update({
+        "font.family": "Arial",
+        "text.usetex": True,
+        "pgf.rcfonts": False,
+        "pgf.preamble": "\n".join([
+            r"\usepackage{amsmath}",
+            r"\usepackage{fontspec}",
+            r"\setmainfont{Arial}",
+            r"\usepackage{siunitx}",
+            r"\usepackage{xcolor}",
+            r"\definecolor{updatecolour}{RGB}{33, 36, 39}"
+        ]),
+        "axes.edgecolor": "#212427",
+        "axes.labelcolor": "#212427",
+        "axes.edgecolor": "#212427",
+        "xtick.color": "#212427",
+        "ytick.color": "#212427",
+        "xtick.labelcolor": "#212427",
+        "ytick.labelcolor": "#212427",
+    })
+
+
+def full_range_to_normalised(*args):
+    return [[val/256 for val in vals] for vals in args]
+
+# palette names available: Paul Tol, SSP, Tableu10ColorBlind
+_palette_name = "Tableu10ColorBlind"  # used for all lines in plots (also such that have None as linstyle)
+_fill_name = "Paul Tol"  # used for filling polygons
+_c_all = {
+    # https://www.nceas.ucsb.edu/sites/default/files/2022-06/Colorblind%20Safe%20Color%20Schemes.pdf
+    "Paul Tol": full_range_to_normalised(*[  
+        (148, 203, 236),  # sky blue
+        (194, 106, 119),  # skin-pink
+        (51, 117, 56),  # medium green
+        (93, 168, 153),  # something between green and blue
+        (46, 37, 133),  # dark blue
+        (221, 221, 211),  # light grey
+        (220, 205, 125),  # light ocker
+        (159, 74, 150),  # pink
+        (126, 41, 84),  # violet
+        ]),
+    "SSP": [ # https://www.simplifiedsciencepublishing.com/resources/best-color-palettes-for-scientific-figures-and-data-visualizations
+        "#003a7d",  # dark blue
+        "#008dff",  # medium blue
+        "#ff73b6",  # pink
+        "#c701ff",  # purple
+        "#4ecb8d",  # green
+        "#ff9d3a",  # orange
+        "#f9e858",  # yellow
+        "#d83034",  # red
+    ],
+    # https://tableaufriction.blogspot.com/2012/11/finally-you-can-use-tableau-data-colors.html
+    "Tableu10ColorBlind": full_range_to_normalised(*[
+        (0, 107, 164),  # blue
+        (255, 128, 14),  # orange
+        (171, 171, 171),  # light grey
+        (89, 89, 89),  # dark grey
+        (95, 158, 209),  # sky blue
+        (200, 82, 0),  # brown
+        (137, 137, 137),  # medium grey
+        (163, 200, 236),  # light sky blue
+        (207, 207, 207),  # very light grey
+        (255, 188, 121),  # light orange
+        ])   
+}
+_c = _c_all[_palette_name]
+_c_fill = _c_all[_fill_name]
+_betterblack = "#212427"
+
+
+class _RetrieveSettings(dict):
+    _aliases = {
+        "linestyle": "ls",
+        "markersize": "ms"
+    }
+    def __call__(self, setting_of: str, **kwargs: dict[str, str]) -> dict[str, str]:
+        modified = copy(self[setting_of])
+        for setting, value in kwargs.items():
+            if setting in self._aliases:
+                setting = self._aliases[setting]
+            modified[setting] = value
+        return modified
 
 
 class _BaseDefaultPltSettings(ABC):
     line = {
-        "color": "black",
+        "color": _betterblack,
         "lw": 1,
         "ls": None,
         "marker": None,
@@ -16,7 +103,7 @@ class _BaseDefaultPltSettings(ABC):
 
     arrow = {
         "width": 1,
-        "color": "black"
+        "color": _betterblack
     }
 
     def __init__(self, kind: str) -> None:
@@ -29,18 +116,18 @@ class _BaseDefaultPltSettings(ABC):
                 getattr(self, setting)[param] = getattr(self, setting)[copy_from]
                 
         settings_set = self._settings.values()
-        self.plt_settings = {}
+        self._individual_plot_settings = {}
         for param in self._params+[*self._copy_params.keys()]:
-            self.plt_settings[param] = {}
+            self._individual_plot_settings[param] = {}
             for setting, pyplot_setting in self._settings.items():
                 try:
-                    self.plt_settings[param][pyplot_setting] = getattr(self, setting)[param]
+                    self._individual_plot_settings[param][pyplot_setting] = getattr(self, setting)[param]
                 except KeyError:
-                    self.plt_settings[param][pyplot_setting] = getattr(self, self.kind)[pyplot_setting]
+                    self._individual_plot_settings[param][pyplot_setting] = getattr(self, self.kind)[pyplot_setting]
             
             for setting, value in getattr(self, self.kind).items():
                 if setting not in settings_set:
-                    self.plt_settings[param][setting] = value
+                    self._individual_plot_settings[param][setting] = value
 
     def copy_from(self, other: "_BaseDefaultPltSettings", parameters: dict[str, list]):
         """Add full description later. 'copy()' does not overwrite settings that are already set.
@@ -54,10 +141,10 @@ class _BaseDefaultPltSettings(ABC):
         """
         for param, settings in parameters.items():
             for setting in settings:
-                if setting in self.plt_settings[param].keys():
+                if setting in self._individual_plot_settings[param].keys():
                     continue
                 try:
-                    self.plt_settings[param][setting] = other[param][other._settings[setting]]
+                    self._individual_plot_settings[param][setting] = other[param][other._settings[setting]]
                 except KeyError:
                     raise KeyError(f"Instance of class '{type(other).__name__}' does not have a parameter "
                                    f"'{param}' or a setting '{setting}' for that parameter.")
@@ -68,7 +155,7 @@ class _BaseDefaultPltSettings(ABC):
         as value. Settings that are used in DefaultsPlots but that are not specified get the "_dfl" (default) value.
         These are saved in the class attributes.
         Example:
-        >>> alpha_eff_plot_settings = {"label": r"$\alpha_{\text{eff}}$", "color"="red", lw=4}
+        >>> alpha_eff_plot_settings = {"label": r"$\alpha_{\text{eff}}$", "color"=_c[7], lw=4}
         >>> plt_settings = DefaultsPlots()
         >>> plt_settings.add_params(alpha_eff=alpha_eff_plot_settings)
         >>> pyplot.plot(time, alpha_eff, **plt_settings.plt_settings)
@@ -76,12 +163,12 @@ class _BaseDefaultPltSettings(ABC):
         parameters defined already.
         """
         for param, defined_settigns in kwargs.items():
-            self.plt_settings[param] = defined_settigns
+            self._individual_plot_settings[param] = defined_settigns
             skip_setting = defined_settigns.keys()
             for setting, value in getattr(self, self.kind).items():
                 if setting in skip_setting:
                     continue
-                self.plt_settings[param][setting] = value
+                self._individual_plot_settings[param][setting] = value
     
     def copy(self):
         return copy(self)
@@ -100,18 +187,15 @@ class _BaseDefaultPltSettings(ABC):
     @abstractmethod
     def _settings():
         pass
-    
-    def __getitem__(self, key: str):
-        return self.plt_settings[key]
 
 
 class _CombineDefaults(_BaseDefaultPltSettings):
     def __init__(self, *args: tuple[_BaseDefaultPltSettings]|tuple[_BaseDefaultPltSettings, str]) -> None:
-        self.plt_settings = {}
+        self.plt_settings = _RetrieveSettings()
         args = tuple([arg if isinstance(arg, tuple) else (arg, "") for arg in args ])
         for part_of_settings, additional_name in args:
             params_set = self.plt_settings.keys()
-            for param, settings in part_of_settings.plt_settings.items():
+            for param, settings in part_of_settings._individual_plot_settings.items():
                 new_param = additional_name+param
                 if new_param in params_set:
                     raise ValueError(f"Settings for the paramter '{new_param}' are tried to be set multiple times.")
@@ -135,9 +219,9 @@ class _Axes(_BaseDefaultPltSettings):
     copy_from = {}
 
     _colours = {  # line colour
-        "x": "darkgreen",
-        "y": "orangered",
-        # "tors": "royalblue",
+        "x": _c[2],
+        "y": _c[4],
+        # "tors": _c[1],
     }
 
     _labels = {  # line label
@@ -198,16 +282,17 @@ class _DefaultAngleOfAttack(_BaseDefaultPltSettings):
     copy_from = {}
 
     _colours = {  # line colour
-        "alpha_steady": "black",
-        "alpha_qs": "darkgreen",
-        "alpha_eff": "orangered",
-        "alpha_sEq": "royalblue",
-        "alpha_eq": "royalblue",
+        "alpha_steady": _betterblack,
+        "alpha_qs": _c[2],
+        "alpha_eff": _c[4],
+        "alpha_sEq": _c[1],
+        "alpha_eq": _c[1],
     }
 
     _labels = {  # line label
         "_dfl": None,
-        "alpha_steady": r"$\alpha_{\text{steady}}$",
+        # "alpha_steady": r"$\alpha_{\text{steady}}$",
+        "alpha_steady": r"$\alpha_{\text{steady}}$",  # $\alpha_{\text{asd}}$
         "alpha_qs": r"$\alpha_{\text{qs}}$",
         "alpha_eff": r"$\alpha_{\text{eff}}$",
         "alpha_sEq": r"$\alpha_{\text{sEq}}$",
@@ -251,13 +336,13 @@ class _DefaultForce(_BaseDefaultPltSettings):
          for spec in ["damp", "stiff", "kin", "pot", "aero"]} 
 
     _colours = {  # line colour
-        "lift": "orangered",
-        "drag": "darkgreen",
-        "mom": "mediumpurple",
+        "lift": _c[1],
+        "drag": _c[5],
+        "mom": _c[7],
 
-        "edge": "forestgreen",
-        "flap": "coral",
-        "tors": "royalblue",
+        "edge": _c[2],
+        "flap": _c[5],
+        "tors": _c[1],
     }
 
     _labels = {  # line label
@@ -291,7 +376,7 @@ class _DefaultProfile(_BaseDefaultPltSettings):
     ]
 
     _colours = {  # line colour
-        "profile": "black",
+        "profile": _betterblack,
         "qc_trail": "gray"
     }
 
@@ -301,11 +386,11 @@ class _DefaultProfile(_BaseDefaultPltSettings):
     }
 
     _markers = {  # line marker
-        "qc_trail": "x"
+        "qc_trail": None
     }
 
     _linestyles = {  # line style
-        "qc_trail": "",
+        "qc_trail": "-",
     }
 
     _marker_size = {  # marker size
@@ -327,19 +412,25 @@ class _DefaultEnergy(_BaseDefaultPltSettings):
     _params = [  # parameters that are supported by default
         "e_kin",
         "e_pot",
-        "e_total"
+        "e_total",
+        "aero",
+        "-struct",
     ]
 
     _colours = {  # line colour
-        "e_kin": "blue",
-        "e_pot": "green",
-        "e_total": "black"
+        "e_kin": _c[1],
+        "e_pot": _c[2],
+        "e_total": _betterblack,
+        "aero": _c[3],
+        "-struct": _c[4]
     }
 
     _labels = {  # line label
         "e_kin": r"$E_\text{kin}$",
         "e_pot": r"$E_\text{pot}$",
-        "e_total": r"$E_\text{total}$"
+        "e_total": r"$E_\text{total}$",
+        "aero": r"$\text{aero}_{\text{tot}}$",
+        "-struct": r"$\text{structural}_{\text{tot}}$"
     }
 
     def __init__(self) -> None:
@@ -403,46 +494,46 @@ class _DefaultBL(_BaseDefaultPltSettings):
     ]
     _params = _prep_params + _sim_params
 
-    _c_models = {"aerohor": "forestgreen", "section": "orangered"}
+    _c_models = {"aerohor": _c[2], "section": _c[4]}
     def _prep_colours(params, colours):  # this is a bit narly; it replaces a dict comprehension that wouldn't work here
         return {param: colours[param.split("_")[-1]] for param in params}
     _prep_colours = _prep_colours(_prep_params, _c_models)
     _c_rest = {
-        "C_nc": "blue",
-        "C_ni": "red",
-        "C_npot": "green",
-        "C_lpot": "green",
-        "C_nsEq": "orange",
-        "C_nf": "blue",
-        "C_nv_instant": "red",
-        "C_nv": "green",
-        "C_tpot": "orange",
-        "C_lpot": "orange",
-        "C_tf": "green",
-        "C_mqs": "black",
-        "C_mnc": "orange",
-        "f_n": "forestgreen",
-        "f_t": "mediumblue",
-        "C_l_rec": "forestgreen", 
-        "C_d_rec": "mediumblue", 
-        "C_lc": "blue", 
-        "C_lnc": "red", 
-        "C_ds": "green",
-        "C_dc": "orange", 
-        "C_dsep": "blue", 
-        "C_ms": "red",
-        "C_liner": "blue", 
-        "C_lcent": "red", 
-        "C_dind": "green",
-        "C_lift": "orange", 
-        "C_miner": "blue", 
-        "C_dus": "black",
-        "C_lus": "black",
-        "C_mus": "black",
-        "C_nvisc": "black",
-        "C_mf": "black",
-        "C_mV": "black",
-        "C_mC": "black",
+        "C_nc": _c[1],
+        "C_ni": _c[7],
+        "C_npot": _c[2],
+        "C_lpot": _c[2],
+        "C_nsEq": _c[5],
+        "C_nf": _c[1],
+        "C_nv_instant": _c[7],
+        "C_nv": _c[2],
+        "C_tpot": _c[5],
+        "C_lpot": _c[5],
+        "C_tf": _c[2],
+        "C_mqs": _betterblack,
+        "C_mnc": _c[5],
+        "f_n": _c[2],
+        "f_t": _c[1],
+        "C_l_rec": _c[2], 
+        "C_d_rec": _c[1], 
+        "C_lc": _c[1], 
+        "C_lnc": _c[7], 
+        "C_ds": _c[2],
+        "C_dc": _c[5], 
+        "C_dsep": _c[1], 
+        "C_ms": _c[7],
+        "C_liner": _c[1], 
+        "C_lcent": _c[7], 
+        "C_dind": _c[2],
+        "C_lift": _c[5], 
+        "C_miner": _c[1], 
+        "C_dus": _betterblack,
+        "C_lus": _betterblack,
+        "C_mus": _betterblack,
+        "C_nvisc": _betterblack,
+        "C_mf": _betterblack,
+        "C_mV": _betterblack,
+        "C_mC": _betterblack,
     }
     _colours = _prep_colours|_c_rest
 
@@ -612,10 +703,10 @@ class _DefaultGeneral(_BaseDefaultPltSettings):
     ]
 
     _colours = {  # line colour
-        "HAWC2": "forestgreen",
-        "openFAST": "coral",
-        "section": "royalblue",
-        "section_staeblein": "royalblue"
+        "HAWC2": _c[2],
+        "openFAST": _c[5],
+        "section": _c[1],
+        "section_staeblein": _c[1]
     }
 
     _labels = {  # line label
@@ -639,8 +730,8 @@ class DefaultPlot:
     This will cause the plot to have all axes settings defined in this class to be set for the values connected 
     to "lift.
     """
-    plt_settings = {}
     def __init__(self) -> None:
+        self.plt_settings = _RetrieveSettings()  # this is only here for type hints
         axes = _Axes()
         arrow = _DefaultArrow()
         aoa = _DefaultAngleOfAttack()
