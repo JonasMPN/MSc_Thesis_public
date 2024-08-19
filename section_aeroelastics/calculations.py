@@ -1163,7 +1163,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
 
         # for return of [f_x, f_y, mom]
         dynamic_pressure = density/2*sim_res.rel_inflow_speed[i]**2
-        rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])
+        rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])  #todo change alpha_eff to alpha_qs
         return dynamic_pressure*np.asarray([chord, chord, -chord**2])*rot@coeffs
 
     def _BL_Staeblein(
