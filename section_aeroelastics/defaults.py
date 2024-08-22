@@ -34,20 +34,20 @@ def full_range_to_normalised(*args):
     return [[val/256 for val in vals] for vals in args]
 
 # palette names available: Paul Tol, SSP, Tableu10ColorBlind
-_palette_name = "Tableu10ColorBlind"  # used for all lines in plots (also such that have None as linstyle)
+_palette_name = "Paul Tol"  # used for all lines in plots (also such that have None as linstyle)
 _fill_name = "Paul Tol"  # used for filling polygons
 _c_all = {
     # https://www.nceas.ucsb.edu/sites/default/files/2022-06/Colorblind%20Safe%20Color%20Schemes.pdf
     "Paul Tol": full_range_to_normalised(*[  
-        (148, 203, 236),  # sky blue
-        (194, 106, 119),  # skin-pink
-        (51, 117, 56),  # medium green
-        (93, 168, 153),  # something between green and blue
-        (46, 37, 133),  # dark blue
-        (221, 221, 211),  # light grey
-        (220, 205, 125),  # light ocker
-        (159, 74, 150),  # pink
-        (126, 41, 84),  # violet
+        (148, 203, 236),  # sky blue, #94CBEC
+        (194, 106, 119),  # skin-pink, #C26A77
+        (51, 117, 56),  # medium green, #337538
+        (93, 168, 153),  # something between green and blue, #5DA899
+        (46, 37, 133),  # dark blue, #2E2585
+        (221, 221, 211),  # light grey, #DDDDDD
+        (220, 205, 125),  # light ocker, #DCCD7D
+        (159, 74, 150),  # pink, #9F4A96
+        (126, 41, 84),  # violet, #7E2954
         ]),
     "SSP": [ # https://www.simplifiedsciencepublishing.com/resources/best-color-palettes-for-scientific-figures-and-data-visualizations
         "#003a7d",  # dark blue
@@ -61,16 +61,16 @@ _c_all = {
     ],
     # https://tableaufriction.blogspot.com/2012/11/finally-you-can-use-tableau-data-colors.html
     "Tableu10ColorBlind": full_range_to_normalised(*[
-        (0, 107, 164),  # blue
-        (255, 128, 14),  # orange
-        (171, 171, 171),  # light grey
-        (89, 89, 89),  # dark grey
-        (95, 158, 209),  # sky blue
-        (200, 82, 0),  # brown
-        (137, 137, 137),  # medium grey
-        (163, 200, 236),  # light sky blue
-        (207, 207, 207),  # very light grey
-        (255, 188, 121),  # light orange
+        (0, 107, 164),  # blue, #006BA4
+        (255, 128, 14),  # orange, #FF800E
+        (171, 171, 171),  # light grey, #ABABAB
+        (89, 89, 89),  # dark grey, #595959
+        (95, 158, 209),  # sky blue, #5F9ED1
+        (200, 82, 0),  # brown, #C85200
+        (137, 137, 137),  # medium grey, #898989
+        (163, 200, 236),  # light sky blue, #A3C8EC
+        (207, 207, 207),  # very light grey, #CFCFCF
+        (255, 188, 121),  # light orange, #FFBC79
         ])   
 }
 _c = _c_all[_palette_name]
