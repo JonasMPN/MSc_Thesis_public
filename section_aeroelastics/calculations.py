@@ -131,6 +131,7 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
                 
             aoa = inflow_angle-tors_angle
             # aero forces in x and y
+            rot = self.passive_2D(-inflow_angle)
             f_aero_xy = (rot@np.c_[[base_force*C_d(aoa)], [base_force*C_l(aoa)]].T).flatten()
             f_aero_xy[0] = f_aero_xy[0] if x else 0 
             f_aero_xy[1] = f_aero_xy[1] if y else 0 
