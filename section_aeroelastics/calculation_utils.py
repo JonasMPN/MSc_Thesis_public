@@ -143,7 +143,8 @@ class SimulationSubRoutine(ABC):
                                          f"return for scheme '{scheme}'.")        
 
     def get_scheme(self, scheme: str, simulation_results: SimulationResults, call_from: str, **kwargs):
-        """Returns a function object that receives a ThreeDOFsAirfoil instance and returns a numpy array with
+        """ Old comment, needs revision.
+        Returns a function object that receives a ThreeDOFsAirfoil instance and returns a numpy array with
         [aero_force_x, aero_force_y, aero_force_moment]. "scheme" sets which kind of calculation for the aerodynamic
         forces is used. Implemented schemes are defined in _implemented_schemes.
 

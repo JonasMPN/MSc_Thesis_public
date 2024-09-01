@@ -187,6 +187,7 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
         """
         self._time_integration_scheme_settings = kwargs
         TI = TimeIntegration(verbose=self.verbose)
+        # add self._added_sim_params in case the time integration has interesting params
         self._time_integration = TI.get_scheme(scheme, self, "set_time_integration", **kwargs)
         self._init_time_integration = TI.get_scheme_init_method(scheme)
 
@@ -609,11 +610,11 @@ class AeroForce(SimulationSubRoutine, Rotations):
         if (sim_res.tau_vortex[i] < tau_vortex_pure_decay) and (d_alpha_qs >= 0):
             tmp = -sim_res.ds[i-1]/T_MU  # T_MU!
             tmp2 = C_Pf*(sim_res.C_nv_instant[i]-sim_res.C_nv_instant[i-1])
-            sim_res.C_mC[i] = sim_res.C_mC[i]*np.exp(tmp)-tmp2*np.exp(tmp/2)
+            sim_res.C_mC[i] = sim_res.C_mC[i-1]*np.exp(tmp)-tmp2*np.exp(tmp/2)
         elif d_alpha_qs < 0:
             tmp = -sim_res.ds[i-1]/T_MD  # T_MD!
             tmp2 = C_Pf*(sim_res.C_nv_instant[i]-sim_res.C_nv_instant[i-1])
-            sim_res.C_mC[i] = sim_res.C_mC[i]*np.exp(tmp)-tmp2*np.exp(tmp/2)
+            sim_res.C_mC[i] = sim_res.C_mC[i-1]*np.exp(tmp)-tmp2*np.exp(tmp/2)
         else:
             sim_res.C_mC[i] = sim_res.C_mC[i-1]
 
@@ -747,7 +748,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.C_nc[i] = self._C_n_slope*(sim_res.alpha_eff[i]-self._alpha_0n_inv)
 
         # impulsive (non-circulatory) normal force coefficient
-        tmp = -a*sim_res.dt[i]/(K_alpha*chord)
+        tmp = -a*sim_res.dt[i-1]/(K_alpha*chord)
         tmp_2 = -(sim_res.vel[i, 2]-sim_res.vel[i-1, 2])
         sim_res.D_i[i] = sim_res.D_i[i-1]*np.exp(tmp)+tmp_2*np.exp(0.5*tmp)
         sim_res.C_ni[i] = 4*K_alpha*chord/rel_flow_vel*(-sim_res.vel[i, 2]-sim_res.D_i[i])
@@ -1034,7 +1035,8 @@ class AeroForce(SimulationSubRoutine, Rotations):
 
         # for return of [f_x, f_y, mom]
         dynamic_pressure = density/2*rel_inflow_speed**2
-        rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])
+        # rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])
+        rot = self.passive_3D_planar(-sim_res.alpha_qs[i]-sim_res.pos[i, 2])
         return dynamic_pressure*np.asarray([chord, chord, -chord**2])*rot@coeffs
     
     def _BL_openFAST_Cl_disc_f_scaled(
@@ -1175,7 +1177,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
 
         # for return of [f_x, f_y, mom]
         dynamic_pressure = density/2*sim_res.rel_inflow_speed[i]**2
-        rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])  #todo change alpha_eff to alpha_qs
+        rot = self.passive_3D_planar(-sim_res.alpha_qs[i]-sim_res.pos[i, 2])  #todo change alpha_eff to alpha_qs
         return dynamic_pressure*np.asarray([chord, chord, -chord**2])*rot@coeffs
 
     def _BL_Staeblein(
