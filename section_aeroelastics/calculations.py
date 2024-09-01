@@ -550,16 +550,14 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.X_lag[i] = sim_res.X_lag[i-1]*np.exp(-b1*sim_res.ds[i-1])+d_alpha_qs*A1*np.exp(-0.5*b1*sim_res.ds[i-1])
         sim_res.Y_lag[i] = sim_res.Y_lag[i-1]*np.exp(-b2*sim_res.ds[i-1])+d_alpha_qs*A2*np.exp(-0.5*b2*sim_res.ds[i-1])
         sim_res.alpha_eff[i] = sim_res.alpha_qs[i]-sim_res.X_lag[i]-sim_res.Y_lag[i]
-        if sim_res.f_n_Dp[i-1] != 0:
-            sim_res.C_nc[i] = self._C_n_slope*(sim_res.alpha_eff[i]-self._alpha_0n_inv) 
-        else:
-            sim_res.C_nc[i] = 4*self._C_n_visc(sim_res.alpha_eff[i])
 
+        sim_res.C_nc[i] = self._C_n_slope*(sim_res.alpha_eff[i]-self._alpha_0n_inv) 
         # impulsive (non-circulatory) normal force coefficient
         tmp = -a*sim_res.dt[i]/(K_alpha*chord)
         tmp_2 = -(sim_res.vel[i, 2]-sim_res.vel[i-1, 2])  # minus here needed because of coordinate system
-        sim_res.D_i[i] = sim_res.D_i[i-1]*np.exp(tmp)+tmp_2*np.exp(0.5*tmp)
-        sim_res.C_ni[i] = 4*K_alpha*chord/rel_flow_vel*(-sim_res.vel[i, 2]-sim_res.D_i[i])  # -vel because of CS
+        # sim_res.D_i[i] = sim_res.D_i[i-1]*np.exp(tmp)+tmp_2*np.exp(0.5*tmp)  # take out for consistency on no compressibility effects
+        # sim_res.C_ni[i] = 4*K_alpha*chord/rel_flow_vel*(-sim_res.vel[i, 2]-sim_res.D_i[i])  # -vel because of CS
+        sim_res.C_ni[i] = -4*K_alpha*chord/rel_flow_vel*-sim_res.vel[i, 2]  # -vel because of CS
 
         # add circulatory and impulsive
         sim_res.C_npot[i] = sim_res.C_nc[i]+sim_res.C_ni[i]
@@ -576,8 +574,12 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.D_bl_n[i] = sim_res.D_bl_n[i-1]*np.exp(tmp_bl)+(sim_res.f_n[i]-sim_res.f_n[i-1])*np.exp(0.5*tmp_bl)
         sim_res.f_n_Dp[i] = sim_res.f_n[i]-sim_res.D_bl_n[i]
 
-        sim_res.C_nvisc[i] = self._C_n_slope*(sim_res.alpha_eff[i]-self._alpha_0n_visc)
-        sim_res.C_nvisc[i] *= ((1+np.sqrt(sim_res.f_n_Dp[i]))/2)**2
+        if sim_res.f_n_Dp[i] != 0:
+            sim_res.C_nvisc[i] = self._C_n_slope*(sim_res.alpha_eff[i]-self._alpha_0n_visc)
+            sim_res.C_nvisc[i] *= ((1+np.sqrt(sim_res.f_n_Dp[i]))/2)**2
+        else:
+            sim_res.C_nvisc[i] = self._C_n_visc(sim_res.alpha_eff[i])
+
         sim_res.C_nf[i] = sim_res.C_nvisc[i]+sim_res.C_ni[i]
 
         sim_res.C_tf[i] = self._C_t_visc(sim_res.alpha_sEq[i])
@@ -719,7 +721,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
             i: int,
             A1: float, A2: float, b1: float, b2: float,
             chord: float=1, density: float=1.225, pitching_around: float=0.25, alpha_at: float=0.75,
-            a: float=343, K_alpha: float=0.75,
+            a: float=343,
             T_p: float=1.7, T_bl: float=3, T_v: float=6, tau_vortex_pure_decay: float=6, alpha_critical=None):
         sim_res.alpha_steady[i] = -sim_res.pos[i, 2]+sim_res.inflow_angle[i]
         # --------- general calculations
@@ -728,11 +730,20 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.alpha_qs[i] = -sim_res.pos[i, 2]+qs_flow_angle
         rel_flow_vel = np.sqrt(v_x**2+v_y**2)
         sim_res.ds[i] = 2*sim_res.dt[i]*rel_flow_vel/chord 
+        Mach = rel_flow_vel/a
+        beta = np.sqrt(1-Mach**2)
+        K_alpha = 0.75/(1-Mach+np.pi*beta**2*Mach**2*(A1*b1+A2*b2))
 
         # --------- MODULE unsteady attached flow
         d_alpha_qs = sim_res.alpha_qs[i]-sim_res.alpha_qs[i-1]
-        sim_res.X_lag[i] = sim_res.X_lag[i-1]*np.exp(-b1*sim_res.ds[i-1])+d_alpha_qs*A1*np.exp(-0.5*b1*sim_res.ds[i-1])
-        sim_res.Y_lag[i] = sim_res.Y_lag[i-1]*np.exp(-b2*sim_res.ds[i-1])+d_alpha_qs*A2*np.exp(-0.5*b2*sim_res.ds[i-1])
+        # sim_res.X_lag[i] = sim_res.X_lag[i-1]*np.exp(-b1*sim_res.ds[i-1])+d_alpha_qs*A1*np.exp(-0.5*b1*sim_res.ds[i-1])
+        # sim_res.Y_lag[i] = sim_res.Y_lag[i-1]*np.exp(-b2*sim_res.ds[i-1])+d_alpha_qs*A2*np.exp(-0.5*b2*sim_res.ds[i-1])
+
+        sim_res.X_lag[i] = sim_res.X_lag[i-1]*np.exp(-b1*sim_res.ds[i-1]*beta**2)
+        sim_res.X_lag[i] += d_alpha_qs*A1*np.exp(-0.5*b1*sim_res.ds[i-1]*beta**2) 
+        sim_res.Y_lag[i] = sim_res.Y_lag[i-1]*np.exp(-b2*sim_res.ds[i-1]*beta**2)
+        sim_res.Y_lag[i] += d_alpha_qs*A2*np.exp(-0.5*b2*sim_res.ds[i-1]*beta**2)
+
         sim_res.alpha_eff[i] = sim_res.alpha_qs[i]-sim_res.X_lag[i]-sim_res.Y_lag[i]
         sim_res.C_nc[i] = self._C_n_slope*(sim_res.alpha_eff[i]-self._alpha_0n_inv)
 
@@ -774,7 +785,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
             if d_alpha_qs >= 0:
                 sim_res.tau_vortex[i] = 0
             else:
-                sim_res.tau_vortex[i] = sim_res.tau_vortex[i-1]
+                sim_res.tau_vortex[i] = sim_res.tau_vortex[i-1]+0.45*sim_res.ds[i-1]
         
         # --------- MODULE leading-edge vortex lift
         sim_res.C_nv_instant[i] = sim_res.C_nc[i]*(1-((1+np.sqrt(sim_res.f_n_Dp[i]))/2)**2)
