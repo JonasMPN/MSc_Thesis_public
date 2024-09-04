@@ -1,11 +1,15 @@
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from abc import ABC, abstractmethod
+from matplotlib.colors import LinearSegmentedColormap
 from copy import copy
 import numpy as np
 
 
 _plot_backend_latex = True
+# fig_size =  "textwidth"
+# fig_size =  "half_textwidth"
+fig_size =  "page_height"
 if _plot_backend_latex:
     mpl.use("pgf")
     plt.rcParams.update({
@@ -27,6 +31,31 @@ if _plot_backend_latex:
         "ytick.color": "#212427",
         "xtick.labelcolor": "#212427",
         "ytick.labelcolor": "#212427",
+    })
+
+if fig_size == "textwidth":
+    plt.rcParams.update({
+        "axes.labelsize": 14,
+        "axes.titlesize": 14,
+        "xtick.labelsize": 12,
+        "ytick.labelsize": 12,
+        "legend.fontsize": 12,
+    })
+elif fig_size == "half_textwidth":
+    plt.rcParams.update({
+        "axes.labelsize": 18,
+        "axes.titlesize": 18,
+        "xtick.labelsize": 16,
+        "ytick.labelsize": 16,
+        "legend.fontsize": 16,
+    })
+elif fig_size == "page_height":
+    plt.rcParams.update({
+        "axes.labelsize": 10,
+        "axes.titlesize": 10,
+        "xtick.labelsize": 8,
+        "ytick.labelsize": 8,
+        "legend.fontsize": 8,
     })
 
 
@@ -73,6 +102,7 @@ _c_all = {
         (255, 188, 121),  # light orange, #FFBC79
         ])   
 }
+_colormap = LinearSegmentedColormap.from_list("Tol_muted_cmap", ["#DCCD7D", "#94CBEC", "#2E2585"], N=256)
 _c = _c_all[_palette_name]
 _c_fill = _c_all[_fill_name]
 _betterblack = "#212427"
@@ -95,7 +125,7 @@ class _RetrieveSettings(dict):
 class _BaseDefaultPltSettings(ABC):
     line = {
         "color": _betterblack,
-        "lw": 1,
+        "lw": 1.5,
         "ls": None,
         "marker": None,
         "ms": 3,
@@ -303,6 +333,45 @@ class _DefaultAngleOfAttack(_BaseDefaultPltSettings):
         _BaseDefaultPltSettings.__init__(self, "line")
 
 
+class _DefaultHHTAlpha(_BaseDefaultPltSettings):
+    _copy_params = {}
+
+    _settings = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
+        "_colours": "color",
+        "_labels": "label",
+        "_linewidth": "lw"
+    }
+
+    _params = [  # parameters that are supported by default
+        "solution",
+        "HHT-alpha-xy",
+        "HHT-alpha-xy-adapted",
+    ]
+
+    copy_from = {}
+
+    _colours = {  # line colour
+        "solution": _betterblack,
+        "HHT-alpha-xy": _c[2],
+        "HHT-alpha-xy-adapted": _c[4],
+    }
+
+    _labels = {  # line label
+        "solution": "analytical", 
+        "HHT-alpha-xy": r"HHT-$\alpha^{\text{HHT}}$",
+        "HHT-alpha-xy-adapted": r"HHT-$\alpha^{\text{HHT}}$-adapted",
+    }
+
+    _linewidth = {  # line colour
+        "solution": 0.6,
+        "HHT-alpha-xy": 0.6,
+        "HHT-alpha-xy-adapted": 0.6,
+    }
+
+    def __init__(self) -> None:
+        _BaseDefaultPltSettings.__init__(self, "line")
+
+
 class _DefaultForce(_BaseDefaultPltSettings):    
     _settings = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
         "_colours": "color",
@@ -337,7 +406,7 @@ class _DefaultForce(_BaseDefaultPltSettings):
 
     _colours = {  # line colour
         "lift": _c[1],
-        "drag": _c[5],
+        "drag": _c[6],
         "mom": _c[7],
 
         "edge": _c[2],
@@ -478,6 +547,7 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_ds",   
         "C_dc", 
         "C_dsep", 
+        "C_dtors",
         "C_ms",
         "C_liner",
         "C_lcent",
@@ -515,19 +585,20 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "f_n": _c[2],
         "f_t": _c[1],
         "C_l_rec": _c[2], 
-        "C_d_rec": _c[1], 
         "C_lc": _c[1], 
         "C_lnc": _c[7], 
+        "C_d_rec": _c[1], 
         "C_ds": _c[2],
         "C_dc": _c[5], 
+        "C_dtors": _c[4],
         "C_dsep": _c[1], 
+        "C_dus": _betterblack,
+        "C_dind": _c[6],
         "C_ms": _c[7],
         "C_liner": _c[1], 
         "C_lcent": _c[7], 
-        "C_dind": _c[2],
         "C_lift": _c[5], 
         "C_miner": _c[1], 
-        "C_dus": _betterblack,
         "C_lus": _betterblack,
         "C_mus": _betterblack,
         "C_nvisc": _betterblack,
@@ -562,12 +633,13 @@ class _DefaultBL(_BaseDefaultPltSettings):
         "C_mnc": r"$C_{m\text{,nc}}$",
         "f_n": r"$f_n$",
         "f_t": r"$f_t$",
-        "C_lc": "$C_{lc}$",
-        "C_lnc": "$C_{lnc}$",
-        "C_ds": "$C_{ds}$",
-        "C_dc": "$C_{dc}$",
-        "C_dsep": "$C_{dsep}$",
-        "C_ms": "$C_{ms}$",
+        "C_lc": r"$C_{l\text{,c}}$",
+        "C_lnc": r"$C_{l\text{,n}c}$",
+        "C_ds": r"$C_{d\text{,s}}$",
+        "C_dc": r"$C_{d\text{,c}}$",
+        "C_dtors": r"$C_{d\text{,tors}}$",
+        "C_dsep": r"$C_{d\text{,s}ep}$",
+        "C_ms": r"$C_{m\text{,s}}$",
         "C_liner": r"$C_{l\text{,iner}}$",
         "C_lcent": r"$C_{l\text{,cent}}$",
         "C_dind": r"$C_{d\text{,ind}}$",
@@ -607,7 +679,8 @@ class _DefaultMeasurement(_BaseDefaultPltSettings):
         "_labels": "label",
         "_markers": "marker",
         "_linestyles": "ls",
-        "_marker_size": "ms"
+        "_marker_size": "ms",
+        "_linewidth": "lw"
     }
 
     _params = [ 
@@ -642,9 +715,9 @@ class _DefaultMeasurement(_BaseDefaultPltSettings):
         "C_l_openFAST": "openFAST",
         "C_d_openFAST": "openFAST",
         "C_m_openFAST": "openFAST",
-        "C_l_IAG": "IAG",
-        "C_d_IAG": "IAG",
-        "C_m_IAG": "IAG",
+        "C_l_IAG": "Bangga et. al (2020)",
+        "C_d_IAG": "Bangga et. al (2020)",
+        "C_m_IAG": "Bangga et. al (2020)",
         "C_l_measurement": "measurement",
         "C_d_measurement": "measurement",
         "C_m_measurement": "measurement",
@@ -671,9 +744,9 @@ class _DefaultMeasurement(_BaseDefaultPltSettings):
     }
 
     _marker_size = {
-        "C_l_HAWC2": 0.8,
-        "C_d_HAWC2": 0.8,
-        "C_m_HAWC2": 0.8,
+        "C_l_HAWC2": 1.4,
+        "C_d_HAWC2": 1.4,
+        "C_m_HAWC2": 1.4,
     }
     
     def _linestyles(params):
@@ -683,39 +756,61 @@ class _DefaultMeasurement(_BaseDefaultPltSettings):
     _linestyles["C_d"] = "-"
     _linestyles["C_m"] = "-"
 
+    def _lw(params):
+        return {param: 1.5 for param in params}
+    _linewidth = _lw(_params)
+
     def __init__(self) -> None:
         _BaseDefaultPltSettings.__init__(self, "line")
 
 
 class _DefaultGeneral(_BaseDefaultPltSettings):
-    _copy_params = {}
+    _copy_params = {
+    }
         
     _settings = {  # which axes.plot() settings are implemented; maps class attributes to plot() kwargs
         "_colours": "color",
-        "_labels": "label"
+        "_labels": "label",
+        # "_linewidth": "lw"
     }
 
     _params = [  # parameters that are supported by default
         "HAWC2",
         "openFAST",
         "section",
-        "section_staeblein",
+        "section_AEROHOR",
+        "section_IAG",
+        "section_HGM_oF",
+        "section_HGM_f",
+        "section_Staeb",
     ]
 
     _colours = {  # line colour
         "HAWC2": _c[2],
         "openFAST": _c[5],
         "section": _c[1],
-        "section_staeblein": _c[1]
+        "section_AEROHOR": _c[0],
+        "section_IAG": _c[2],
+        "section_HGM_oF": _c[6],
+        "section_HGM_f": _c[7],
+        "section_Staeb": _c[1]
     }
 
     _labels = {  # line label
         "HAWC2": "HAWC2",
         "openFAST": "openFAST",
         "section": "section",
-        "section_staeblein": "section, Stäblein"
+        "section_AEROHOR": "section (AEROHOR)",
+        "section_IAG": "section (1st-order IAG)",
+        "section_HGM_oF": "section (HGM openFAST)",
+        "section_HGM_f": r"section (HGM $f$-scaled)",
+        "section_Staeb": "section (Stäblein)"
     }
-    
+
+    def _lw(params):
+        return {param: 1.5 for param in params}
+    _linewidth = _lw(_params)
+
     def __init__(self) -> None:
         _BaseDefaultPltSettings.__init__(self, "line")
 
@@ -741,7 +836,9 @@ class DefaultPlot:
         BL = _DefaultBL()
         measurement = _DefaultMeasurement()
         general = _DefaultGeneral()
-        _CombineDefaults.__init__(self, axes, (arrow, "arrow_"), aoa, force, profile, energy, BL, measurement, general)
+        hht = _DefaultHHTAlpha()
+        _CombineDefaults.__init__(self, axes, (arrow, "arrow_"), aoa, force, profile, energy, BL, measurement, general, 
+                                  hht)
         
 
 class DefaultStructure:
@@ -836,4 +933,3 @@ class Staeblein:
         tors_stiff = self.m*self.r**2*self.nat_freqs[2]**2
         self.stiffness = np.r_[lin_stiff, tors_stiff] 
         self.damping = 2*self.damp_ratios*self.inertia*self.nat_freqs
-
