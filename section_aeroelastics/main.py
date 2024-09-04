@@ -68,13 +68,13 @@ root = "data/FFA_WA3_221"  # set which airfoil polars to use. Simulatenously def
 # sim_type = "free"
 sim_type = "free_parallel"
 # sim_type = "forced"
-n_processes = 4  # for sim_type="forced" and sim_type="free_parallel".
+n_processes = 2  # for sim_type="forced" and sim_type="free_parallel".
 
 # aero_scheme = "qs"
 # aero_scheme = "BL_openFAST_Cl_disc"
-aero_scheme = "BL_openFAST_Cl_disc_f_scaled"
+# aero_scheme = "BL_openFAST_Cl_disc_f_scaled"
 # aero_scheme = "BL_AEROHOR"
-# aero_scheme = "BL_first_order_IAG2"
+aero_scheme = "BL_first_order_IAG2"
 # aero_scheme = "BL_Staeblein"
 
 file_polar = "polars_new.dat"
@@ -232,8 +232,10 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             velocities = [5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25, 27.5, 30, 32.5, 35]
             angle_of_attacks = [-20, -17.5, -15, -12.5, -10, -7.5, -5, -2.5, 0, 2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20]
             # angle_of_attacks = [20, 22.5, 25]
+            combinations = [(vel, aoa) for vel, aoa in product(velocities, [-25, -22.5, 22.5, 25])]
+            combinations += [(vel, aoa) for vel, aoa in product([37.5, 40, 42.5, 45, 47.5, 50], angle_of_attacks)]
             run_free_parallel(root, file_polar, case_dir, n_processes, aero_scheme, t, structure_def, velocities, 
-                              angle_of_attacks, save_last)
+                              angle_of_attacks, combinations, save_last)
 
         if sim_type == "forced":
             root_cases = case_dir
@@ -294,7 +296,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             post_calc.work_per_cycle()
 
     if plot_results:
-        trailing_every = 5
+        5
         time_frame = (290, 300)
         file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
         if sim_type == "free":
@@ -304,16 +306,16 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             dir_sim = join(root, "simulation", sim_type, aero_scheme, case_name, case_id)
         dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
         plotter = Plotter(file_profile, dir_sim, dir_plots, structure_def["coordinate_system"]) 
-        plotter.force(trailing_every=trailing_every, time_frame=time_frame)  # plot various forces of the simulation
-        plotter.energy(trailing_every=trailing_every, time_frame=time_frame)  # plot various energies and work done by forces of the simulation
+        plotter.force(time_frame=time_frame)  # plot various forces of the simulation
+        plotter.energy(time_frame=time_frame)  # plot various energies and work done by forces of the simulation
         if "BL" in aero_scheme:
-            plotter.Beddoes_Leishman(trailing_every=trailing_every, time_frame=time_frame)
+            plotter.Beddoes_Leishman(time_frame=time_frame)
         # plotter.damping(("alpha_eff", [25, 35]), 
         #                 polar=["data/FFA_WA3_221/polars_new.dat", 5],
         #                 time_frame=(0.1, 400),  transient_time=30)
     
     if plot_results_fill:
-        trailing_every = 5
+        5
         peak_distance = 1000
         file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
         if sim_type == "free":
@@ -327,9 +329,9 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         plotter = Plotter(file_profile, dir_sim, dir_plots, structure_def["coordinate_system"]) 
         alpha = 0.3
         # plot various forces of the simulation
-        plotter.force_fill(trailing_every=trailing_every, alpha=alpha, peak_distance=peak_distance) 
+        plotter.force_fill(alpha=alpha, peak_distance=peak_distance) 
         # plot various energies and work done by forces of the simulation
-        plotter.energy_fill(trailing_every=trailing_every, alpha=alpha, peak_distance=peak_distance)  
+        plotter.energy_fill(alpha=alpha, peak_distance=peak_distance)  
         if "BL" in aero_scheme:
             plotter.Beddoes_Leishman_fill(alpha=alpha, peak_distance=peak_distance)
 
@@ -369,7 +371,14 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         combined_forced(join(root, "simulation", sim_type, aero_scheme, case_name))
 
     if plot_combined_LOC_amplitude:
-        combined_LOC_amplitude(join(root, "simulation", sim_type, aero_scheme, case_name))
+        schemes = ["BL_openFAST_Cl_disc", "BL_openFAST_Cl_disc_f_scaled", "BL_AEROHOR", 
+                #    "BL_first_order_IAG2"
+                   ]
+        scaling_dirs = [
+            join(root, "simulation", sim_type, scheme, case_name) for scheme in schemes
+        ]
+        combined_LOC_amplitude(join(root, "simulation", sim_type, aero_scheme, case_name),
+                               dirs_scaling=scaling_dirs)
 
 if __name__ == "__main__":
     main(**do)
