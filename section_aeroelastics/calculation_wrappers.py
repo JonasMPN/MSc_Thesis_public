@@ -326,12 +326,14 @@ def run_free_parallel(
         structure_data: dict[str, float],
         inflow_velocity: list[float]|float,
         angle_of_attack: list[float]|float,
+        combinations: list[tuple]=None,
         save_last: float=None
 ):
     root_dir = helper.create_dir(root)[0]
-    inflow_velocity = inflow_velocity if isinstance(inflow_velocity, list) else [inflow_velocity]
-    angle_of_attack = angle_of_attack if isinstance(angle_of_attack, list) else [angle_of_attack]
-    combinations = [(vel, aoa) for vel, aoa in product(inflow_velocity, angle_of_attack)]
+    if combinations is None:
+        inflow_velocity = inflow_velocity if isinstance(inflow_velocity, list) else [inflow_velocity]
+        angle_of_attack = angle_of_attack if isinstance(angle_of_attack, list) else [angle_of_attack]
+        combinations = [(vel, aoa) for vel, aoa in product(inflow_velocity, angle_of_attack)]
 
     ffile_combinations = join(root_dir, "combinations.dat")
     df_existing_combinations = None
