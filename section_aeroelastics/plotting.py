@@ -1,6 +1,6 @@
 from plot_utils import Shapes, PlotPreparation, AnimationPreparation, PlotHandler, get_colourbar
 from calculations import Rotations
-from defaults import DefaultPlot, DefaultStructure, _c, _c_fill, _colormap
+from defaults import DefaultPlot, DefaultStructure, _c, _c_fill, _colormap, _fcolormap
 import pandas as pd
 import numpy as np
 import json
@@ -8,7 +8,9 @@ import matplotlib.animation as animation
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 import matplotlib
-from os.path import join, isdir
+import matplotlib.ticker as ticker
+import matplotlib.colors as mcolors
+from os.path import join, isdir, isfile
 from os import listdir
 from scipy.signal import find_peaks
 from scipy.interpolate import interp1d
@@ -26,7 +28,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
     """
     
     def __init__(self, file_profile: str, dir_data: str, dir_plots: str, structure_coordinate_system: str,
-                 dt_res: float=500) -> None:
+                 dt_res: float=2000) -> None:
         """Initialises a plotter instance.
 
         :param file_profile: Path from the current working directory to a text file holding the profile coordinates. The
@@ -63,7 +65,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                              " 'ef' and 'xy'.")
         self._cs_struc = structure_coordinate_system
 
-    def force(self, equal_y: tuple[str]=None, trailing_every: int=40, time_frame: tuple[float, float]=None):
+    def force(self, equal_y: tuple[str]=None, time_frame: tuple[float, float]=None, anchor_y: float=None):
         """Plots the history of the airfoil movement and different forces.
 
         :param equal_y: Whether the force axes should have equal y scaling, defaults to None
@@ -89,9 +91,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         rot_profile += np.asarray([[pos[-1, 0]], [pos[-1, 1]]])
         axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plt_settings["profile"])
         time = self.df_general["time"].to_numpy() if use_ids is None else self.df_general["time"].to_numpy()[use_ids]
-        self.coupled_timeseries(time=time[::trailing_every], val1=pos[::trailing_every, 0], 
-                                val2=pos[::trailing_every, 1], fig_and_ax=(fig, axs["profile"]), 
-                                cbar_kwargs={"location": "top", "anchor": (-3, -1.3)})
+        skip_points = max(int(time.size/self.dt_res), 1)
+        self.coupled_timeseries(time=time[::skip_points], val1=pos[::skip_points, 0], 
+                                val2=pos[::skip_points, 1], fig_and_ax=(fig, axs["profile"]), 
+                                cbar_kwargs={"location": "top", "anchor":  (-3, -1.3 if anchor_y is None else anchor_y)})
         # axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plt_settings["qc_trail"])
         
         # grab all angles of attack from the data
@@ -119,8 +122,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         handler.update(legend=legend)
         handler.save(join(self.dir_plots, f"forces{postfix}.pdf"))
                     
-    def force_fill(self, equal_y: tuple[str]=None, trailing_every: int=40, alpha: int=0.2, peak_distance: int=400,
-                   time_frame: tuple[float, float]=None):
+    def force_fill(self, equal_y: tuple[str]=None, alpha: int=0.2, peak_distance: int=400,
+                   time_frame: tuple[float, float]=None, anchor_y: float=None):
         """Plots the history of the airfoil movement and different forces.
 
         :param equal_y: Whether the force axes should have equal y scaling, defaults to None
@@ -139,9 +142,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         rot_profile += np.asarray([[pos[-1, 0]], [pos[-1, 1]]])
         axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plt_settings["profile"])
         time = self.df_general["time"].to_numpy()
-        self.coupled_timeseries(time=time[::trailing_every], val1=pos[::trailing_every, 0], 
-                                val2=pos[::trailing_every, 1], fig_and_ax=(fig, axs["profile"]), 
-                                cbar_kwargs={"location": "top", "anchor": (-3, -1.3)})
+        skip_points = max(int(time.size/self.dt_res), 1)
+        self.coupled_timeseries(time=time[::skip_points], val1=pos[::skip_points, 0], 
+                                val2=pos[::skip_points, 1], fig_and_ax=(fig, axs["profile"]), 
+                                cbar_kwargs={"location": "top", "anchor":  (-3, -1.3 if anchor_y is None else anchor_y)})
         # axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plt_settings["qc_trail"])
         
         # grab all angles of attack from the data
@@ -172,7 +176,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         handler.update(legend=legend)
         handler.save(join(self.dir_plots, "forces_fill.pdf"))
 
-    def energy(self, equal_y: tuple[str]=None, trailing_every: int=40, time_frame: tuple[float, float]=None):
+    def energy(self, equal_y: tuple[str]=None, time_frame: tuple[float, float]=None, anchor_y: float=None):
         """Plots the history of the airfoil movement and different energies/power.
 
         :param equal_y: Whether the force axes should have equal y scaling, defaults to None
@@ -198,9 +202,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         rot_profile += np.asarray([[pos[-1, 0]], [pos[-1, 1]]])
         axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plt_settings["profile"])
         time = self.df_general["time"].to_numpy() if use_ids is None else self.df_general["time"].to_numpy()[use_ids]
-        self.coupled_timeseries(time=time[::trailing_every], val1=pos[::trailing_every, 0], 
-                                val2=pos[::trailing_every, 1], fig_and_ax=(fig, axs["profile"]), 
-                                cbar_kwargs={"location": "top", "anchor": (-3, -1.3)})
+        skip_points = max(int(time.size/self.dt_res), 1)
+        self.coupled_timeseries(time=time[::skip_points], val1=pos[::skip_points, 0], 
+                                val2=pos[::skip_points, 1], fig_and_ax=(fig, axs["profile"]), 
+                                cbar_kwargs={"location": "top", "anchor":  (-3, -1.3 if anchor_y is None else anchor_y)})
         # axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plt_settings["qc_trail"])
         
         df_total = pd.concat([self.df_e_kin["total"], self.df_e_pot["total"]], keys=["e_kin", "e_pot"], axis=1)
@@ -209,7 +214,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                "potential": self.df_e_pot}
         
         plot = {
-            "total": ["e_total", "e_kin", "e_pot"],
+            "total": ["e_kin", "e_pot", "e_total"],
             "power": ["aero_drag", "aero_lift", "aero_mom"]
         }
         # if self._cs_struc == "ef":
@@ -238,8 +243,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         handler.update(legend=legend)
         handler.save(join(self.dir_plots, f"energy{postfix}.pdf"))
     
-    def energy_fill(self, equal_y: tuple[str]=None, trailing_every: int=40, alpha: int=0.2, peak_distance: int=400,
-                    time_frame: tuple[float, float]=None):
+    def energy_fill(self, equal_y: tuple[str]=None, alpha: int=0.2, peak_distance: int=400,
+                    time_frame: tuple[float, float]=None, anchor_y: float=None):
         """Plots the history of the airfoil movement and different energies/power.
 
         :param equal_y: Whether the force axes should have equal y scaling, defaults to None
@@ -258,9 +263,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         rot_profile += np.asarray([[pos[-1, 0]], [pos[-1, 1]]])
         axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plt_settings["profile"])
         time = self.df_general["time"].to_numpy()
-        self.coupled_timeseries(time=time[::trailing_every], val1=pos[::trailing_every, 0], 
-                                val2=pos[::trailing_every, 1], fig_and_ax=(fig, axs["profile"]), 
-                                cbar_kwargs={"location": "top", "anchor": (-3, -1.3)})
+        skip_points = max(int(time.size/self.dt_res), 1)
+        self.coupled_timeseries(time=time[::skip_points], val1=pos[::skip_points, 0], 
+                                val2=pos[::skip_points, 1], fig_and_ax=(fig, axs["profile"]), 
+                                cbar_kwargs={"location": "top", "anchor":  (-3, -1.3 if anchor_y is None else anchor_y)})
         # axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plt_settings["qc_trail"])
         
         df_total = pd.concat([self.df_e_kin.sum(axis=1), self.df_e_pot.sum(axis=1)], keys=["e_kin", "e_pot"], axis=1)
@@ -269,7 +275,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                "potential": self.df_e_pot}
         
         plot = {
-            "total": ["e_total", "e_kin", "e_pot"],
+            "total": ["e_kin", "e_pot", "e_total"],
             "power": ["aero_drag", "aero_lift", "aero_mom"]
         }
         # if self._cs_struc == "ef":
@@ -300,7 +306,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         handler.update(legend=legend)
         handler.save(join(self.dir_plots, "energy_fill.pdf"))
 
-    def Beddoes_Leishman(self, equal_y: tuple[str]=None, trailing_every: int=40, time_frame: tuple[float, float]=None):
+    def Beddoes_Leishman(self, equal_y: tuple[str]=None, time_frame: tuple[float, float]=None, anchor_y: float=None):
         """Plots the history of the airfoil movement and different BL parameters.
 
         :param equal_y: Whether the force axes should have equal y scaling, defaults to None
@@ -327,9 +333,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         rot_profile += np.asarray([[pos[-1, 0]], [pos[-1, 1]]])
         axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plt_settings["profile"])
         time = self.df_general["time"].to_numpy() if use_ids is None else self.df_general["time"].to_numpy()[use_ids]
-        self.coupled_timeseries(time=time[::trailing_every], val1=pos[::trailing_every, 0], 
-                                val2=pos[::trailing_every, 1], fig_and_ax=(fig, axs["profile"]), 
-                                cbar_kwargs={"location": "top", "anchor": (-3, -1.3)})
+        skip_points = max(int(time.size/self.dt_res), 1)
+        self.coupled_timeseries(time=time[::skip_points], val1=pos[::skip_points, 0], 
+                                val2=pos[::skip_points, 1], fig_and_ax=(fig, axs["profile"]), 
+                                cbar_kwargs={"location": "top", "anchor":  (-3, -1.3 if anchor_y is None else anchor_y)})
         # axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plt_settings["qc_trail"])
         
         # grab all angles of attack from the data
@@ -346,8 +353,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         handler.update(legend=legend)
         handler.save(join(self.dir_plots, f"BL{postfix}.pdf"))
 
-    def Beddoes_Leishman_fill(self, equal_y: tuple[str]=None, trailing_every: int=40, alpha: int=0.2, 
-                              peak_distance: int=400, time_frame: tuple[float, float]=None):
+    def Beddoes_Leishman_fill(self, equal_y: tuple[str]=None, alpha: int=0.2, 
+                              peak_distance: int=400, time_frame: tuple[float, float]=None, anchor_y: float=None):
         """Plots the history of the airfoil movement and different BL parameters.
 
         :param equal_y: Whether the force axes should have equal y scaling, defaults to None
@@ -367,9 +374,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         rot_profile += np.asarray([[pos[-1, 0]], [pos[-1, 1]]])
         axs["profile"].plot(rot_profile[0, :], rot_profile[1, :], **self.plt_settings["profile"])
         time = self.df_general["time"].to_numpy()
-        self.coupled_timeseries(time=time[::trailing_every], val1=pos[::trailing_every, 0], 
-                                val2=pos[::trailing_every, 1], fig_and_ax=(fig, axs["profile"]), 
-                                cbar_kwargs={"location": "top", "anchor": (-3, -1.3)})
+        skip_points = max(int(time.size/self.dt_res), 1)
+        self.coupled_timeseries(time=time[::skip_points], val1=pos[::skip_points, 0], 
+                                val2=pos[::skip_points, 1], fig_and_ax=(fig, axs["profile"]), 
+                                cbar_kwargs={"location": "top", "anchor":  (-3, -1.3 if anchor_y is None else anchor_y)})
         # axs["profile"].plot(pos[::trailing_every, 0], pos[::trailing_every, 1], **self.plt_settings["qc_trail"])
         
         # grab all angles of attack from the data
@@ -608,7 +616,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             handler.update(x_labels="amplitude (m)", y_labels="rel. work per period (-)", legend=True, titles=title)
             handler.save(join(prefix, f"work_pp_rel{postfix}.pdf"))
 
-    def couple_timeseries(self, cmap=_colormap, linewidth: float=1.2, skip_points: int=1):
+    def couple_timeseries(self, cmap=_colormap, linewidth: float=1.2):
         df_polar = pd.read_csv("data/FFA_WA3_221/polars_new.dat", delim_whitespace=True)
         a = (self.df_f_aero, "f_aero", "alpha_steady", r"$\alpha$ (deg)")
         b = (self.df_f_aero, "f_aero", "alpha_eff", r"$\alpha_{\text{eff}}$ (deg)")
@@ -658,26 +666,26 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             elif col_specific == "C_dus" and "alpha" in col_general:
                 add = (df_polar["alpha"], df_polar["C_d"])
             self.coupled_timeseries(time, val_general, val_specifc,
-                                    label_general, label_specific, cmap=cmap, linewidth=linewidth, save_to=save_to, 
-                                    skip_points=skip_points, add=add)
+                                    label_general, label_specific, cmap=cmap, linewidth=linewidth, save_to=save_to,add=add)
         self.df_general["pos_tors"]= np.deg2rad(self.df_general["pos_tors"])  # change the column back to rad
     
     @staticmethod
     def coupled_timeseries(time: np.ndarray, val1: np.ndarray, val2: np.ndarray,
                            x_label: str=None, y_label: str=None, grid: bool=False, cmap=_colormap, 
-                           linewidth: float=1.5, save_to: str=None, skip_points: int=1, add: tuple[list, list]=None, 
+                           linewidth: float=1.5, save_to: str=None, add: tuple[list, list]=None, 
                            fig_and_ax: tuple=None, cbar_kwargs: dict={}):
         if fig_and_ax is None:
             fig, ax = plt.subplots()
         else:
             fig, ax = fig_and_ax
 
-        points = np.asarray([val1[::skip_points], val2[::skip_points]]).T.reshape(-1, 1, 2)
+        points = np.asarray([val1, val2]).T.reshape(-1, 1, 2)
         segments = np.concatenate([points[:-1], points[1:]], axis=1)
 
         norm = plt.Normalize(time[0], time[-1])
-        lc = LineCollection(segments, cmap=cmap, norm=norm, linewidth=linewidth)
-        lc.set_array(time[::skip_points])
+        lc = LineCollection(segments, cmap=cmap, norm=norm, linewidth=linewidth, linestyle="-", joinstyle="round", 
+                            capstyle="round")
+        lc.set_array(time)
         line = ax.add_collection(lc)
         ax.autoscale()
         
@@ -692,8 +700,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         cbar.remove()
 
         if add is not None:
-            min_x = val1[::skip_points].min()
-            max_x = val1[::skip_points].max()
+            min_x = val1.min()
+            max_x = val1.max()
             x = add[0] if isinstance(add[0], np.ndarray) else np.asarray(add[0])
             y = add[1] if isinstance(add[1], np.ndarray) else np.asarray(add[1])
             used_ids = np.logical_and(x>=min_x, x<=max_x)
@@ -1844,7 +1852,7 @@ def combined_forced(root_dir: str):
     fig, ax = plt.subplots()
     stability = period_aero_work+period_struct_work
     cmap, norm = get_colourbar(stability)
-    ax = heatmap(stability, xticklabels=np.round(aoas, 3), ax=ax, 
+    ax = heatmap(stability, xticklabels=np.roun(aoas, 3), ax=ax, 
                  yticklabels=np.round(amplitudes, 3), cbar_kws={"label": "total period work (Nm/s)"}, cmap=cmap, 
                  norm=norm, annot=True, fmt=".3g")
     cbar = ax.collections[0].colorbar
@@ -1864,78 +1872,137 @@ def combined_forced(root_dir: str):
     handler.save(join(dir_plots, "stability.pdf"))
 
 
-def combined_LOC_amplitude(
+def _combined_LOC_amplitude(
         root_dir: str,
         add_resolution: bool=True,
-        cmap=_colormap,
-):
+        cmap=_fcolormap,
+        recalculate: bool=False,
+        scaling: dict[str, list]=None,
+        n_levels: int=500,
+):   
+    dir_plots = helper.create_dir(join(root_dir, "plots"))[0]
     df_combinations = pd.read_csv(join(root_dir, "combinations.dat"))
+
     velocities = np.sort(df_combinations["velocity"].unique())
     aoas = np.sort(df_combinations["alpha"].unique())[::-1]
+    
+    ffile_ampls = join(dir_plots, "amplitudes")
+    if isfile(ffile_ampls+".npy"):
+        amplitudes = np.load(ffile_ampls+".npy")
+    else:
+        recalculate = True
 
-    amplitudes = np.zeros((aoas.size, velocities.size))
-    convergence = np.zeros((aoas.size, velocities.size))
-    aoa_types = ["alpha_qs", "alpha_eff"]
+    ffile_conv = join(dir_plots, "conv")
+    if isfile(ffile_conv+".npy"):
+        convergence = np.load(ffile_conv+".npy")
+    else:
+        recalculate = True
+
+    aoa_types = ["alpha_eff", "alpha_qs"]
     max_aoa = {aoa_type: np.zeros((aoas.size, velocities.size)) for aoa_type in aoa_types}
 
-    vel_to_ind = {vel: i for i, vel in enumerate(velocities)}
-    aoa_to_ind = {aoa: i for i, aoa in enumerate(aoas)}
-    for i, row in df_combinations.iterrows():
-        vel = row["velocity"]
-        aoa = row["alpha"] 
-        dir_current = join(root_dir, str(i))
-        pos_x = pd.read_csv(join(dir_current, "general.dat"), usecols=["pos_x"]).to_numpy().flatten()
+    ffile_aoa_eff = join(dir_plots, "alpha_eff")
+    if isfile(ffile_aoa_eff+".npy"):
+        max_aoa["alpha_eff"] = np.load(ffile_aoa_eff+".npy")
+    else:
+        recalculate = True
 
-        ppeaks = find_peaks(pos_x)[0]
-        npeaks = find_peaks(-pos_x)[0]
-        
-        ampl_last = np.abs(pos_x[ppeaks[-1]]-pos_x[npeaks[-1]])/2
-        amplitudes[aoa_to_ind[aoa], vel_to_ind[vel]] = abs(ampl_last)
+    ffile_aoa_qs = join(dir_plots, "alpha_qs")
+    if isfile(ffile_aoa_qs+".npy"):
+        max_aoa["alpha_qs"] = np.load(ffile_aoa_qs+".npy")
+    else:
+        recalculate = True
+    
+    if recalculate:
+        amplitudes = np.zeros((aoas.size, velocities.size))
+        convergence = np.zeros((aoas.size, velocities.size))
 
-        ampl_second_to_last = np.abs(pos_x[ppeaks[-2]]-pos_x[npeaks[-2]])/2
-        converg = (ampl_last-ampl_second_to_last)/(ampl_second_to_last)
-        convergence[aoa_to_ind[aoa], vel_to_ind[vel]] = converg
+        vel_to_ind = {vel: i for i, vel in enumerate(velocities)}
+        aoa_to_ind = {aoa: i for i, aoa in enumerate(aoas)}
+        for i, row in df_combinations.iterrows():
+            vel = row["velocity"]
+            aoa = row["alpha"] 
+            dir_current = join(root_dir, str(i))
+            pos_x = pd.read_csv(join(dir_current, "general.dat"), usecols=["pos_x"]).to_numpy().flatten()
 
-        df_aero = pd.read_csv(join(dir_current, "f_aero.dat"))
-        start = ppeaks[-2]
-        end = ppeaks[-1]
-        for aoa_type in aoa_types:
-            max_aoa[aoa_type][aoa_to_ind[aoa], vel_to_ind[vel]] = df_aero[aoa_type].iloc[start:end].abs().max()
+            ppeaks = find_peaks(pos_x)[0]
+            npeaks = find_peaks(-pos_x)[0]
 
+            if ppeaks.size == 0:
+                amplitudes[aoa_to_ind[aoa], vel_to_ind[vel]] = 0
+                convergence[aoa_to_ind[aoa], vel_to_ind[vel]] = 0
+                for aoa_type in aoa_types:
+                    max_aoa[aoa_type][aoa_to_ind[aoa], vel_to_ind[vel]] = df_aero[aoa_type].iloc[-1]
+                continue
 
-    dir_plots = helper.create_dir(join(root_dir, "plots"))[0]
-    levels = 20
+            ampl_last = np.abs(pos_x[ppeaks[-1]]-pos_x[npeaks[-1]])/2
+            amplitudes[aoa_to_ind[aoa], vel_to_ind[vel]] = abs(ampl_last)
+
+            ampl_second_to_last = np.abs(pos_x[ppeaks[-2]]-pos_x[npeaks[-2]])/2
+            converg = (ampl_last-ampl_second_to_last)/(ampl_second_to_last)
+            convergence[aoa_to_ind[aoa], vel_to_ind[vel]] = converg
+
+            df_aero = pd.read_csv(join(dir_current, "f_aero.dat"))
+            start = ppeaks[-2]
+            end = ppeaks[-1]
+            for aoa_type in aoa_types:
+                max_aoa[aoa_type][aoa_to_ind[aoa], vel_to_ind[vel]] = df_aero[aoa_type].iloc[start:end].abs().max()
+
+        np.save(ffile_ampls, amplitudes)
+        np.save(ffile_conv, convergence)
+        np.save(ffile_aoa_eff, max_aoa["alpha_eff"])
+        np.save(ffile_aoa_qs, max_aoa["alpha_qs"])
+
     v, a = np.meshgrid(velocities, aoas)
     points = np.c_[(v.ravel(), a.ravel())]
 
     fig, ax = plt.subplots()
-    cf = ax.contourf(v, a, amplitudes, cmap=_colormap, levels=levels)
+    if scaling is not None:
+        ticks, norm, levels = get_norm_and_ticks(*scaling["amplitudes"], n_levels=n_levels) 
+    else:
+        ticks, norm, levels = None, None, None
+    cf = ax.contourf(v, a, amplitudes, norm=norm, cmap=_fcolormap(n_levels), levels=levels)
     cf.set_edgecolor("face")
-    fig.colorbar(cf, ax=ax, label="LCO amplitude (m)")
-    handler = PlotHandler(fig, ax)
-    handler.update(x_labels="velocity (m/s)", y_labels="angle of attack (°)")
+    cb = fig.colorbar(cf, ax=ax, ticks=ticks, label=r"LCO amplitude (\unit{\metre})")
+    cb.ax.minorticks_off()
+    cb.outline.set_visible(False)
     if add_resolution:
         ax.plot(points[:, 0], points[:, 1], "ok", ms=0.4)
-    handler.save(join(dir_plots, "LCO_amplitude_contourf.pdf"), close=False)
-
-    fig, ax = plt.subplots()
-    cf = ax.contourf(v, a, convergence*1e2, cmap=_colormap, levels=levels)
-    cf.set_edgecolor("face")
-    fig.colorbar(cf, ax=ax, label="% rel. change in amplitude (-)")
     handler = PlotHandler(fig, ax)
-    handler.update(x_labels="velocity (m/s)", y_labels="angle of attack (°)")
+    handler.update(x_labels=r"wind speed (\metre\per\second)", y_labels=r"yaw misalignment (\degree)")
+    handler.save(join(dir_plots, "LCO_amplitude_contourf.pdf"))
+    
+    fig, ax = plt.subplots()
+    if scaling is not None:
+        ticks, norm, levels = get_norm_and_ticks(*scaling["conv"], n_levels=n_levels) 
+    else:
+        ticks, norm, levels = None, None, None
+    cf = ax.contourf(v, a, convergence*1e2, norm=norm, cmap=_fcolormap(n_levels), levels=levels)
+    cf.set_edgecolor("face")
+    cb = fig.colorbar(cf, ax=ax, ticks=ticks, label=r"rel. change in amplitude (\unit{\percent})")
+    cb.ax.minorticks_off()
+    cb.outline.set_visible(False)
+    handler = PlotHandler(fig, ax)
+    handler.update(x_labels=r"wind speed (\metre\per\second)", y_labels=r"yaw misalignment (\degree)")
     if add_resolution:
         ax.plot(points[:, 0], points[:, 1], "ok", ms=0.4)
     handler.save(join(dir_plots, "LCO_amplitude_convergence_contourf.pdf"))
     
-    aoa_label = {"alpha_qs": r"$\alpha_{qs}$", "alpha_eff": r"$\alpha_{eff}$"}
+    aoa_label = {"alpha_qs": r"$\alpha_{\text{qs}}$ (\unit{\degree})", 
+                 "alpha_eff": r"$\alpha_{\text{eff}}$ (\unit{\degree})"}
     for aoa_type in aoa_types:
         fig, ax = plt.subplots()
-        cf = ax.contourf(v, a, np.rad2deg(max_aoa[aoa_type]), cmap=_colormap, levels=levels)
+        if scaling is not None:
+            ticks, norm, levels = get_norm_and_ticks(*scaling[aoa_type], n_levels=n_levels) 
+        else:
+            ticks, norm, levels = None, None, None
+        cf = ax.contourf(v, a, np.rad2deg(max_aoa[aoa_type]), norm=norm, cmap=_fcolormap(n_levels), levels=levels)
         cf.set_edgecolor("face")
-        fig.colorbar(cf, ax=ax, label="max "+ aoa_label[aoa_type]+ " during last period (°)")
+        cb = fig.colorbar(cf, ax=ax, ticks=ticks, label=r"max "+ aoa_label[aoa_type]+ r" during last period")
+        cb.ax.minorticks_off()
+        cb.outline.set_visible(False)
         handler = PlotHandler(fig, ax)
-        handler.update(x_labels="velocity (m/s)", y_labels="angle of attack (°)")
+        handler.update(x_labels=r"wind speed (\metre\per\second)", y_labels=r"yaw misalignment (\degree)")
         if add_resolution:
             ax.plot(points[:, 0], points[:, 1], "ok", ms=0.4)
         handler.save(join(dir_plots, f"max_{aoa_type}.pdf"))
@@ -1974,3 +2041,52 @@ def combined_LOC_amplitude(
     # handler = PlotHandler(fig, ax)
     # handler.update(x_labels="velocity (m/s)", y_labels="angle of attack (°)")
     # handler.save(join(dir_plots, "LCO_amplitude_convergence.pdf"))
+
+
+def combined_LOC_amplitude(
+        root_dir: str,
+        add_resolution: bool=True,
+        cmap=_colormap,
+        recalculate: bool=False,
+        dirs_scaling: tuple[str]=None,
+        n_levels: int=500,
+):
+    apply = {
+        "conv": lambda x: x*1e2,
+        "alpha_eff": np.rad2deg,
+        "alpha_qs": np.rad2deg,
+    }
+    scaling = None
+    if dirs_scaling is not None:
+        scaling = {param: [1e10, -1e10] for param in ["amplitudes", "conv", "alpha_eff", "alpha_qs"]}
+        for dir_scaling in dirs_scaling:
+            dir_plot = join(dir_scaling, "plots")
+            for param in scaling:
+                vals = np.load(join(dir_plot, param+".npy"))
+                current_min = vals.min()
+                current_max = vals.max()
+                if param in apply:
+                    current_min = apply[param](current_min)
+                    current_max = apply[param](current_max)
+
+                if current_min < scaling[param][0]:
+                    scaling[param][0] = current_min
+                if current_max > scaling[param][1]:
+                    scaling[param][1] = current_max
+                    
+    _combined_LOC_amplitude(
+        root_dir=root_dir,
+        add_resolution=add_resolution,
+        cmap=cmap,
+        recalculate=recalculate,
+        scaling=scaling,
+        n_levels=n_levels
+    )
+        
+
+def get_norm_and_ticks(v_min: float, v_max: float, n_levels: int=300):
+    ticks = ticker.MaxNLocator().tick_values(v_min, v_max)
+    levels = np.linspace(ticks[0], ticks[-1], n_levels)
+    return ticks, mcolors.BoundaryNorm(boundaries=levels, ncolors=n_levels), levels
+        
+    
