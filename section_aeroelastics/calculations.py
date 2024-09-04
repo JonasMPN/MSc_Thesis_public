@@ -418,12 +418,12 @@ class AeroForce(SimulationSubRoutine, Rotations):
                        "C_tf", "C_tpot",
                        "C_dus", "C_lus", "C_mus"],
         "BL_openFAST_Cl_disc": ["alpha_qs", "alpha_eff", "x1", "x2", "x3", "x4", "C_lpot", "C_lc", "C_lnc", "C_ds", 
-                                "C_dc", "C_dsep", "C_ms", "C_mnc", "f_steady", "alpha_eq", "C_dus", "C_lus", "C_mus"],
+                                "C_dtors", "C_dind", "C_dsep", "C_ms", "C_mnc", "f_steady", "alpha_eq", "C_dus", "C_lus", "C_mus"],
         "BL_Staeblein": ["alpha_qs", "alpha_eff", "x1", "x2", "C_lc", "rel_inflow_speed", "rel_inflow_accel",
-                         "C_liner", "C_lcent", "C_ds", "C_dind", "C_ms", "C_lift", "C_miner", "C_l"],
+                         "C_liner", "C_lcent", "C_ds", "C_dind", "C_ms", "C_lift", "C_miner", "C_l", "C_dus", "C_lus", "C_mus"],
         "BL_openFAST_Cl_disc_f_scaled": ["alpha_qs", "alpha_eff", "x1", "x2", "x3", "x4", "C_lpot", "C_lc", "C_lnc", 
-                                         "C_ds", "C_dc", "C_dsep", "C_ms", "C_mnc", "f_steady", "T_u", "alpha_eq", 
-                                         "C_dus", "C_lus", "C_mus", "rel_inflow_speed"],
+                                         "C_ds", "C_dtors", "C_dind", "C_dsep", "C_ms", "C_mnc", "f_steady", "T_u", 
+                                         "alpha_eq", "C_dus", "C_lus", "C_mus", "rel_inflow_speed"],
     }
 
     # _copy_scheme = {
@@ -555,9 +555,9 @@ class AeroForce(SimulationSubRoutine, Rotations):
         # impulsive (non-circulatory) normal force coefficient
         tmp = -a*sim_res.dt[i]/(K_alpha*chord)
         tmp_2 = -(sim_res.vel[i, 2]-sim_res.vel[i-1, 2])  # minus here needed because of coordinate system
-        # sim_res.D_i[i] = sim_res.D_i[i-1]*np.exp(tmp)+tmp_2*np.exp(0.5*tmp)  # take out for consistency on no compressibility effects
-        # sim_res.C_ni[i] = 4*K_alpha*chord/rel_flow_vel*(-sim_res.vel[i, 2]-sim_res.D_i[i])  # -vel because of CS
-        sim_res.C_ni[i] = -4*K_alpha*chord/rel_flow_vel*-sim_res.vel[i, 2]  # -vel because of CS
+        sim_res.D_i[i] = sim_res.D_i[i-1]*np.exp(tmp)+tmp_2*np.exp(0.5*tmp)  # take out for consistency on no compressibility effects. DON'T TAKE OUT, RESULTS BECOME SHIT
+        sim_res.C_ni[i] = 4*K_alpha*chord/rel_flow_vel*(-sim_res.vel[i, 2]-sim_res.D_i[i])  # -vel because of CS
+        # sim_res.C_ni[i] = -4*K_alpha*chord/rel_flow_vel*-sim_res.vel[i, 2]  # -vel because of CS
 
         # add circulatory and impulsive
         sim_res.C_npot[i] = sim_res.C_nc[i]+sim_res.C_ni[i]
@@ -625,12 +625,12 @@ class AeroForce(SimulationSubRoutine, Rotations):
                                    sim_res.C_mf[i]+sim_res.C_mV[i]+sim_res.C_mC[i]])
         # not -pos[i, 2] in the next line because for pos[i, 2]=0, the C_t axis is opposite to the
         # x axis.
-        rot = self.passive_3D_planar(sim_res.pos[i, 2])  # since it's C_t and C_n
-        coeffs = rot@coefficients
+        rot_df = self.passive_3D_planar(sim_res.pos[i, 2]+qs_flow_angle)  # since it's C_t and C_n
+        coeffs = rot_df@coefficients # now as [-drag, lift, mom]
         coeffs[0] = -coeffs[0]
-        # C_d_polar = self.C_d_polar(sim_res.alpha_qs[i])
-        # if coeffs[0] < C_d_polar and sim_res.alpha_qs[i]<self._alpha_crit:
-        #     coeffs[0] = C_d_polar
+        C_d_polar = self.C_d_polar(sim_res.alpha_qs[i])
+        if coeffs[0] < C_d_polar and sim_res.alpha_qs[i]<self._alpha_crit:
+            coeffs[0] = C_d_polar
         
         sim_res.C_dus[i] = coeffs[0]
         sim_res.C_lus[i] = coeffs[1]
@@ -639,8 +639,9 @@ class AeroForce(SimulationSubRoutine, Rotations):
         return coeffs
 
         # for return of [f_x, f_y, mom]
+        # rot_xy = self.passive_3D_planar(-qs_flow_angle)
         # dynamic_pressure = density/2*rel_flow_vel**2
-        # forces = dynamic_pressure*np.asarray([chord, chord, -chord**2])*coefficients
+        # forces = dynamic_pressure*np.asarray([chord, chord, -chord**2])*rot_xy@coefficients
         # return forces  # for [f_x, f_y, mom]
 
     def _init_BL_first_order_IAG2(
@@ -797,8 +798,8 @@ class AeroForce(SimulationSubRoutine, Rotations):
         coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], 0])
         # not -pos[i, 2] in the next line because for pos[i, 2]=0, the C_t axis is opposite to the
         # x axis.
-        rot = self.passive_3D_planar(sim_res.pos[i, 2])
-        coeffs = rot@coefficients
+        rot_df = self.passive_3D_planar(sim_res.pos[i, 2]+qs_flow_angle)  # since it's C_t and C_n
+        coeffs = rot_df@coefficients # now as [-drag, lift, mom]
         coeffs[0] = -coeffs[0]+self._C_d0  # C_t is facing forwards, C_d backwards
 
         sim_res.C_dus[i] = coeffs[0]
@@ -808,8 +809,9 @@ class AeroForce(SimulationSubRoutine, Rotations):
         return coeffs
 
         # for return of [f_x, f_y, mom] uncommmet next lines
+        # rot_xy = self.passive_3D_planar(-qs_flow_angle)
         # dynamic_pressure = density/2*rel_flow_vel**2
-        # forces = dynamic_pressure*np.asarray([chord, chord, -chord**2])*coeffs 
+        # forces = dynamic_pressure*np.asarray([chord, chord, -chord**2])*rot_xy@coefficients
         # return forces  # for [f_x, f_y, mom]
 
     def _init_BL_AEROHOR(
@@ -932,7 +934,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
                 return 2*np.sqrt(self.C_l_polar(alpha)/(self._C_l_slope*(alpha-self._alpha_0l_visc)))-1
             
             alpha_interp = np.linspace(self._raoa_given.min(), self._raoa_given.max(), resolution)
-            alpha_f_l, f_l = self._adjust_f(alpha_interp, sqrt_of_f_l, adjust_attached=False)
+            alpha_f_l, f_l = self._adjust_f(alpha_interp, sqrt_of_f_l, adjust_attached=False, adjust_separated=False)
             df_sep = pd.DataFrame({"alpha_l": alpha_f_l, "f_l": f_l})
             df_sep.to_csv(ff_sep_points, index=None)
         else:
@@ -1020,8 +1022,11 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.C_ds[i] = self.C_d_polar(sim_res.alpha_eff[i])
         tmp = (np.sqrt(sim_res.f_steady[i])-np.sqrt(sim_res.x4[i]))/2-(sim_res.f_steady[i]-sim_res.x4[i])/4
         sim_res.C_dsep[i] = (sim_res.C_ds[i]-self._C_d0)*tmp
-        sim_res.C_dc[i] = (sim_res.alpha_qs[i]-sim_res.alpha_eff[i]-T_u_current*sim_res.vel[i, 2])*sim_res.C_lc[i]
-        sim_res.C_dus[i] = sim_res.C_ds[i]+sim_res.C_dc[i]+sim_res.C_dsep[i]
+        sim_res.C_dtors[i] = -T_u_current*sim_res.vel[i, 2]*sim_res.C_lc[i]
+        sim_res.C_dind[i] = (sim_res.alpha_qs[i]-sim_res.alpha_eff[i])*sim_res.C_lc[i]
+        sim_res.C_dus[i] = sim_res.C_ds[i]+sim_res.C_dtors[i]+sim_res.C_dind[i]+sim_res.C_dsep[i]
+        # sim_res.C_dc[i] = (sim_res.alpha_qs[i]-sim_res.alpha_eff[i]-sim_res.T_u[i]*sim_res.vel[i, 2])*sim_res.C_lc[i]
+        # sim_res.C_dus[i] = sim_res.C_ds[i]+sim_res.C_dc[i]+sim_res.C_dsep[i]
 
         sim_res.C_ms[i] = self.C_m_polar(sim_res.alpha_eff[i])
         sim_res.C_mnc[i] = 0.5*np.pi*T_u_current*sim_res.vel[i, 2]
@@ -1036,7 +1041,8 @@ class AeroForce(SimulationSubRoutine, Rotations):
         # for return of [f_x, f_y, mom]
         dynamic_pressure = density/2*rel_inflow_speed**2
         # rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])
-        rot = self.passive_3D_planar(-sim_res.alpha_qs[i]-sim_res.pos[i, 2])
+        # rot = self.passive_3D_planar(-sim_res.alpha_qs[i]-sim_res.pos[i, 2])
+        rot = self.passive_3D_planar(-qs_flow_angle)
         return dynamic_pressure*np.asarray([chord, chord, -chord**2])*rot@coeffs
     
     def _BL_openFAST_Cl_disc_f_scaled(
@@ -1086,7 +1092,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
                 return 2*np.sqrt(self.C_l_polar(alpha)/(self._C_l_slope*(alpha-self._alpha_0l_visc)))-1
             
             alpha_interp = np.linspace(self._raoa_given.min(), self._raoa_given.max(), resolution)
-            alpha_f_l, f_l = self._adjust_f(alpha_interp, sqrt_of_f_l, adjust_attached=False)
+            alpha_f_l, f_l = self._adjust_f(alpha_interp, sqrt_of_f_l, adjust_attached=False, adjust_separated=True)
             df_sep = pd.DataFrame({"alpha_l": alpha_f_l, "f_l": f_l})
             df_sep.to_csv(ff_sep_points, index=None)
         else:
@@ -1134,7 +1140,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
                                                                 sim_res.inflow[i, :], chord, pitching_around, alpha_at)
         sim_res.alpha_qs[i] = -sim_res.pos[i, 2]+qs_flow_angle
         sim_res.rel_inflow_speed[i] = np.sqrt(v_x**2+v_y**2)
-        sim_res.T_u[i] = 0.5*chord/sim_res.rel_inflow_speed[i] #todo not just the wind velocity in the denominator right? Just the wind velocity doesn't really make sense
+        sim_res.T_u[i] = 0.5*chord/sim_res.rel_inflow_speed[i] 
 
         tmp1 = np.exp(-sim_res.dt[i-1]*b1/sim_res.T_u[i-1]) 
         tmp2 = np.exp(-sim_res.dt[i-1]*b2/sim_res.T_u[i-1])
@@ -1162,8 +1168,11 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.C_ds[i] = self.C_d_polar(sim_res.alpha_eff[i])
         tmp = (np.sqrt(sim_res.f_steady[i])-np.sqrt(sim_res.x4[i]))/2-(sim_res.f_steady[i]-sim_res.x4[i])/4
         sim_res.C_dsep[i] = (sim_res.C_ds[i]-self._C_d0)*tmp
-        sim_res.C_dc[i] = (sim_res.alpha_qs[i]-sim_res.alpha_eff[i]-sim_res.T_u[i]*sim_res.vel[i, 2])*sim_res.C_lc[i]
-        sim_res.C_dus[i] = sim_res.C_ds[i]+sim_res.C_dc[i]+sim_res.C_dsep[i]
+        sim_res.C_dtors[i] = -sim_res.T_u[i]*sim_res.vel[i, 2]*sim_res.C_lc[i]
+        sim_res.C_dind[i] = (sim_res.alpha_qs[i]-sim_res.alpha_eff[i])*sim_res.C_lc[i]
+        sim_res.C_dus[i] = sim_res.C_ds[i]+sim_res.C_dtors[i]+sim_res.C_dind[i]+sim_res.C_dsep[i]
+        # sim_res.C_dc[i] = (sim_res.alpha_qs[i]-sim_res.alpha_eff[i]-sim_res.T_u[i]*sim_res.vel[i, 2])*sim_res.C_lc[i]
+        # sim_res.C_dus[i] = sim_res.C_ds[i]+sim_res.C_dc[i]+sim_res.C_dsep[i]
 
         sim_res.C_ms[i] = self.C_m_polar(sim_res.alpha_eff[i])
         sim_res.C_mnc[i] = 0.5*np.pi*sim_res.T_u[i]*sim_res.vel[i, 2]
@@ -1177,7 +1186,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
 
         # for return of [f_x, f_y, mom]
         dynamic_pressure = density/2*sim_res.rel_inflow_speed[i]**2
-        rot = self.passive_3D_planar(-sim_res.alpha_qs[i]-sim_res.pos[i, 2])  #todo change alpha_eff to alpha_qs
+        rot = self.passive_3D_planar(-sim_res.alpha_qs[i]-sim_res.pos[i, 2]) 
         return dynamic_pressure*np.asarray([chord, chord, -chord**2])*rot@coeffs
 
     def _BL_Staeblein(
@@ -1274,7 +1283,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         # return coeffs
 
         # for return of [f_x, f_y, mom] uncomment the two following lines 
-        rot = self.passive_3D_planar(-sim_res.alpha_eff[i]-sim_res.pos[i, 2])
+        rot = self.passive_3D_planar(-sim_res.alpha_qs[i]-sim_res.pos[i, 2])
         return rot@f_aero
 
     def _init_BL_Staeblein(
@@ -1287,6 +1296,8 @@ class AeroForce(SimulationSubRoutine, Rotations):
     ):
         self._C_l_slope = 7.15
         self._alpha_0l_inv = 0
+        # self._C_l_slope = 7.255718867221749
+        # self._alpha_0l_inv = -0.05280194962556979
         # currently does not support an initial non-zero velocity of the airfoil
         init_inflow_vel = np.linalg.norm(sim_res.inflow[0, :])
         next_inflow_vel = np.linalg.norm(sim_res.inflow[1, :])
