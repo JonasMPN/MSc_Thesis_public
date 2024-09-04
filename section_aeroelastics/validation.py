@@ -765,7 +765,7 @@ if __name__ == "__main__":
         x_0 = np.asarray([0, 0, 0])  # in xy
         v_0 = np.zeros(3)  # in xy
         # v_0 = np.asarray([0, 0, 1])  # in xy
-        k = np.asarray([1, 3, 2])  # in ef
+        k = np.asarray([1, 2, 1])  # in ef
         # c = np.asarray([2, 1, 1])  # in ef
         c = np.asarray([2, 1, 2])  # in ef
         inertia = np.asarray([3, 1, 2])
@@ -782,7 +782,7 @@ if __name__ == "__main__":
         M = np.diag(inertia)
 
         T = 160
-        dt = 0.05
+        dt = 0.001
         # dt = 0.01
         t = np.linspace(0, T, int(T/dt))
         n_per_10 = (t<=20).sum()
@@ -833,61 +833,61 @@ if __name__ == "__main__":
         for cs in ["xy"]:
             dir_res = helper.create_dir(join(case_dir, cs))[0]
 
-            with open(join(dir_res, "section_data.json"), "w") as json_file:
-                json.dump(section_data, json_file, indent=4)
+            # with open(join(dir_res, "section_data.json"), "w") as json_file:
+            #     json.dump(section_data, json_file, indent=4)
 
-            airfoil = ThreeDOFsAirfoil(t)
-            airfoil.dt = dt*np.ones(t.size)
-            airfoil.pos[0, :] = x_0
-            airfoil.vel[0, :] = v_0
+            # airfoil = ThreeDOFsAirfoil(t)
+            # airfoil.dt = dt*np.ones(t.size)
+            # airfoil.pos[0, :] = x_0
+            # airfoil.vel[0, :] = v_0
 
-            airfoil.aero = f
-            airfoil.damp = np.zeros((t.size, 3))
-            airfoil.stiff = np.zeros((t.size, 3))
+            # airfoil.aero = f
+            # airfoil.damp = np.zeros((t.size, 3))
+            # airfoil.stiff = np.zeros((t.size, 3))
 
-            sf_func = sf_funcs[cs]   
-            full_rotations = 0
-            was_below_0 = False
-            for i in range(t.size-1):
-                current_angle = airfoil.pos[i, 2]
-                airfoil.damp[i, :], airfoil.stiff[i, :] = sf_func(airfoil, i)
+            # sf_func = sf_funcs[cs]   
+            # full_rotations = 0
+            # was_below_0 = False
+            # for i in range(t.size-1):
+            #     current_angle = airfoil.pos[i, 2]
+            #     airfoil.damp[i, :], airfoil.stiff[i, :] = sf_func(airfoil, i)
 
-                # airfoil.aero[i, :] = [-np.sin(current_angle), np.cos(current_angle), 0]
-                pos, vel, accel = integration_func(airfoil, i, dt)
-                # if pos[1] > 0 and was_below_0:
-                #     full_rotations += 1
-                #     was_below_0 = False
-                # if pos[1] < 0:
-                #     was_below_0 = True
-                # angle = np.arctan2(pos[1], pos[0])
-                # angle = angle if angle > 0 else angle+2*np.pi
-                # pos[2] = angle+full_rotations*2*np.pi
-                # vel[2] = (airfoil.pos[i, 2]-airfoil.pos[i-1, 2])/dt if i>0 else 1
-                airfoil.pos[i+1, :] = pos
-                airfoil.vel[i+1, :] = vel
-                airfoil.accel[i+1, :] = accel
+            #     # airfoil.aero[i, :] = [-np.sin(current_angle), np.cos(current_angle), 0]
+            #     pos, vel, accel = integration_func(airfoil, i, dt)
+            #     # if pos[1] > 0 and was_below_0:
+            #     #     full_rotations += 1
+            #     #     was_below_0 = False
+            #     # if pos[1] < 0:
+            #     #     was_below_0 = True
+            #     # angle = np.arctan2(pos[1], pos[0])
+            #     # angle = angle if angle > 0 else angle+2*np.pi
+            #     # pos[2] = angle+full_rotations*2*np.pi
+            #     # vel[2] = (airfoil.pos[i, 2]-airfoil.pos[i-1, 2])/dt if i>0 else 1
+            #     airfoil.pos[i+1, :] = pos
+            #     airfoil.vel[i+1, :] = vel
+            #     airfoil.accel[i+1, :] = accel
 
-            i = t.size-1
-            airfoil.damp[i, :], airfoil.stiff[i, :] = sf_func(airfoil, i)
-            airfoil.inflow = np.zeros((t.size, 2))
-            airfoil._save(dir_res)
+            # i = t.size-1
+            # airfoil.damp[i, :], airfoil.stiff[i, :] = sf_func(airfoil, i)
+            # airfoil.inflow = np.zeros((t.size, 2))
+            # airfoil._save(dir_res)
 
-            post_calc = PostCaluculations(dir_res, "alpha_steady", cs)
-            aoa_thresholds = {
-                "alpha_steady": 5
-            }
-            post_calc.check_angle_of_attack(**aoa_thresholds)
-            post_calc.write_peaks()
-            post_calc.project_data()
-            post_calc.power()
-            post_calc.kinetic_energy()
-            post_calc.potential_energy()
-            post_calc.work_per_cycle(peaks=n_per_10*np.arange(1, 8))
+            # post_calc = PostCaluculations(dir_res, "alpha_steady", cs)
+            # aoa_thresholds = {
+            #     "alpha_steady": 5
+            # }
+            # post_calc.check_angle_of_attack(**aoa_thresholds)
+            # post_calc.write_peaks()
+            # post_calc.project_data()
+            # post_calc.power()
+            # post_calc.kinetic_energy()
+            # post_calc.potential_energy()
+            # post_calc.work_per_cycle(peaks=n_per_10*np.arange(0, 9))
 
             dir_plots = helper.create_dir(join(dir_res, "plots"))[0]
-            plotter = Plotter("data/FFA_WA3_221/profile.dat", dir_res, dir_plots, cs, dt_res=500)
-            plotter.force(trailing_every=1)
-            plotter.energy(trailing_every=1)
+            plotter = Plotter("data/FFA_WA3_221/profile.dat", dir_res, dir_plots, cs, dt_res=2000)
+            plotter.force(anchor_y=-0.9)
+            plotter.energy(anchor_y=-0.9)
 
         # # E_pot = E_pot[:, :2]
         # # E_kin = E_kin[:, :2]
