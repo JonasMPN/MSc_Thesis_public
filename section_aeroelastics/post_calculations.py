@@ -442,9 +442,9 @@ class PostHHT_alpha:
 
                 res = {
                     "err_freq": np.r_[err_freq, np.nan],
-                    "rel_err_freq": np.r_[rel_err_freq/1e2, np.nan],
+                    "rel_err_freq": np.r_[rel_err_freq, np.nan],
                     "err_ampl": err_ampl,
-                    "rel_err_ampl": rel_err_ampl/1e2,
+                    "rel_err_ampl": rel_err_ampl,
                 }
                 pd.DataFrame(res).to_csv(join(current_dir, "errors.dat"), index=None)
 
