@@ -103,6 +103,9 @@ _c_all = {
         ])   
 }
 _colormap = LinearSegmentedColormap.from_list("Tol_muted_cmap", ["#DCCD7D", "#94CBEC", "#2E2585"], N=256)
+def _fcolormap(n_levels):
+    return LinearSegmentedColormap.from_list("Tol_muted_cmap", ["#DCCD7D", "#94CBEC", "#2E2585"], N=n_levels)
+
 _c = _c_all[_palette_name]
 _c_fill = _c_all[_fill_name]
 _betterblack = "#212427"
