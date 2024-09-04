@@ -71,9 +71,8 @@ def run_BeddoesLeishman(
         dir_profile: str, BL_scheme: str, validation_against: str, index_unsteady_data: int,
         k: float, inflow_speed: float, chord: float, amplitude: float, mean: float, 
         period_res: int=1000, file_polar: str="polars_new.dat",
-        # A1: float=0.3, A2: float=0.7, b1: float=0.7, b2: float=0.53 # IAG2
-        # A1: float=0.3, A2: float=0.7, b1: float=0.14, b2: float=0.53 # AEROHOR
-        A1: float=0.165, A2: float=0.335, b1: float=0.0445, b2: float=0.3 #HAWC2
+        A1: float=0.3, A2: float=0.7, b1: float=0.7, b2: float=0.53 # IAG2 and AEROHOR
+        # A1: float=0.165, A2: float=0.335, b1: float=0.0445, b2: float=0.3 #HAWC2
         ):
     n_periods = 8
     overall_res = n_periods*period_res
@@ -476,7 +475,7 @@ if __name__ == "__main__":
         "BL": False,
         "plot_BL_results_meas": False,
         "plot_BL_results_polar": False,
-        "plot_BL_comparison": True,
+        "plot_BL_comparison": False,
         "calc_HHT_alpha_response": False,
         "plot_HHT_alpha_response": False,
         "HHT_alpha_undamped": False,
@@ -485,21 +484,28 @@ if __name__ == "__main__":
         "HHT_alpha_forced_composite": False,
         "HHT_alpha_step": False,
         "HHT_alpha_rotation": False,
-        "ef_vs_xy": False
+        "ef_vs_xy": True
     }
-    dir_airfoil = "data/FFA_WA3_221"
-    file_polar = "polars_new.dat"
-    # dir_airfoil = "data/S801/"
-    # file_polar = "polars/polars_G075.dat"
+    # dir_airfoil = "data/FFA_WA3_221"
+    # file_polar = "polars_new.dat"
+    dir_airfoil = "data/S801/"
+    file_polar = "polars/polars_G075.dat"
     dir_HHT_alpha_validation = "data/HHT_alpha_validation"
     # BL_scheme = "BL_AEROHOR"
-    # BL_scheme = "BL_first_order_IAG2"
+    BL_scheme = "BL_first_order_IAG2"
     # BL_scheme = "BL_openFAST_Cl_disc"
-    BL_scheme = "BL_openFAST_Cl_disc_f_scaled"
+    # BL_scheme = "BL_openFAST_Cl_disc_f_scaled"
     # BL_scheme = "BL_Staeblein"
     HHT_alpha_case = "test"
     sep_point_test_res = 202
     period_res = 200
+    BL_scheme_mapping = {
+        "BL_AEROHOR": "AEROHOR",
+        "BL_first_order_IAG2": "IAG",
+        "BL_openFAST_Cl_disc": "MGH_oF",
+        "BL_openFAST_Cl_disc_f_scaled": "MGH_f",
+        "BL_Staeblein": "Staeb",
+    }
 
     if do["separation_point_calculation"]:
         sep_point_calc(dir_airfoil, BL_scheme, resolution=sep_point_test_res)
@@ -547,7 +553,7 @@ if __name__ == "__main__":
                 coeffs_polar[coeff] = [aoa_subset, df_polar[coeff].iloc[aoa_ids]]
             
             plotter.plot_meas_comparison(join(dir_unsteady, "unsteady_data"), row.to_dict(), dir_case, 
-                                         period_res=period_res, coeffs_polar=coeffs_polar)
+                                         period_res=period_res, coeffs_polar=coeffs_polar, model=BL_scheme_mapping[BL_scheme], legend_for="C_d")
             
     if do["plot_BL_results_polar"]:
         ffile_polar = join(dir_airfoil, file_polar)
@@ -565,7 +571,7 @@ if __name__ == "__main__":
         ff_cases = join(dir_airfoil, "unsteady", "cases_results.dat")
         ffile_polar = join(dir_airfoil, file_polar)
         plotter = BLValidationPlotter()
-        plotter.BL_comparison(dir_val_root, "measurement", ff_cases, period_res, ffile_polar)
+        plotter.BL_comparison(dir_val_root, "measurement", ff_cases, period_res, ffile_polar, legend_for="C_m")
   
     if do["calc_HHT_alpha_response"] or do["plot_HHT_alpha_response"]:
         T = 1
@@ -654,12 +660,13 @@ if __name__ == "__main__":
         root_dir = join(dir_HHT_alpha_validation, "forced_composite")
         # root_dir = join(dir_HHT_alpha_validation, "forced_force_term_adapted")
         validator = HHTalphaValidator(dir_airfoil, root_dir)
-        validator.simulate_forced_composite(damping_coeff, n_t_per_oscillation, force_freq, force_ampl,
-                                            n_oscillations, x_0, v_0, scheme="HHT-alpha-xy")
-        validator.simulate_forced_composite(damping_coeff, n_t_per_oscillation, force_freq, force_ampl,
-                                            n_oscillations, x_0, v_0, scheme="HHT-alpha-xy-adapted")
-        PostHHT_alpha().amplitude_and_period(root_dir)
-        HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
+        # validator.simulate_forced_composite(damping_coeff, n_t_per_oscillation, force_freq, force_ampl,
+        #                                     n_oscillations, x_0, v_0, scheme="HHT-alpha-xy")
+        # validator.simulate_forced_composite(damping_coeff, n_t_per_oscillation, force_freq, force_ampl,
+        #                                     n_oscillations, x_0, v_0, scheme="HHT-alpha-xy-adapted")
+        # PostHHT_alpha().amplitude_and_period(root_dir)
+        # HHTalphaPlotter().sol_and_sim(root_dir, ["ampl", "freq"])
+        HHTalphaPlotter().sol_and_sim2(root_dir, ["ampl", "freq"])
 
     if do["HHT_alpha_step"]:
         n_oscillations = 10
@@ -748,20 +755,20 @@ if __name__ == "__main__":
     
     if do["ef_vs_xy"]:
         root_dir = helper.create_dir(join("data", "ef_vs_xy"))[0]
-        case_id = "[1,0,small]_stable_ef"
+        case_id = "e_p_w_validation"
         case_dir = helper.create_dir(join(root_dir, str(case_id)))[0]
 
         get_rot = Rotations()
 
         # x_0 = np.asarray([3, 4, 1*np.pi/2])  # in xy
-        x_0 = np.asarray([1, 0, 0.01*np.pi/2])  # in xy
-        # x_0 = np.asarray([0, 0, 0])  # in xy
+        # x_0 = np.asarray([1, 0, 0.01*np.pi/2])  # in xy
+        x_0 = np.asarray([0, 0, 0])  # in xy
         v_0 = np.zeros(3)  # in xy
         # v_0 = np.asarray([0, 0, 1])  # in xy
-        k = np.asarray([1, 4, 1])  # in ef
+        k = np.asarray([1, 3, 2])  # in ef
         # c = np.asarray([2, 1, 1])  # in ef
-        c = np.asarray([0, 0, 0])  # in ef
-        inertia = np.asarray([1, 1, 1])
+        c = np.asarray([2, 1, 2])  # in ef
+        inertia = np.asarray([3, 1, 2])
 
         section_data = {
             "inertia": inertia.tolist(),
@@ -774,16 +781,24 @@ if __name__ == "__main__":
         C = np.diag(c)
         M = np.diag(inertia)
 
-        T = 20
-        dt = 0.0005
+        T = 160
+        dt = 0.05
         # dt = 0.01
-        t = np.linspace(0, T, int(T/dt)+1)
-        n_per_10 = (t<=10).sum()
+        t = np.linspace(0, T, int(T/dt))
+        n_per_10 = (t<=20).sum()
 
-        f = np.c_[0.*np.ones_like(t), 0*np.ones_like(t), 0.*np.pi*np.ones_like(t)]
-        # f = np.c_[np.ones(n_per_10), np.zeros(n_per_10), np.zeros(n_per_10)]
+        # f = np.c_[1.*np.ones_like(t), 0*np.ones_like(t), 0.*np.pi*np.ones_like(t)]
+        f = np.c_[np.ones(n_per_10), np.zeros(n_per_10), np.zeros(n_per_10)]
         # phi = np.linspace(0, 40, t.size)
-        # f = np.r_[f, np.c_[np.cos(phi), np.sin(phi), np.zeros_like(phi)]]
+        f = np.r_[f, np.c_[np.ones(n_per_10), 2*np.ones(n_per_10), np.zeros(n_per_10)]]
+        f = np.r_[f, np.c_[np.zeros(n_per_10), np.zeros(n_per_10), np.linspace(0, np.pi, n_per_10)]]
+        f = np.r_[f, np.c_[np.zeros(n_per_10), np.zeros(n_per_10), np.pi*np.ones(n_per_10)]]
+        f = np.r_[f, np.c_[np.zeros(n_per_10), 2*np.ones(n_per_10), np.pi*np.ones(n_per_10)]]
+        f = np.r_[f, np.c_[-np.sin(np.linspace(0, np.pi/2, n_per_10)), np.cos(np.linspace(0, np.pi/2, n_per_10)), 
+                           np.zeros(n_per_10)]]
+        f = np.r_[f, np.c_[np.zeros(n_per_10), np.ones(n_per_10), np.zeros(n_per_10)]]
+        f = np.r_[f, np.c_[np.zeros(n_per_10), np.zeros(n_per_10), np.zeros(n_per_10)]]
+        
         # f = np.r_[np.c_[np.cos(phi), np.sin(phi), np.zeros_like(phi)]]
         # f = get_inflow(t, [(10, 10, 1, 0), (20, 20, 4, 45), (30, 30, 0, 0)], 1, 0)
 
@@ -797,20 +812,25 @@ if __name__ == "__main__":
         init(None, k, c)
         f_struct = sf.get_scheme_method(f"linear_{cs}")
 
-        ti = TimeIntegration()
-        init = ti.get_scheme_init_method("eE")
-        init(None, inertia)
-        time_integrator = ti.get_scheme_method("eE")
+        # ti = TimeIntegration()
+        # init = ti.get_scheme_init_method("eE")
+        # init(None, inertia)
+        # time_integrator = ti.get_scheme_method("eE")
 
-        time_integrator = TimeIntegration()
-        time_integrator._init_eE("_", inertia)
-        integration_func = time_integrator.get_scheme_method("eE")
+        # time_integrator = TimeIntegration()
+        # time_integrator._init_eE("_", inertia)
+        # integration_func = time_integrator.get_scheme_method("eE")
+
+        ti = TimeIntegration()
+        ti._init_HHT_alpha("_", 0.1, dt, inertia, c, k)
+        integration_func = ti.get_scheme_method("HHT-alpha-xy-adapted")
 
         sf = StructForce()
         sf._init_linear("_", k, c)
         sf_funcs = {"xy": sf._linear_xy, "ef": sf._linear_ef}
         
-        for cs in ["xy", "ef"]:
+        # for cs in ["xy", "ef"]:
+        for cs in ["xy"]:
             dir_res = helper.create_dir(join(case_dir, cs))[0]
 
             with open(join(dir_res, "section_data.json"), "w") as json_file:
@@ -833,7 +853,7 @@ if __name__ == "__main__":
                 airfoil.damp[i, :], airfoil.stiff[i, :] = sf_func(airfoil, i)
 
                 # airfoil.aero[i, :] = [-np.sin(current_angle), np.cos(current_angle), 0]
-                pos, vel, accel = integration_func(airfoil, i)
+                pos, vel, accel = integration_func(airfoil, i, dt)
                 # if pos[1] > 0 and was_below_0:
                 #     full_rotations += 1
                 #     was_below_0 = False
@@ -853,15 +873,21 @@ if __name__ == "__main__":
             airfoil._save(dir_res)
 
             post_calc = PostCaluculations(dir_res, "alpha_steady", cs)
+            aoa_thresholds = {
+                "alpha_steady": 5
+            }
+            post_calc.check_angle_of_attack(**aoa_thresholds)
+            post_calc.write_peaks()
             post_calc.project_data()
             post_calc.power()
             post_calc.kinetic_energy()
             post_calc.potential_energy()
+            post_calc.work_per_cycle(peaks=n_per_10*np.arange(1, 8))
 
             dir_plots = helper.create_dir(join(dir_res, "plots"))[0]
             plotter = Plotter("data/FFA_WA3_221/profile.dat", dir_res, dir_plots, cs, dt_res=500)
-            plotter.force()
-            plotter.energy()
+            plotter.force(trailing_every=1)
+            plotter.energy(trailing_every=1)
 
         # # E_pot = E_pot[:, :2]
         # # E_kin = E_kin[:, :2]
