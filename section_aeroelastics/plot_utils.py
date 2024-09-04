@@ -212,14 +212,17 @@ class PlotHandler(Helper):
             "grid": {True: self._empty_call, False: self._skip_call}
         }
         for param, values in copy(kwargs).items():
-            if param not in map_params or isinstance(values, dict):
+            # if param not in map_params or isinstance(values, dict):
+            if param not in map_params:
                 # if isinstance(value, dict) means the respective setting gets kwargs set
                 continue
             if not isinstance(values, dict):
-                kwargs[param] = map_params[param][values]
+                if values in map_params[param]:  # else it is a specifically set kwarg that is allowed to pass
+                    kwargs[param] = map_params[param][values]
             else:
                 for axs_label, value in values.items():
-                    kwargs[param][axs_label] = map_params[param][value]
+                    if value in map_params[param]:  # else it is a specifically set kwarg that is allowed to pass
+                        kwargs[param][axs_label] = map_params[param][value]
         return kwargs  
 
     def _handle_options(self, ax_labels: tuple[str], **kwargs) -> dict:
@@ -334,21 +337,26 @@ class PlotHandler(Helper):
                     axis_label[ax_name] = label[1:]
                     continue
                 adjusted_label = r""
-                while unit_specifier in label:
-                    from_idx = label.find(unit_specifier)+n_specifier
-                    contains_unit = label[from_idx:]
-                    unit = contains_unit.split(" ")[0]
-                    unit = unit[:len(unit)-offset]
-                    n_unit = len(unit)
-                    if latex_active:
-                        unit = r"\unit{"+unit+r"}"
-                        if unit_specifier == "(":
-                            unit = r"$\left("+unit+r"\right)$"
-                    else:
-                        unit = unit.replace(".", "")
-                    
-                    adjusted_label += label[:from_idx-offset] + unit
-                    label = label[from_idx+n_unit+offset:]
+                if unit_specifier in label:
+                    while unit_specifier in label:
+                        from_idx = label.find(unit_specifier)+n_specifier
+                        contains_unit = label[from_idx:]
+                        unit = contains_unit.split(" ")[0]
+                        unit = unit[:len(unit)-offset]
+                        n_unit = len(unit)
+                        if latex_active:
+                            unit = r"\unit{"+unit+r"}"
+                            if unit_specifier == "(":
+                                unit = r"$\left("+unit+r"\right)$"
+                        else:
+                            unit = unit.replace(".", "")
+                        
+                        adjusted_label += label[:from_idx-offset] + unit
+                        label = label[from_idx+n_unit+offset:]
+                    if len(label) != 0:
+                        adjusted_label += label
+                else:
+                    adjusted_label = label
                     
                 if set_colour:
                     adjusted_label = r"\textcolor{updatecolour}{"+adjusted_label+r"}"
@@ -359,7 +367,7 @@ class PlotHandler(Helper):
                 continue
             if "_" in axis_label:
                 axes_labels[i] = axis_label["_"]
-    
+
         return [label for label in axes_labels]
 
 
@@ -414,7 +422,7 @@ class PlotPreparation:
         :rtype: tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, PlotHandler]
         """
         fig, axs = plt.subplot_mosaic([["profile", "aoa", "aero"], 
-                                       ["profile", "stiff", "damp"]], figsize=(10, 5), tight_layout=True, dpi=300)
+                                       ["profile", "stiff", "damp"]], figsize=(10, 5), tight_layout=True, dpi=50)
         handler = PlotHandler(fig, axs)
         x_labels = {
             "profile": "normal (m)",
@@ -433,6 +441,8 @@ class PlotPreparation:
         aspect = {
             "profile": {"aspect": "equal"}
         }
+        for ax in axs.values():
+            ax.spines[["top", "right"]].set_visible(False)
         return *handler.update(x_labels=x_labels, y_labels=y_labels, aspect=aspect), handler
 
     @staticmethod
@@ -448,7 +458,7 @@ class PlotPreparation:
         """
         fig, axs = plt.subplot_mosaic([["profile", "total", "power"],
                                        ["profile", "kinetic", "potential"]], figsize=(10, 5), tight_layout=True,
-                                      dpi=300)
+                                      dpi=50)
         handler = PlotHandler(fig, axs)
         x_labels = {
             "profile": "normal (m)",
@@ -467,6 +477,8 @@ class PlotPreparation:
         aspect = {
             "profile": "equal"
         }
+        for ax in axs.values():
+            ax.spines[["top", "right"]].set_visible(False)
         return *handler.update(x_labels=x_labels, y_labels=y_labels, aspect=aspect), handler
     
     @staticmethod
@@ -483,7 +495,7 @@ class PlotPreparation:
         """
         fig, axs = plt.subplot_mosaic([["profile", "aoa", coeffs[0]],
                                        ["profile", coeffs[1], "C_m"]], figsize=(10, 5), tight_layout=True,
-                                      dpi=300)
+                                      dpi=50)
         handler = PlotHandler(fig, axs)
         x_labels = {
             "profile": "normal (m)",
@@ -502,6 +514,8 @@ class PlotPreparation:
         aspect = {
             "profile": "equal"
         }
+        for ax in axs.values():
+            ax.spines[["top", "right"]].set_visible(False)
         return *handler.update(x_labels=x_labels, y_labels=y_labels, aspect=aspect), handler
     
     @staticmethod
