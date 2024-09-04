@@ -636,13 +636,13 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.C_lus[i] = coeffs[1]
         sim_res.C_mus[i] = coeffs[2]
         # for return of [C_d, C_l, C_m]
-        return coeffs
+        # return coeffs
 
         # for return of [f_x, f_y, mom]
-        # rot_xy = self.passive_3D_planar(-qs_flow_angle)
-        # dynamic_pressure = density/2*rel_flow_vel**2
-        # forces = dynamic_pressure*np.asarray([chord, chord, -chord**2])*rot_xy@coefficients
-        # return forces  # for [f_x, f_y, mom]
+        rot_xy = self.passive_3D_planar(-qs_flow_angle)
+        dynamic_pressure = density/2*rel_flow_vel**2
+        forces = dynamic_pressure*np.asarray([chord, chord, -chord**2])*rot_xy@coefficients
+        return forces  # for [f_x, f_y, mom]
 
     def _init_BL_first_order_IAG2(
             self,
@@ -806,13 +806,13 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.C_lus[i] = coeffs[1]
         sim_res.C_mus[i] = coeffs[2]
         # for return of [C_d, C_l, C_m] uncomment next line
-        return coeffs
+        # return coeffs
 
         # for return of [f_x, f_y, mom] uncommmet next lines
-        # rot_xy = self.passive_3D_planar(-qs_flow_angle)
-        # dynamic_pressure = density/2*rel_flow_vel**2
-        # forces = dynamic_pressure*np.asarray([chord, chord, -chord**2])*rot_xy@coefficients
-        # return forces  # for [f_x, f_y, mom]
+        rot_xy = self.passive_3D_planar(-qs_flow_angle)
+        dynamic_pressure = density/2*rel_flow_vel**2
+        forces = dynamic_pressure*np.asarray([chord, chord, -chord**2])*rot_xy@coefficients
+        return forces  # for [f_x, f_y, mom]
 
     def _init_BL_AEROHOR(
             self,
