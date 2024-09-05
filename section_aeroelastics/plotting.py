@@ -1885,37 +1885,37 @@ def _combined_LOC_amplitude(
 
     velocities = np.sort(df_combinations["velocity"].unique())
     aoas = np.sort(df_combinations["alpha"].unique())[::-1]
-    
-    ffile_ampls = join(dir_plots, "amplitudes")
-    if isfile(ffile_ampls+".npy"):
-        amplitudes = np.load(ffile_ampls+".npy")
-    else:
-        recalculate = True
-
-    ffile_conv = join(dir_plots, "conv")
-    if isfile(ffile_conv+".npy"):
-        convergence = np.load(ffile_conv+".npy")
-    else:
-        recalculate = True
 
     aoa_types = ["alpha_eff", "alpha_qs"]
-    max_aoa = {aoa_type: np.zeros((aoas.size, velocities.size)) for aoa_type in aoa_types}
+    data_params = ["ampl_x", "ampl_y", "conv_x", "conv_y"] + aoa_types
+    data = {
+        "ffiles_write": {param: join(dir_plots, param) for param in data_params},
+        "ffiles_read": {param: join(dir_plots, param+".npy") for param in data_params},
+        "values": {param: None for param in data_params},
+        "cb_labels": {
+            "ampl_x": r"edgewise LCO amplitude (\unit{\metre})",
+            "ampl_y": r"flapwise LCO amplitude (\unit{\metre})",
+            "conv_x": r"rel. change in edgewise amplitude (\unit{\percent})",
+            "conv_y": r"rel. change in flapwise amplitude (\unit{\percent})",
+            "alpha_eff": r"$\alpha_{\text{eff}}$ (\unit{\degree})",
+            "alpha_qs": r"$\alpha_{\text{qs}}$ (\unit{\degree})"
+        }
+    }
 
-    ffile_aoa_eff = join(dir_plots, "alpha_eff")
-    if isfile(ffile_aoa_eff+".npy"):
-        max_aoa["alpha_eff"] = np.load(ffile_aoa_eff+".npy")
-    else:
-        recalculate = True
+    for param in data_params:
+        if isfile(data["ffiles_read"][param]):
+            data["values"][param] = np.load(data["ffiles_read"][param])
+        else:
+            recalculate = True
 
-    ffile_aoa_qs = join(dir_plots, "alpha_qs")
-    if isfile(ffile_aoa_qs+".npy"):
-        max_aoa["alpha_qs"] = np.load(ffile_aoa_qs+".npy")
-    else:
-        recalculate = True
-    
     if recalculate:
-        amplitudes = np.zeros((aoas.size, velocities.size))
-        convergence = np.zeros((aoas.size, velocities.size))
+        directions = ["x", "y"]
+        for direction in directions:
+            data["values"][f"ampl_{direction}"] = np.zeros((aoas.size, velocities.size))
+            data["values"][f"conv_{direction}"] = np.zeros((aoas.size, velocities.size))
+
+        for aoa_type in aoa_types:
+            data["values"][aoa_type] = np.zeros((aoas.size, velocities.size))
 
         vel_to_ind = {vel: i for i, vel in enumerate(velocities)}
         aoa_to_ind = {aoa: i for i, aoa in enumerate(aoas)}
@@ -1923,124 +1923,85 @@ def _combined_LOC_amplitude(
             vel = row["velocity"]
             aoa = row["alpha"] 
             dir_current = join(root_dir, str(i))
-            pos_x = pd.read_csv(join(dir_current, "general.dat"), usecols=["pos_x"]).to_numpy().flatten()
-
-            ppeaks = find_peaks(pos_x)[0]
-            npeaks = find_peaks(-pos_x)[0]
-
-            if ppeaks.size == 0:
-                amplitudes[aoa_to_ind[aoa], vel_to_ind[vel]] = 0
-                convergence[aoa_to_ind[aoa], vel_to_ind[vel]] = 0
-                for aoa_type in aoa_types:
-                    max_aoa[aoa_type][aoa_to_ind[aoa], vel_to_ind[vel]] = df_aero[aoa_type].iloc[-1]
-                continue
-
-            ampl_last = np.abs(pos_x[ppeaks[-1]]-pos_x[npeaks[-1]])/2
-            amplitudes[aoa_to_ind[aoa], vel_to_ind[vel]] = abs(ampl_last)
-
-            ampl_second_to_last = np.abs(pos_x[ppeaks[-2]]-pos_x[npeaks[-2]])/2
-            converg = (ampl_last-ampl_second_to_last)/(ampl_second_to_last)
-            convergence[aoa_to_ind[aoa], vel_to_ind[vel]] = converg
-
             df_aero = pd.read_csv(join(dir_current, "f_aero.dat"))
-            start = ppeaks[-2]
-            end = ppeaks[-1]
-            for aoa_type in aoa_types:
-                max_aoa[aoa_type][aoa_to_ind[aoa], vel_to_ind[vel]] = df_aero[aoa_type].iloc[start:end].abs().max()
+            pos = {}
+            df = pd.read_csv(join(dir_current, "general.dat"), usecols=[f"pos_{direction}" for direction in directions])
+            for direction in directions:
+                pos[direction] = df[f"pos_{direction}"].to_numpy().flatten()
 
-        np.save(ffile_ampls, amplitudes)
-        np.save(ffile_conv, convergence)
-        np.save(ffile_aoa_eff, max_aoa["alpha_eff"])
-        np.save(ffile_aoa_qs, max_aoa["alpha_qs"])
+            for direction, displacement in pos.items():
+                ppeaks = find_peaks(displacement)[0]
+                npeaks = find_peaks(-displacement)[0]
 
+                if ppeaks.size < 2: # completely converged
+                    if direction == directions[0]:
+                        for aoa_type in aoa_types:
+                            data["values"][aoa_type][aoa_to_ind[aoa], vel_to_ind[vel]] = df_aero[aoa_type].iloc[-1]
+                    continue
+
+                ampl_last = np.abs(displacement[ppeaks[-1]]-displacement[npeaks[-1]])/2
+                if ampl_last <= 1e-2: # basically completely converged
+                    if direction == directions[0]:
+                        for aoa_type in aoa_types:
+                            data["values"][aoa_type][aoa_to_ind[aoa], vel_to_ind[vel]] = df_aero[aoa_type].iloc[-1]
+                    continue
+                
+                data["values"][f"ampl_{direction}"][aoa_to_ind[aoa], vel_to_ind[vel]] = abs(ampl_last)
+                ampl_second_to_last = np.abs(displacement[ppeaks[-2]]-displacement[npeaks[-2]])/2
+                converg = (ampl_last-ampl_second_to_last)/(ampl_second_to_last)
+                if converg > 0.1:
+                    converg = 0.1
+                if converg < -0.1:
+                    converg = -0.1
+                data["values"][f"conv_{direction}"][aoa_to_ind[aoa], vel_to_ind[vel]] = converg
+                start = ppeaks[-2]
+                end = ppeaks[-1]
+                if direction == directions[0]:
+                    for aoa_type in aoa_types:
+                        aoa_max = df_aero[aoa_type].iloc[start:end].abs().max()
+                        data["values"][aoa_type][aoa_to_ind[aoa], vel_to_ind[vel]] = aoa_max
+        for param in data_params:
+            np.save(data["ffiles_write"][param], data["values"][param])
+            
     v, a = np.meshgrid(velocities, aoas)
     points = np.c_[(v.ravel(), a.ravel())]
-
-    fig, ax = plt.subplots()
-    if scaling is not None:
-        ticks, norm, levels = get_norm_and_ticks(*scaling["amplitudes"], n_levels=n_levels) 
-    else:
-        ticks, norm, levels = None, None, None
-    cf = ax.contourf(v, a, amplitudes, norm=norm, cmap=_fcolormap(n_levels), levels=levels)
-    cf.set_edgecolor("face")
-    cb = fig.colorbar(cf, ax=ax, ticks=ticks, label=r"LCO amplitude (\unit{\metre})")
-    cb.ax.minorticks_off()
-    cb.outline.set_visible(False)
-    if add_resolution:
-        ax.plot(points[:, 0], points[:, 1], "ok", ms=0.4)
-    handler = PlotHandler(fig, ax)
-    handler.update(x_labels=r"wind speed (\metre\per\second)", y_labels=r"yaw misalignment (\degree)")
-    handler.save(join(dir_plots, "LCO_amplitude_contourf.pdf"))
-    
-    fig, ax = plt.subplots()
-    if scaling is not None:
-        ticks, norm, levels = get_norm_and_ticks(*scaling["conv"], n_levels=n_levels) 
-    else:
-        ticks, norm, levels = None, None, None
-    cf = ax.contourf(v, a, convergence*1e2, norm=norm, cmap=_fcolormap(n_levels), levels=levels)
-    cf.set_edgecolor("face")
-    cb = fig.colorbar(cf, ax=ax, ticks=ticks, label=r"rel. change in amplitude (\unit{\percent})")
-    cb.ax.minorticks_off()
-    cb.outline.set_visible(False)
-    handler = PlotHandler(fig, ax)
-    handler.update(x_labels=r"wind speed (\metre\per\second)", y_labels=r"yaw misalignment (\degree)")
-    if add_resolution:
-        ax.plot(points[:, 0], points[:, 1], "ok", ms=0.4)
-    handler.save(join(dir_plots, "LCO_amplitude_convergence_contourf.pdf"))
-    
-    aoa_label = {"alpha_qs": r"$\alpha_{\text{qs}}$ (\unit{\degree})", 
-                 "alpha_eff": r"$\alpha_{\text{eff}}$ (\unit{\degree})"}
-    for aoa_type in aoa_types:
+    apply = {
+        "conv_x": lambda x: x*1e2,
+        "conv_y": lambda x: x*1e2,
+        "alpha_eff": np.rad2deg,
+        "alpha_qs": np.rad2deg,
+    }
+    tmp = root_dir.replace("\\", "/")
+    split = tmp.split("/")
+    model = [part for part in split if "BL" in part][0]
+    map_model = {
+        "BL_openFAST_Cl_disc": "HGM openFAST",
+        "BL_openFAST_Cl_disc_f_scaled": r"HGM $f$-scaled",
+        "BL_first_order_IAG2": "1st-order IAG",
+        "BL_AEROHOR": "AEROHOR"
+    }
+    for param in data_params:
         fig, ax = plt.subplots()
         if scaling is not None:
-            ticks, norm, levels = get_norm_and_ticks(*scaling[aoa_type], n_levels=n_levels) 
+            ticks, norm, levels = get_norm_and_ticks(*scaling[param], n_levels=n_levels) 
         else:
-            ticks, norm, levels = None, None, None
-        cf = ax.contourf(v, a, np.rad2deg(max_aoa[aoa_type]), norm=norm, cmap=_fcolormap(n_levels), levels=levels)
+            ticks, norm, levels = None, None, n_levels
+        
+        vals = data["values"][param]
+        if param in apply:
+            vals = apply[param](vals)
+        cf = ax.contourf(v, a, vals, norm=norm, cmap=_fcolormap(n_levels), levels=levels)
         cf.set_edgecolor("face")
-        cb = fig.colorbar(cf, ax=ax, ticks=ticks, label=r"max "+ aoa_label[aoa_type]+ r" during last period")
+
+        cb = fig.colorbar(cf, ax=ax, ticks=ticks, label=data["cb_labels"][param])
         cb.ax.minorticks_off()
         cb.outline.set_visible(False)
-        handler = PlotHandler(fig, ax)
-        handler.update(x_labels=r"wind speed (\metre\per\second)", y_labels=r"yaw misalignment (\degree)")
         if add_resolution:
             ax.plot(points[:, 0], points[:, 1], "ok", ms=0.4)
-        handler.save(join(dir_plots, f"max_{aoa_type}.pdf"))
-
-
-    # fig, ax = plt.subplots()
-    # cmap, norm = get_colourbar(amplitudes)
-    # ax = heatmap(amplitudes, xticklabels=np.round(velocities, 3), ax=ax, yticklabels=np.round(aoas, 3),
-    #              cbar_kws={"label": "LCO amplitude (m)"}, cmap=cmap, norm=norm, annot=True, fmt=".3g")
-    # cbar = ax.collections[0].colorbar
-    # stab_min = amplitudes.min()
-    # stab_max = amplitudes.max()
-    # cbar.set_ticks([0, stab_max])
-    # cbar.set_ticklabels([0, np.round(stab_max, 3)])
-    # cbar.minorticks_off()
-    # handler = PlotHandler(fig, ax)
-    # handler.update(x_labels="velocity (m/s)", y_labels="angle of attack (°)")
-    # handler.save(join(dir_plots, "LCO_amplitude_heat_map.pdf"))
-
-
-    # dir_plots = helper.create_dir(join(root_dir, "plots"))[0]
-    # fig, ax = plt.subplots()
-    # cmap, norm = get_colourbar(amplitudes)
-    # ax = heatmap(convergence, xticklabels=np.round(velocities, 3), ax=ax, yticklabels=np.round(aoas, 3),
-    #              cbar_kws={"label": "rel. change in amplitude (-)"}, cmap=cmap, norm=norm, annot=True, fmt=".3g")
-    # cbar = ax.collections[0].colorbar
-    # stab_min = convergence.min()
-    # stab_max = convergence.max()
-    # if stab_max > 0:
-    #     cbar.set_ticks([stab_min, 0, stab_max])
-    #     cbar.set_ticklabels([np.round(stab_min, 3), 0, np.round(stab_max, 3)])
-    # else:
-    #     cbar.set_ticks([stab_min, 0])
-    #     cbar.set_ticklabels([np.round(stab_min, 3), 0])
-    # cbar.minorticks_off()
-    # handler = PlotHandler(fig, ax)
-    # handler.update(x_labels="velocity (m/s)", y_labels="angle of attack (°)")
-    # handler.save(join(dir_plots, "LCO_amplitude_convergence.pdf"))
+        handler = PlotHandler(fig, ax)
+        handler.update(x_labels=r"wind speed (\metre\per\second)", y_labels=r"steady angle of attack (\degree)", 
+                       titles=map_model[model])
+        handler.save(join(dir_plots, f"LCO_{param}.pdf"))
 
 
 def combined_LOC_amplitude(
@@ -2052,13 +2013,14 @@ def combined_LOC_amplitude(
         n_levels: int=500,
 ):
     apply = {
-        "conv": lambda x: x*1e2,
+        "conv_x": lambda x: x*1e2,
+        "conv_y": lambda x: x*1e2,
         "alpha_eff": np.rad2deg,
         "alpha_qs": np.rad2deg,
     }
     scaling = None
     if dirs_scaling is not None:
-        scaling = {param: [1e10, -1e10] for param in ["amplitudes", "conv", "alpha_eff", "alpha_qs"]}
+        scaling = {param: [1e10, -1e10] for param in ["ampl_x", "ampl_y", "conv_x", "conv_y", "alpha_eff", "alpha_qs"]}
         for dir_scaling in dirs_scaling:
             dir_plot = join(dir_scaling, "plots")
             for param in scaling:
@@ -2073,15 +2035,44 @@ def combined_LOC_amplitude(
                     scaling[param][0] = current_min
                 if current_max > scaling[param][1]:
                     scaling[param][1] = current_max
-                    
-    _combined_LOC_amplitude(
-        root_dir=root_dir,
-        add_resolution=add_resolution,
-        cmap=cmap,
-        recalculate=recalculate,
-        scaling=scaling,
-        n_levels=n_levels
-    )
+
+        # same_scalings = [["ampl_x", "ampl_y"], ["conv_x", "conv_y"]]
+        # compared = []
+        # for same_scaling in same_scalings:
+        #     tmp = [1e10, 1e-10]
+        #     for param in same_scaling:
+        #         if scaling[param][0] < tmp[0]:
+        #             tmp[0] = scaling[param][0]
+        #         if scaling[param][1] > tmp[1]:
+        #             tmp[1] = scaling[param][1]
+        #     compared.append(tmp)
+        # for adjusted, params in zip(compared, same_scalings):
+        #     for param in params:
+        #         scaling[param] = adjusted
+
+    # for k, v in scaling.items():
+    #     print(k, v)
+    # exit()
+
+    if root_dir == "all":
+        for directory in dirs_scaling:
+            _combined_LOC_amplitude(
+                root_dir=directory,
+                add_resolution=add_resolution,
+                cmap=cmap,
+                recalculate=recalculate,
+                scaling=scaling,
+                n_levels=n_levels
+            )
+    else:
+        _combined_LOC_amplitude(
+            root_dir=root_dir,
+            add_resolution=add_resolution,
+            cmap=cmap,
+            recalculate=recalculate,
+            scaling=scaling,
+            n_levels=n_levels
+        )
         
 
 def get_norm_and_ticks(v_min: float, v_max: float, n_levels: int=300):
