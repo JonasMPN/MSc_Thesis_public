@@ -43,14 +43,14 @@ def set_do(
     return do
 
 do = {
-    "simulate": True,  # run a simulation
+    "simulate": False,  # run a simulation
     "post_calc": False,  # peform post calculations
     "plot_results": False,  # plot results,
     "plot_results_fill": False,
     "plot_coupled_timeseries": False,
     "animate_results": False,
     "plot_combined_forced": False,
-    "plot_combined_LOC_amplitude": False
+    "plot_combined_LOC_amplitude": True
 }
 
 do = set_do(do=do,
@@ -71,10 +71,10 @@ sim_type = "free_parallel"
 n_processes = 2  # for sim_type="forced" and sim_type="free_parallel".
 
 # aero_scheme = "qs"
-# aero_scheme = "BL_openFAST_Cl_disc"
+aero_scheme = "BL_openFAST_Cl_disc"
 # aero_scheme = "BL_openFAST_Cl_disc_f_scaled"
 # aero_scheme = "BL_AEROHOR"
-aero_scheme = "BL_first_order_IAG2"
+# aero_scheme = "BL_first_order_IAG2"
 # aero_scheme = "BL_Staeblein"
 
 file_polar = "polars_new.dat"
@@ -232,8 +232,10 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             velocities = [5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25, 27.5, 30, 32.5, 35]
             angle_of_attacks = [-20, -17.5, -15, -12.5, -10, -7.5, -5, -2.5, 0, 2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20]
             # angle_of_attacks = [20, 22.5, 25]
-            combinations = [(vel, aoa) for vel, aoa in product(velocities, [-25, -22.5, 22.5, 25])]
-            combinations += [(vel, aoa) for vel, aoa in product([37.5, 40, 42.5, 45, 47.5, 50], angle_of_attacks)]
+            # combinations = [(vel, aoa) for vel, aoa in product(velocities, [-25, -22.5, 22.5, 25])]
+            # combinations += [(vel, aoa) for vel, aoa in product([37.5, 40, 42.5, 45, 47.5, 50], angle_of_attacks)]
+            # combinations = [(50.0,2.5), (50.0,5.0), (50.0,7.5), (50.0,10.0)]
+            combinations = None
             run_free_parallel(root, file_polar, case_dir, n_processes, aero_scheme, t, structure_def, velocities, 
                               angle_of_attacks, combinations, save_last)
 
@@ -282,7 +284,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             # post_calculations_parallel(root_cases, alpha_lift, n_processes, aoa_thresholds)
 
             # to do post calculations on only one, use the following lines
-            case_id = 81
+            case_id = 356
             post_calc = PostCaluculations(dir_sim_res=join(root, "simulation", sim_type, aero_scheme, case_name, 
                                                            str(case_id)),
                                           alpha_lift=alpha_lift, coordinate_system_structure=coordinate_system)
@@ -296,13 +298,12 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             post_calc.work_per_cycle()
 
     if plot_results:
-        5
-        time_frame = (290, 300)
+        time_frame = (0, 600)
         file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
         if sim_type == "free":
             dir_sim = join(root, "simulation", "free", aero_scheme, case_name)  # define path to the root of the simulation results
         elif "forced" in sim_type or "parallel" in sim_type:
-            case_id = "81"
+            case_id = "356"
             dir_sim = join(root, "simulation", sim_type, aero_scheme, case_name, case_id)
         dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
         plotter = Plotter(file_profile, dir_sim, dir_plots, structure_def["coordinate_system"]) 
@@ -371,14 +372,20 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         combined_forced(join(root, "simulation", sim_type, aero_scheme, case_name))
 
     if plot_combined_LOC_amplitude:
-        schemes = ["BL_openFAST_Cl_disc", "BL_openFAST_Cl_disc_f_scaled", "BL_AEROHOR", 
-                #    "BL_first_order_IAG2"
-                   ]
+        schemes = [
+            "BL_openFAST_Cl_disc", 
+            "BL_openFAST_Cl_disc_f_scaled", 
+            "BL_AEROHOR", 
+            "BL_first_order_IAG2"
+            ]
         scaling_dirs = [
             join(root, "simulation", sim_type, scheme, case_name) for scheme in schemes
         ]
-        combined_LOC_amplitude(join(root, "simulation", sim_type, aero_scheme, case_name),
-                               dirs_scaling=scaling_dirs)
+        # scaling_dirs = None
+        combined_LOC_amplitude(
+            # root_dir=join(root, "simulation", sim_type, aero_scheme, case_name),
+            root_dir="all",
+            dirs_scaling=scaling_dirs, recalculate=False)
 
 if __name__ == "__main__":
     main(**do)
