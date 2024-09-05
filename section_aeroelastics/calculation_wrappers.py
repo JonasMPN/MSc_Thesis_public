@@ -257,7 +257,7 @@ def _run_free(
     ffile_polar = join(dir_airfoil, file_polar)
     approx_steady_x = True
     approx_steady_y = True
-    approx_steady_tors = True
+    approx_steady_tors = True if "AEROHOR" not in aero_scheme else False
     fac_x = 1.3
     fac_y = 1
     fac_tors = 1
