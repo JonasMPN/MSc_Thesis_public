@@ -84,7 +84,7 @@ class PowerAndEnergy(Rotations):
         # here it is just the edgewise/flapwise damping force times the respective velocity
         f_damp_mean = (self.f_damp[:-1, :]+self.f_damp[1:, :])/2
         vel_damp_mean = (self.velocity_damp[:-1, :]+self.velocity_damp[1:, :])/2
-        power_damp = f_damp_mean*vel_damp_mean
+        power_damp = -f_damp_mean*vel_damp_mean  # minus such that damping work is negative
         
         return {
             "aero": {
