@@ -43,14 +43,14 @@ def set_do(
     return do
 
 do = {
-    "simulate": False,  # run a simulation
+    "simulate": True,  # run a simulation
     "post_calc": False,  # peform post calculations
     "plot_results": False,  # plot results,
     "plot_results_fill": False,
     "plot_coupled_timeseries": False,
     "animate_results": False,
     "plot_combined_forced": False,
-    "plot_combined_LOC_amplitude": True
+    "plot_combined_LOC_amplitude": False
 }
 
 do = set_do(do=do,
@@ -71,10 +71,10 @@ sim_type = "free_parallel"
 n_processes = 2  # for sim_type="forced" and sim_type="free_parallel".
 
 # aero_scheme = "qs"
-aero_scheme = "BL_openFAST_Cl_disc"
+# aero_scheme = "BL_openFAST_Cl_disc"
 # aero_scheme = "BL_openFAST_Cl_disc_f_scaled"
 # aero_scheme = "BL_AEROHOR"
-# aero_scheme = "BL_first_order_IAG2"
+aero_scheme = "BL_first_order_IAG2"
 # aero_scheme = "BL_Staeblein"
 
 file_polar = "polars_new.dat"
@@ -84,6 +84,7 @@ file_polar = "polars_new.dat"
 alpha_lift = "alpha_qs"
 
 case_name = "LCO_final"
+# case_name = "aoa_20_v_35_dt_0.0005"
 # case_name = "test_BL_openFAST"
 # case_name = "test_qs"
 # case_name = "initial_y_and_tors_set"
@@ -177,7 +178,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             # # alpha = 17.5
             alpha = 20
 
-            inflow = get_inflow(t, [(0, 0, 20, alpha)], init_velocity=0.1)
+            inflow = get_inflow(t, [(0, 0, 35, alpha)], init_velocity=0.1)
             approx_steady_x = True
             approx_steady_y = True
             approx_steady_tors = True if aero_scheme != "BL_AEROHOR" else False
@@ -197,13 +198,13 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             # init_pos = np.zeros(3)
             # init_pos[0] += 5*np.cos(init_pos[2])
             # init_pos[0] += 10
-            init_pos[0] += 1.3
+            init_pos[0] *= 1.3
             # init_pos[1] += 5*np.sin(init_pos[2])
             # init_pos[1] += 4
             # init_pos[2] -= 0.0001
 
             # initial conditions for the velocity in [x, y, rotation in rad/s]
-            init_vel = np.zeros(3)  
+            init_vel = np.zeros(3)
             
             # set the calculation scheme for the structural damping and stiffness forces
             NACA_643_618.set_struct_calc("linear_xy", **structure_def)
@@ -229,12 +230,13 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             NACA_643_618.save(case_dir, save_last=save_last)  # save simulation results
         
         if sim_type == "free_parallel":
-            velocities = [5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25, 27.5, 30, 32.5, 35]
-            angle_of_attacks = [-20, -17.5, -15, -12.5, -10, -7.5, -5, -2.5, 0, 2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20]
+            # velocities = [5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25, 27.5, 30, 32.5, 35]
+            # angle_of_attacks = [-20, -17.5, -15, -12.5, -10, -7.5, -5, -2.5, 0, 2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20]
             # angle_of_attacks = [20, 22.5, 25]
+            velocities = [5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25, 27.5, 30, 32.5, 35, 37.5, 40, 42.5, 45, 47.5, 50]
+            angle_of_attacks = [-25, -22.5, -20, -17.5, -15, -12.5, -10, -7.5, -5, -2.5, 0, 2.5, 5, 7.5, 10, 12.5, 15, 17.5, 20, 22.5, 25]
             # combinations = [(vel, aoa) for vel, aoa in product(velocities, [-25, -22.5, 22.5, 25])]
             # combinations += [(vel, aoa) for vel, aoa in product([37.5, 40, 42.5, 45, 47.5, 50], angle_of_attacks)]
-            # combinations = [(50.0,2.5), (50.0,5.0), (50.0,7.5), (50.0,10.0)]
             combinations = None
             run_free_parallel(root, file_polar, case_dir, n_processes, aero_scheme, t, structure_def, velocities, 
                               angle_of_attacks, combinations, save_last)
@@ -374,9 +376,10 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
     if plot_combined_LOC_amplitude:
         schemes = [
             "BL_openFAST_Cl_disc", 
-            "BL_openFAST_Cl_disc_f_scaled", 
-            "BL_AEROHOR", 
-            "BL_first_order_IAG2"
+            # "BL_openFAST_Cl_disc_f_scaled", 
+            # "BL_AEROHOR", 
+            # "BL_first_order_IAG2"
+            "qs"
             ]
         scaling_dirs = [
             join(root, "simulation", sim_type, scheme, case_name) for scheme in schemes
