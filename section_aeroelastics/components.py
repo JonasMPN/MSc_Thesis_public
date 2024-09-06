@@ -4,14 +4,14 @@ import numpy as np
 from scipy.signal import find_peaks
 
 dfs = {
-    # "oF": [pd.read_csv("data/FFA_WA3_221/validation/BL_openFAST_Cl_disc/measurement/2/f_aero.dat"), ("lift", "aoa")],
-    "oF": [pd.read_csv("data/FFA_WA3_221/validation/BL_openFAST_Cl_disc/measurement/3/f_aero.dat"), ("drag", "aoa")],
+    "oF": [pd.read_csv("data/FFA_WA3_221/validation/BL_openFAST_Cl_disc/measurement/3/f_aero.dat"), ("lift", "aoa")],
+    # "oF": [pd.read_csv("data/FFA_WA3_221/validation/BL_openFAST_Cl_disc/measurement/3/f_aero.dat"), ("drag", "aoa")],
     # "oF": [pd.read_csv("data/FFA_WA3_221/validation/BL_openFAST_Cl_disc/measurement/3/f_aero.dat"), 
         #    ("aoa", "moment_hgm")],
-    # "iag": [pd.read_csv("data/FFA_WA3_221/validation/BL_first_order_IAG2/measurement/2/f_aero.dat"), ("aoa", 
-    #                                                                                                   "normal")],
     "iag": [pd.read_csv("data/FFA_WA3_221/validation/BL_first_order_IAG2/measurement/3/f_aero.dat"), ("aoa", 
-                                                                                                      "tangential")]
+                                                                                                      "normal")],
+    # "iag": [pd.read_csv("data/FFA_WA3_221/validation/BL_first_order_IAG2/measurement/3/f_aero.dat"), ("aoa", 
+                                                                                                    #   "tangential")]
     # "iag": [pd.read_csv("data/FFA_WA3_221/validation/BL_first_order_IAG2/measurement/3/f_aero.dat"), ("aoa", "moment")],
     # "aerohor": [pd.read_csv("data/FFA_WA3_221/validation/BL_AEROHOR/measurement/2/f_aero.dat"), ("tangential")],
     # "aerohor": [pd.read_csv("data/FFA_WA3_221/validation/BL_AEROHOR/measurement/2/f_aero.dat"), ("tangential")],
@@ -41,7 +41,7 @@ for title, [df, do] in dfs.items():
     #------- normal contributions
     if "normal" in do:
         fig, ax = plt.subplots()
-        plot(ax, aoa, df, ["C_nvisc", "C_ni", "C_nv"], start, end, np.cos(np.deg2rad(aoa)))
+        plot(ax, aoa, df, ["C_nvisc", "C_ni", "C_nv", "C_nsEq", "C_nc"], start, end, np.cos(np.deg2rad(aoa)))
         plot(ax, aoa, df, ["C_tf"], start, end, np.sin(np.deg2rad(aoa)))
         plot(ax, aoa, df, ["C_lus"], start, end)
         ax.plot(aoa, df["C_lus"].iloc[start:end], label="C_lus")
@@ -60,7 +60,7 @@ for title, [df, do] in dfs.items():
     #------- tangential contribution
     if "tangential" in do:
         fig, ax = plt.subplots()
-        plot(ax, aoa, df, ["C_nv", "C_nf", "C_ni"], start, end, np.sin(np.deg2rad(aoa)))
+        plot(ax, aoa, df, ["C_nv", "C_nvisc", "C_ni"], start, end, np.sin(np.deg2rad(aoa)))
         plot(ax, aoa, df, ["C_tf"], start, end, np.cos(np.deg2rad(aoa)), apply=lambda x: np.multiply(x, -1))
         plot(ax, aoa, df, ["C_dus"], start, end)
         fig.suptitle(title)
