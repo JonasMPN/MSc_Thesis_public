@@ -723,7 +723,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             plot: dict[str, list[str]],
             data: dict[str, pd.DataFrame|dict],
             map_column_to_settings: Callable,
-            apply: dict[str, Callable]={"aoa": np.rad2deg},
+            # apply: dict[str, Callable]={"aoa": np.rad2deg},
+            apply: dict[str, Callable]={"aoa": np.rad2deg, "damp": lambda x: -x, "stiff": lambda x: -x}, #todo JUST A TEMPORARY HACK, THE SIGN HAS NOW BEEN CHANGED IN .save() OF ThreeDOFsAirfoil!!! TAKE OUT FOR NEW SIMULATIONS
             time_frame: tuple[float, float]=None) -> dict[str, matplotlib.axes.Axes]:
         if time_frame is not None:
             time_ids = np.logical_and(self.time >= time_frame[0], self.time <= time_frame[1])
@@ -1887,8 +1888,8 @@ def _combined_LOC_amplitude(
     velocities = np.sort(df_combinations["velocity"].unique())
     aoas = np.sort(df_combinations["alpha"].unique())[::-1]
 
-    # aoa_types = ["alpha_eff", "alpha_qs"]
-    aoa_types = ["alpha_qs"]
+    aoa_types = ["alpha_eff", "alpha_qs"]
+    # aoa_types = ["alpha_qs"]
     data_params = ["ampl_x", "ampl_y", "conv_x", "conv_y"] + aoa_types
     data = {
         "ffiles_write": {param: join(dir_plots, param) for param in data_params},
@@ -1899,8 +1900,8 @@ def _combined_LOC_amplitude(
             "ampl_y": r"flapwise LCO amplitude (\unit{\metre})",
             "conv_x": r"rel. change in edgewise amplitude (\unit{\percent})",
             "conv_y": r"rel. change in flapwise amplitude (\unit{\percent})",
-            "alpha_eff": r"$\alpha_{\text{eff}}$ (\unit{\degree})",
-            "alpha_qs": r"$\alpha_{\text{qs}}$ (\unit{\degree})"
+            "alpha_eff": r"$\max{\left(\alpha_{\text{eff}}\right)}$ (\unit{\degree})",
+            "alpha_qs": r"$\max{\left(\alpha_{\text{qs}}\right)}$ (\unit{\degree})"
         }
     }
 
@@ -1988,6 +1989,9 @@ def _combined_LOC_amplitude(
         "BL_AEROHOR": "AEROHOR",
         "qs": "quasi-steady"
     }
+    scaling["conv_x"] = (-3, 3)
+    data["values"]["conv_x"][data["values"]["conv_x"]>0.03] = 0.03
+    data["values"]["conv_x"][data["values"]["conv_x"]< -0.03] = -0.03
     for param in data_params:
         fig, ax = plt.subplots()
         
@@ -2032,8 +2036,8 @@ def combined_LOC_amplitude(
     }
     scaling = None
     if dirs_scaling is not None:
-        # scaling = {param: [1e10, -1e10] for param in ["ampl_x", "ampl_y", "conv_x", "conv_y", "alpha_eff", "alpha_qs"]}
-        scaling = {param: [1e10, -1e10] for param in ["ampl_x", "ampl_y", "conv_x", "conv_y", "alpha_qs"]}
+        scaling = {param: [1e10, -1e10] for param in ["ampl_x", "ampl_y", "conv_x", "conv_y", "alpha_eff", "alpha_qs"]}
+        # scaling = {param: [1e10, -1e10] for param in ["ampl_x", "ampl_y", "conv_x", "conv_y", "alpha_qs"]}
         for dir_scaling in dirs_scaling:
             dir_plot = join(dir_scaling, "plots")
             for param in scaling:
