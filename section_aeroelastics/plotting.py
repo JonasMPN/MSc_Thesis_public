@@ -1,6 +1,6 @@
 from plot_utils import Shapes, PlotPreparation, AnimationPreparation, PlotHandler, get_colourbar
 from calculations import Rotations
-from defaults import DefaultPlot, DefaultStructure, _c, _c_fill, _colormap, _fcolormap
+from defaults import DefaultPlot, DefaultStructure, _c, _c_fill, _colormap, _fcolormap, _cmap_colours
 import pandas as pd
 import numpy as np
 import json
@@ -10,6 +10,7 @@ from matplotlib.collections import LineCollection
 import matplotlib
 import matplotlib.ticker as ticker
 import matplotlib.colors as mcolors
+from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm, Normalize
 from os.path import join, isdir, isfile
 from os import listdir
 from scipy.signal import find_peaks
@@ -1886,7 +1887,8 @@ def _combined_LOC_amplitude(
     velocities = np.sort(df_combinations["velocity"].unique())
     aoas = np.sort(df_combinations["alpha"].unique())[::-1]
 
-    aoa_types = ["alpha_eff", "alpha_qs"]
+    # aoa_types = ["alpha_eff", "alpha_qs"]
+    aoa_types = ["alpha_qs"]
     data_params = ["ampl_x", "ampl_y", "conv_x", "conv_y"] + aoa_types
     data = {
         "ffiles_write": {param: join(dir_plots, param) for param in data_params},
@@ -1973,33 +1975,43 @@ def _combined_LOC_amplitude(
     }
     tmp = root_dir.replace("\\", "/")
     split = tmp.split("/")
-    model = [part for part in split if "BL" in part][0]
+    model = [part for part in split if "BL" in part]
+    if len(model) == 1:
+        model = model[0]
+    else:
+        model = [part for part in split if "qs" in part][0]
+
     map_model = {
         "BL_openFAST_Cl_disc": "HGM openFAST",
         "BL_openFAST_Cl_disc_f_scaled": r"HGM $f$-scaled",
         "BL_first_order_IAG2": "1st-order IAG",
-        "BL_AEROHOR": "AEROHOR"
+        "BL_AEROHOR": "AEROHOR",
+        "qs": "quasi-steady"
     }
     for param in data_params:
         fig, ax = plt.subplots()
-        if scaling is not None:
-            ticks, norm, levels = get_norm_and_ticks(*scaling[param], n_levels=n_levels) 
-        else:
-            ticks, norm, levels = None, None, n_levels
         
         vals = data["values"][param]
         if param in apply:
             vals = apply[param](vals)
-        cf = ax.contourf(v, a, vals, norm=norm, cmap=_fcolormap(n_levels), levels=levels)
+
+        if scaling is not None:
+            ticks, norm, cmap, levels = _cbar_setup(*scaling[param], n_levels=n_levels) 
+        else:
+            ticks, norm, cmap, levels = _cbar_setup(vals.min(), vals.max(), n_levels=n_levels) 
+        
+        cf = ax.contourf(v, a, vals, norm=norm, cmap=cmap, levels=levels)
         cf.set_edgecolor("face")
 
         cb = fig.colorbar(cf, ax=ax, ticks=ticks, label=data["cb_labels"][param])
+        ticks = cb.get_ticks()
+        cb.set_ticks(np.round(ticks, 1))
         cb.ax.minorticks_off()
         cb.outline.set_visible(False)
         if add_resolution:
             ax.plot(points[:, 0], points[:, 1], "ok", ms=0.4)
         handler = PlotHandler(fig, ax)
-        handler.update(x_labels=r"wind speed (\metre\per\second)", y_labels=r"steady angle of attack (\degree)", 
+        handler.update(x_labels=r"wind speed (\metre\per\second)", y_labels=r"steady-state angle of attack (\degree)", 
                        titles=map_model[model])
         handler.save(join(dir_plots, f"LCO_{param}.pdf"))
 
@@ -2020,7 +2032,8 @@ def combined_LOC_amplitude(
     }
     scaling = None
     if dirs_scaling is not None:
-        scaling = {param: [1e10, -1e10] for param in ["ampl_x", "ampl_y", "conv_x", "conv_y", "alpha_eff", "alpha_qs"]}
+        # scaling = {param: [1e10, -1e10] for param in ["ampl_x", "ampl_y", "conv_x", "conv_y", "alpha_eff", "alpha_qs"]}
+        scaling = {param: [1e10, -1e10] for param in ["ampl_x", "ampl_y", "conv_x", "conv_y", "alpha_qs"]}
         for dir_scaling in dirs_scaling:
             dir_plot = join(dir_scaling, "plots")
             for param in scaling:
@@ -2075,9 +2088,18 @@ def combined_LOC_amplitude(
         )
         
 
-def get_norm_and_ticks(v_min: float, v_max: float, n_levels: int=300):
+def _cbar_setup(v_min: float, v_max: float, n_levels: int=300):
     ticks = ticker.MaxNLocator().tick_values(v_min, v_max)
     levels = np.linspace(ticks[0], ticks[-1], n_levels)
-    return ticks, mcolors.BoundaryNorm(boundaries=levels, ncolors=n_levels), levels
+    if ticks[0] < 0 and ticks[-1] > 0:
+        cmap = LinearSegmentedColormap.from_list("Tol_muted_cmap", _cmap_colours, N=n_levels)
+        norm = TwoSlopeNorm(vmin=ticks[0], vcenter=0, vmax=ticks[-1])
+    elif ticks[-1] <= 0:
+        cmap = LinearSegmentedColormap.from_list("Tol_muted_cmap", _cmap_colours[:2], N=n_levels)
+        norm = Normalize(vmin=ticks[0], vmax=0)
+    elif ticks[0] >= 0:
+        cmap = LinearSegmentedColormap.from_list("Tol_muted_cmap", _cmap_colours[1:], N=n_levels)
+        norm = Normalize(vmin=0, vmax=ticks[-1])
+    return ticks, norm, cmap, levels
         
     
