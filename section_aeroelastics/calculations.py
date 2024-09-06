@@ -356,10 +356,11 @@ class ThreeDOFsAirfoil(SimulationResults, Rotations):
                     continue
                 files[filename] = list(set(files[filename]+params))
         #todo add error if use_default==False and files==None in method call
-        apply = {
-            "damp": lambda vals: np.multiply(-1, vals),
-            "stiff": lambda vals: np.multiply(-1, vals),
-        }
+        # apply = {
+        #     "damp": lambda vals: np.multiply(-1, vals),
+        #     "stiff": lambda vals: np.multiply(-1, vals),
+        # }
+        apply = None
         save_ids = None
         if save_last is not None:
             save_ids = self.time >= self.time[-1]-save_last
