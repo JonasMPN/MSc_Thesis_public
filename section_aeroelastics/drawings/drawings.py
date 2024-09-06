@@ -4,9 +4,12 @@ import numpy as np
 import matplotlib as mpl
 from scipy.interpolate import interp1d
 import json
-
+from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
 
 _plot_backend_latex = True
+# fig_size =  "textwidth"
+# fig_size =  "half_textwidth"
+fig_size =  "page_height"
 if _plot_backend_latex:
     mpl.use("pgf")
     plt.rcParams.update({
@@ -28,20 +31,96 @@ if _plot_backend_latex:
         "ytick.color": "#212427",
         "xtick.labelcolor": "#212427",
         "ytick.labelcolor": "#212427",
+    })
+
+if fig_size == "textwidth":
+    plt.rcParams.update({
+        "axes.labelsize": 14,
+        "axes.titlesize": 14,
+        "xtick.labelsize": 12,
+        "ytick.labelsize": 12,
+        "legend.fontsize": 12,
+    })
+elif fig_size == "half_textwidth":
+    plt.rcParams.update({
         "axes.labelsize": 18,
+        "axes.titlesize": 18,
         "xtick.labelsize": 16,
         "ytick.labelsize": 16,
         "legend.fontsize": 16,
     })
+elif fig_size == "page_height":
+    plt.rcParams.update({
+        "axes.labelsize": 10,
+        "axes.titlesize": 10,
+        "xtick.labelsize": 8,
+        "ytick.labelsize": 8,
+        "legend.fontsize": 8,
+    })
+
+
+def full_range_to_normalised(*args):
+    return [[val/256 for val in vals] for vals in args]
+_cmap_colours = ["#94CBEC", "#DCCD7D", "#2E2585"]
+
+
+# palette names available: Paul Tol, SSP, Tableu10ColorBlind
+_palette_name = "Paul Tol"  # used for all lines in plots (also such that have None as linstyle)
+_fill_name = "Paul Tol"  # used for filling polygons
+_c_all = {
+    # https://www.nceas.ucsb.edu/sites/default/files/2022-06/Colorblind%20Safe%20Color%20Schemes.pdf
+    "Paul Tol": full_range_to_normalised(*[  
+        (148, 203, 236),  # sky blue, #94CBEC
+        (194, 106, 119),  # skin-pink, #C26A77
+        (51, 117, 56),  # medium green, #337538
+        (93, 168, 153),  # something between green and blue, #5DA899
+        (46, 37, 133),  # dark blue, #2E2585
+        (221, 221, 211),  # light grey, #DDDDDD
+        (220, 205, 125),  # light ocker, #DCCD7D
+        (159, 74, 150),  # pink, #9F4A96
+        (126, 41, 84),  # violet, #7E2954
+        ]),
+    "SSP": [ # https://www.simplifiedsciencepublishing.com/resources/best-color-palettes-for-scientific-figures-and-data-visualizations
+        "#003a7d",  # dark blue
+        "#008dff",  # medium blue
+        "#ff73b6",  # pink
+        "#c701ff",  # purple
+        "#4ecb8d",  # green
+        "#ff9d3a",  # orange
+        "#f9e858",  # yellow
+        "#d83034",  # red
+    ],
+    # https://tableaufriction.blogspot.com/2012/11/finally-you-can-use-tableau-data-colors.html
+    "Tableu10ColorBlind": full_range_to_normalised(*[
+        (0, 107, 164),  # blue, #006BA4
+        (255, 128, 14),  # orange, #FF800E
+        (171, 171, 171),  # light grey, #ABABAB
+        (89, 89, 89),  # dark grey, #595959
+        (95, 158, 209),  # sky blue, #5F9ED1
+        (200, 82, 0),  # brown, #C85200
+        (137, 137, 137),  # medium grey, #898989
+        (163, 200, 236),  # light sky blue, #A3C8EC
+        (207, 207, 207),  # very light grey, #CFCFCF
+        (255, 188, 121),  # light orange, #FFBC79
+        ])   
+}
+_colormap = LinearSegmentedColormap.from_list("Tol_muted_cmap", ["#DCCD7D", "#94CBEC", "#2E2585"], N=256)
+def _fcolormap(n_levels):
+    return LinearSegmentedColormap.from_list("Tol_muted_cmap", ["#DCCD7D", "#94CBEC", "#2E2585"], N=n_levels)
+
+_c = _c_all[_palette_name]
+_c_fill = _c_all[_fill_name]
+_betterblack = "#212427"
+
 
 
 do = {
-    "profile": False,
+    "profile": True,
     "tors_spring": False,
     "tors_damper": False,
     "Cn_vs_Cl": False,
-    "Kirchhoff_HGM": False,
-    "oF_vs_f_scaled": True
+    "Kirchhoff_HGM": True,
+    "oF_vs_f_scaled": False
 }
 
 colour = "#212427"  # better black
@@ -162,19 +241,15 @@ if do["Kirchhoff_HGM"]:
     Kirchhoff = C_lslope*(aoas-alpha_0)*((1+np.sqrt(fs))/2)**2
     HGM = C_lslope*(aoas-alpha_0)*fs+(1-fs)*C_lfs(aoas)
 
-    # fig, ax = plt.subplots()
-    # cf = ax.contourf(aoas, fs, HGM, cmap=plt.get_cmap("RdYlGn_r"), levels=100)
-    # fig.colorbar(cf, ax=ax, label="% rel. change in amplitude (-)")
-    # fig.savefig("HGM.pdf")
-
-    # fig, ax = plt.subplots()
-    # cf = ax.contourf(aoas, fs, Kirchhoff, cmap=plt.get_cmap("RdYlGn_r"), levels=100)
-    # fig.colorbar(cf, ax=ax, label="% rel. change in amplitude (-)")
-    # fig.savefig("Kirchhoff.pdf")
-    
+    # colors = ["#DCCD7D", "#94CBEC", "#2E2585"]
+    cmap = LinearSegmentedColormap.from_list("Tol_muted_cmap", _cmap_colours, N=300)
+    # Define the normalization for your data
+    norm = TwoSlopeNorm(vmin=-19, vcenter=0, vmax=50)
+        
+    levels = 300
     fig, ax = plt.subplots()
     rel_diff = (HGM-Kirchhoff)/HGM*1e2
-    cf = ax.contourf(np.rad2deg(aoas), fs, (HGM-Kirchhoff)/HGM*1e2, cmap=plt.get_cmap("RdYlGn_r"), levels=300)
+    cf = ax.contourf(np.rad2deg(aoas), fs, (HGM-Kirchhoff)/HGM*1e2, norm=norm, cmap=cmap, levels=levels)
     cbar = fig.colorbar(cf, ax=ax, label="% rel. difference between the Kirchhoff and HGM approach")
     ax.set_xlabel(r"$\alpha$ (\unit{\degree})")
     ax.set_ylabel(r"$f_l$ (\unit{-}) and $x_4$ (\unit{-})")
