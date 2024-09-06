@@ -35,11 +35,11 @@ if _plot_backend_latex:
 
 if fig_size == "textwidth":
     plt.rcParams.update({
-        "axes.labelsize": 14,
-        "axes.titlesize": 14,
-        "xtick.labelsize": 12,
-        "ytick.labelsize": 12,
-        "legend.fontsize": 12,
+        "axes.labelsize": 12,
+        "axes.titlesize": 12,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+        "legend.fontsize": 10,
     })
 elif fig_size == "half_textwidth":
     plt.rcParams.update({
@@ -102,9 +102,12 @@ _c_all = {
         (255, 188, 121),  # light orange, #FFBC79
         ])   
 }
-_colormap = LinearSegmentedColormap.from_list("Tol_muted_cmap", ["#DCCD7D", "#94CBEC", "#2E2585"], N=256)
+# _cmap_colours = ["#DCCD7D", "#94CBEC", "#2E2585"]
+# _cmap_colours = ["#DCCD7D", "#94CBEC", "#C26A77"]
+_cmap_colours = ["#94CBEC", "#DCCD7D", "#2E2585"]
+_colormap = LinearSegmentedColormap.from_list("Tol_muted_cmap", _cmap_colours, N=256)
 def _fcolormap(n_levels):
-    return LinearSegmentedColormap.from_list("Tol_muted_cmap", ["#DCCD7D", "#94CBEC", "#2E2585"], N=n_levels)
+    return LinearSegmentedColormap.from_list("Tol_muted_cmap", _cmap_colours, N=n_levels)
 
 _c = _c_all[_palette_name]
 _c_fill = _c_all[_fill_name]
