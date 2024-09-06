@@ -43,9 +43,9 @@ def set_do(
     return do
 
 do = {
-    "simulate": True,  # run a simulation
-    "post_calc": False,  # peform post calculations
-    "plot_results": False,  # plot results,
+    "simulate": False,  # run a simulation
+    "post_calc": True,  # peform post calculations
+    "plot_results": True,  # plot results,
     "plot_results_fill": False,
     "plot_coupled_timeseries": False,
     "animate_results": False,
@@ -73,8 +73,8 @@ n_processes = 2  # for sim_type="forced" and sim_type="free_parallel".
 # aero_scheme = "qs"
 # aero_scheme = "BL_openFAST_Cl_disc"
 # aero_scheme = "BL_openFAST_Cl_disc_f_scaled"
-# aero_scheme = "BL_AEROHOR"
-aero_scheme = "BL_first_order_IAG2"
+aero_scheme = "BL_AEROHOR"
+# aero_scheme = "BL_first_order_IAG2"
 # aero_scheme = "BL_Staeblein"
 
 file_polar = "polars_new.dat"
@@ -286,7 +286,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             # post_calculations_parallel(root_cases, alpha_lift, n_processes, aoa_thresholds)
 
             # to do post calculations on only one, use the following lines
-            case_id = 356
+            case_id = 387
             post_calc = PostCaluculations(dir_sim_res=join(root, "simulation", sim_type, aero_scheme, case_name, 
                                                            str(case_id)),
                                           alpha_lift=alpha_lift, coordinate_system_structure=coordinate_system)
@@ -300,12 +300,12 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             post_calc.work_per_cycle()
 
     if plot_results:
-        time_frame = (0, 600)
+        time_frame = (592, 600)
         file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
         if sim_type == "free":
             dir_sim = join(root, "simulation", "free", aero_scheme, case_name)  # define path to the root of the simulation results
         elif "forced" in sim_type or "parallel" in sim_type:
-            case_id = "356"
+            case_id = "387"
             dir_sim = join(root, "simulation", sim_type, aero_scheme, case_name, case_id)
         dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
         plotter = Plotter(file_profile, dir_sim, dir_plots, structure_def["coordinate_system"]) 
@@ -376,10 +376,10 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
     if plot_combined_LOC_amplitude:
         schemes = [
             "BL_openFAST_Cl_disc", 
-            # "BL_openFAST_Cl_disc_f_scaled", 
-            # "BL_AEROHOR", 
-            # "BL_first_order_IAG2"
-            "qs"
+            "BL_openFAST_Cl_disc_f_scaled", 
+            "BL_AEROHOR", 
+            "BL_first_order_IAG2"
+            # "qs"
             ]
         scaling_dirs = [
             join(root, "simulation", sim_type, scheme, case_name) for scheme in schemes
