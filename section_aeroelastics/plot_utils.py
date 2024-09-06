@@ -434,9 +434,9 @@ class PlotPreparation:
         y_labels = {
             "profile": "tangential (m)",
             "aoa": r"angle of attack (\degree)",
-            "aero": "aero (N) or (N.m)",
-            "damp": "struct. damping (N) or (N.m)",
-            "stiff": "struct. stiffness (N) or (N.m)",
+            "aero": "aero (N.m^{-1}) or (N)",
+            "damp": "struct. damping (N.m^{-1}) or (N)",
+            "stiff": "struct. stiffness (N.m^{-1}) or (N)",
         }
         aspect = {
             "profile": {"aspect": "equal"}
@@ -457,7 +457,7 @@ class PlotPreparation:
         :rtype: tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, PlotHandler]
         """
         fig, axs = plt.subplot_mosaic([["profile", "total", "power"],
-                                       ["profile", "kinetic", "potential"]], figsize=(10, 5), tight_layout=True,
+                                       ["profile", "potential", "kinetic"]], figsize=(10, 5), tight_layout=True,
                                       dpi=50)
         handler = PlotHandler(fig, axs)
         x_labels = {
@@ -469,10 +469,10 @@ class PlotPreparation:
         }
         y_labels = {
             "profile": "tangential (m)",
-            "total": "energy (N.m)",
-            "power": "power (N.m.s^{-1})",
-            "kinetic": "kinetic energy (N.m)",
-            "potential": "potential energy (N.m)",
+            "total": "energy (N)",
+            "power": "power (N.s^{-1})",
+            "kinetic": "kinetic energy (N)",
+            "potential": "potential energy (N)",
         }
         aspect = {
             "profile": "equal"
