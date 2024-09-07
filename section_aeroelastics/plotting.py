@@ -80,11 +80,11 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         
         # get final position of the profile. Displace it such that the qc is at (0, 0) at t=0.
         use_ids = None
-        postfix = ""
         if time_frame is not None:
             use_ids = np.logical_and(self.time >= time_frame[0], self.time <= time_frame[1])
             if use_ids.sum() != self.time.size:
-                postfix = f"_{time_frame[0]}_{time_frame[1]}"
+                stime_frame = f"{time_frame[0]}_{time_frame[1]}"
+
         pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
         pos = pos if use_ids is None else pos[use_ids, :]
         rot = self._rot.active_2D(pos[-1, 2])
@@ -121,7 +121,12 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         axs = self._plot_to_mosaic(axs, plot, dfs, param_name, time_frame=time_frame)
         legend = {ax: True if ax!="profile" else False for ax in axs}
         handler.update(legend=legend)
-        handler.save(join(self.dir_plots, f"forces{postfix}.pdf"))
+        dir_plot = join(self.dir_plots, "lines")
+        if time_frame is not None:
+            save_file = join(dir_plot, "time_framed", stime_frame, f"forces_{stime_frame}.pdf")
+        else:
+            save_file = join(dir_plot, "forces.pdf")
+        handler.save(save_file)
                     
     def force_fill(self, equal_y: tuple[str]=None, alpha: int=0.2, peak_distance: int=400,
                    time_frame: tuple[float, float]=None, anchor_y: float=None):
@@ -135,6 +140,11 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         :rtype: None
         """
         fig, axs, handler = self._prepare_force_plot(equal_y)
+        
+        if time_frame is not None:
+            use_ids = np.logical_and(self.time >= time_frame[0], self.time <= time_frame[1])
+            if use_ids.sum() != self.time.size:
+                stime_frame = f"{time_frame[0]}_{time_frame[1]}"
         
         # get final position of the profile. Displace it such that the qc is at (0, 0) at t=0.
         pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
@@ -175,7 +185,12 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                                             time_frame=time_frame)
         legend = {ax: True if ax!="profile" else False for ax in axs}
         handler.update(legend=legend)
-        handler.save(join(self.dir_plots, "forces_fill.pdf"))
+        dir_plot = join(self.dir_plots, "fill")
+        if time_frame is not None:
+            save_file = join(dir_plot, "time_framed", stime_frame, f"forces_fill_{stime_frame}.pdf")
+        else:
+            save_file = join(dir_plot, "forces_fill.pdf")
+        handler.save(save_file)
 
     def energy(self, equal_y: tuple[str]=None, time_frame: tuple[float, float]=None, anchor_y: float=None):
         """Plots the history of the airfoil movement and different energies/power.
@@ -188,7 +203,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         :rtype: None
         """
         fig, axs, handler = self._prepare_energy_plot(equal_y)
-        
+        if time_frame is not None:
+            use_ids = np.logical_and(self.time >= time_frame[0], self.time <= time_frame[1])
+            if use_ids.sum() != self.time.size:
+                stime_frame = f"{time_frame[0]}_{time_frame[1]}"
         # get final position of the profile. Displace it such that the qc is at (0, 0) at t=0.
         use_ids = None
         postfix = ""
@@ -242,7 +260,12 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         axs = self._plot_to_mosaic(axs, plot, dfs, param_name, time_frame=time_frame)
         legend = {ax: True if ax!="profile" else False for ax in axs}
         handler.update(legend=legend)
-        handler.save(join(self.dir_plots, f"energy{postfix}.pdf"))
+        dir_plot = join(self.dir_plots, "lines")
+        if time_frame is not None:
+            save_file = join(dir_plot, "time_framed", stime_frame, f"energy_{stime_frame}.pdf")
+        else:
+            save_file = join(dir_plot, "energy.pdf")
+        handler.save(save_file)
     
     def energy_fill(self, equal_y: tuple[str]=None, alpha: int=0.2, peak_distance: int=400,
                     time_frame: tuple[float, float]=None, anchor_y: float=None):
@@ -256,7 +279,11 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         :rtype: None
         """
         fig, axs, handler = self._prepare_energy_plot(equal_y)
-        
+
+        if time_frame is not None:
+            use_ids = np.logical_and(self.time >= time_frame[0], self.time <= time_frame[1])
+            if use_ids.sum() != self.time.size:
+                stime_frame = f"{time_frame[0]}_{time_frame[1]}"
         # get final position of the profile. Displace it such that the qc is at (0, 0) at t=0.
         pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
         rot = self._rot.active_2D(pos[-1, 2])
@@ -305,7 +332,12 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                                             time_frame=time_frame)
         legend = {ax: True if ax!="profile" else False for ax in axs}
         handler.update(legend=legend)
-        handler.save(join(self.dir_plots, "energy_fill.pdf"))
+        dir_plot = join(self.dir_plots, "fill")
+        if time_frame is not None:
+            save_file = join(dir_plot, "time_framed", stime_frame, f"energy_fill_{stime_frame}.pdf")
+        else:
+            save_file = join(dir_plot, "energy_fill.pdf")
+        handler.save(save_file)
 
     def Beddoes_Leishman(self, equal_y: tuple[str]=None, time_frame: tuple[float, float]=None, anchor_y: float=None):
         """Plots the history of the airfoil movement and different BL parameters.
@@ -321,12 +353,11 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         fig, axs, handler = self._prepare_BL_plot([*coeffs.keys()], equal_y)
         
         # get final position of the profile. Displace it such that the qc is at (0, 0) at t=0.
-        use_ids = None
-        postfix = ""
         if time_frame is not None:
             use_ids = np.logical_and(self.time >= time_frame[0], self.time <= time_frame[1])
             if use_ids.sum() != self.time.size:
-                postfix = f"_{time_frame[0]}_{time_frame[1]}"
+                stime_frame = f"{time_frame[0]}_{time_frame[1]}"
+
         pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
         pos = pos if use_ids is None else pos[use_ids, :]
         rot = self._rot.active_2D(pos[-1, 2])
@@ -352,7 +383,12 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         axs = self._plot_to_mosaic(axs, plot, dfs, param_name, time_frame=time_frame)
         legend = {ax: True if ax!="profile" else False for ax in axs}
         handler.update(legend=legend)
-        handler.save(join(self.dir_plots, f"BL{postfix}.pdf"))
+        dir_plot = join(self.dir_plots, "lines")
+        if time_frame is not None:
+            save_file = join(dir_plot, "time_framed", stime_frame, f"BL_{stime_frame}.pdf")
+        else:
+            save_file = join(dir_plot, "BL.pdf")
+        handler.save(save_file)
 
     def Beddoes_Leishman_fill(self, equal_y: tuple[str]=None, alpha: int=0.2, 
                               peak_distance: int=400, time_frame: tuple[float, float]=None, anchor_y: float=None):
@@ -367,7 +403,11 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         """
         coeffs = self._get_force_and_moment_coeffs(self.df_f_aero)
         fig, axs, handler = self._prepare_BL_plot([*coeffs.keys()], equal_y)
-        
+                
+        if time_frame is not None:
+            use_ids = np.logical_and(self.time >= time_frame[0], self.time <= time_frame[1])
+            if use_ids.sum() != self.time.size:
+                stime_frame = f"{time_frame[0]}_{time_frame[1]}"
         # get final position of the profile. Displace it such that the qc is at (0, 0) at t=0.
         pos = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
         rot = self._rot.active_2D(pos[-1, 2])
@@ -395,9 +435,16 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                                             time_frame=time_frame)
         legend = {ax: True if ax!="profile" else False for ax in axs}
         handler.update(legend=legend)
-        handler.save(join(self.dir_plots, "BL_fill.pdf"))
+        dir_plot = join(self.dir_plots, "fill")
+        if time_frame is not None:
+            save_file = join(dir_plot, "time_framed", stime_frame, f"BL_fill_{stime_frame}.pdf")
+        else:
+            save_file = join(dir_plot, "BL_fill.pdf")
+        handler.save(save_file)
 
-    def damping(self, 
+
+    def damping(self,
+                displacement_axis: str,
                 alpha_thresholds: tuple[float, list], 
                 time_frame: tuple[float, float]=None,
                 polar: tuple[str, list[float]|int]=None,
@@ -406,14 +453,14 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                 transient_time: float=30,
                 colours: list[str]=_c):
         dir_damping_plots = join(self.dir_plots, "damping")
-        pos_x = self.df_general["pos_x"].to_numpy().flatten()
+        pos = self.df_general[f"pos_{displacement_axis}"].to_numpy().flatten()
         alpha_th = self.df_f_aero[alpha_thresholds[0]].to_numpy()
         time = self.time
-
+        
         with open(join(self.dir_data, self._dfl_filenames["peaks"]), "r") as f_peaks:
             peaks = json.load(f_peaks)
-            ppeaks = np.asarray(peaks["p_pos_x"])
-            npeaks = np.asarray(peaks["n_pos_x"])
+            ppeaks = np.asarray(peaks[f"p_pos_{displacement_axis}"])
+            npeaks = np.asarray(peaks[f"n_pos_{displacement_axis}"])
 
         if time_frame is None:
             postfix = ""
@@ -430,7 +477,6 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             dir_time_framed = helper.create_dir(join(dir_damping_plots, "time_framed"))[0]
             prefix = helper.create_dir(join(dir_time_framed, postfix[1:]))[0]
 
-        
         # max_aoa = np.rad2deg(alpha_th[ppeaks[-2]:ppeaks[-1]]).max()  # only works for growing LCO
         max_aoa = np.rad2deg(alpha_th).max()  # needed for positive damping
         
@@ -465,15 +511,15 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                 break
             
         damping_ratio = []
-        amplitude = [(pos_x[ppeaks[0]]-pos_x[npeaks[0]])/2]
+        amplitude = [(pos[ppeaks[0]]-pos[npeaks[0]])/2]
         damping_ratio = []
         transient_end = None
         for i, (idx_ppeak, idx_npeak) in enumerate(zip(ppeaks[1:], npeaks[1:]), 1):
-            # mean = pos_x[ppeaks[max(0, i-4)]:ppeaks[min(ppeaks.size-1, i+4)]].mean()
-            # ampl = pos_x[idx_ppeak]-mean
+            # mean = pos[ppeaks[max(0, i-4)]:ppeaks[min(ppeaks.size-1, i+4)]].mean()
+            # ampl = pos[idx_ppeak]-mean
             # amplitude.append(ampl)
-            # log_dec = np.log((pos_x[ppeaks[i-1]]-mean)/(pos_x[idx_ppeak]-mean))
-            amplitude.append((pos_x[idx_ppeak]-pos_x[idx_npeak])/2)
+            # log_dec = np.log((pos[ppeaks[i-1]]-mean)/(pos[idx_ppeak]-mean))
+            amplitude.append((pos[idx_ppeak]-pos[idx_npeak])/2)
             log_dec = np.log(amplitude[i-1]/amplitude[i])
             damping_ratio.append(log_dec/(2*np.pi))
             if transient_time is not None and transient_time > time[0]:
@@ -540,7 +586,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                        titles=title, legend=True if transient_end is not None else False, grid={"axis": "y"})
         # ax.set_yticks([0.008, 0.01, 0.015])
         handler.save(join(prefix, f"damping{postfix}.pdf"))
-
+        
         map_to_us = {
             "C_d": r"$C_{d\text{,us}}$",
             "C_l": r"$C_{l\text{,us}}$",
@@ -556,6 +602,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                 alpha_lim = ax.get_xlim()
                 alpha_polar = df_polar["alpha"].to_numpy().flatten()
                 alpha_ids = np.logical_and(alpha_polar>=alpha_lim[0], alpha_polar<=alpha_lim[1])
+                if sum(alpha_ids) == 1:
+                    loc = alpha_ids.argmax()
+                    alpha_ids[loc+1] = True
+                    alpha_ids[loc-1] = True
                 ax.plot(alpha_polar[alpha_ids], df_polar[coeff_name].iloc[alpha_ids], "--k")
                 handler = PlotHandler(fig, ax)
                 ax.spines[["top", "right"]].set_visible(False)
@@ -617,57 +667,82 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             handler.update(x_labels="amplitude (m)", y_labels="rel. work per period (-)", legend=True, titles=title)
             handler.save(join(prefix, f"work_pp_rel{postfix}.pdf"))
 
-    def couple_timeseries(self, cmap=_colormap, linewidth: float=1.2):
+    def couple_timeseries(self, cmap=_colormap, linewidth: float=1.2, time_frame: tuple[float, float]=None):
         df_polar = pd.read_csv("data/FFA_WA3_221/polars_new.dat", delim_whitespace=True)
-        a = (self.df_f_aero, "f_aero", "alpha_steady", r"$\alpha$ (deg)")
-        b = (self.df_f_aero, "f_aero", "alpha_eff", r"$\alpha_{\text{eff}}$ (deg)")
-        c = (self.df_f_aero, "f_aero", "C_lus", r"$C_{l,\text{us}}$ (-)")
-        d = (self.df_f_aero, "f_aero", "C_dus", r"$C_{d,\text{us}}$ (-)")
-        e = (self.df_f_aero, "f_aero", "f_steady", r"$f$ (-)")
-        f = (self.df_f_aero, "f_aero", "x4", r"$x_4$ (-)")
-        from_f_aero = [(self.df_f_aero, "f_aero", "aero_edge", r"$f_{\text{edge}}^{\text{aero}}$ (N)"), 
-                       (self.df_f_aero, "f_aero", "aero_flap", r"$f_{\text{flap}}^{\text{aero}}$ (N)"), 
-                       (self.df_f_aero, "f_aero", "aero_mom", r"$f_{\text{moment}}^{\text{aero}}$ (Nm)"),
+        if time_frame is not None:
+            use_ids = np.logical_and(self.time >= time_frame[0], self.time <= time_frame[1])
+            if use_ids.sum() != self.time.size:
+                stime_frame = f"{time_frame[0]}_{time_frame[1]}"
+
+        # a = (self.df_f_aero, "f_aero", "alpha_steady", r"$\alpha$ (\degree)")
+        # b = (self.df_f_aero, "f_aero", "alpha_eff", r"$\alpha_{\text{eff}}$ (\degree)")
+        # c = (self.df_f_aero, "f_aero", "C_lus", r"$C_{l,\text{us}}$ (-)")
+        # d = (self.df_f_aero, "f_aero", "C_dus", r"$C_{d,\text{us}}$ (-)")
+        # e = (self.df_f_aero, "f_aero", "f_steady", r"$f$ (-)")
+        # f = (self.df_f_aero, "f_aero", "x4", r"$x_4$ (-)")
+        from_f_aero = [(self.df_f_aero, "f_aero", "aero_edge", r"$f_{\text{edge}}^{\text{aero}}$ (\newton\per\metre)"), 
+                       (self.df_f_aero, "f_aero", "aero_flap", r"$f_{\text{flap}}^{\text{aero}}$ (\newton\per\metre)"), 
+                       (self.df_f_aero, "f_aero", "aero_mom", r"$f_{\text{moment}}^{\text{aero}}$ (\newton)"),
                        ]
-        from_power = [(self.df_power, "power", "aero_drag", r"$P_{\text{drag}}^{\text{aero}}$ (Nm/s)"),
-                      (self.df_power, "power", "aero_lift", r"$P_{\text{lift}}^{\text{aero}}$ (Nm/s)"),
-                      (self.df_power, "power", "aero_mom", r"$P_{\text{moment}}^{\text{aero}}$ (Nm/s)")]
-        from_energy = [(self.df_e_kin, "e_kin", "total", r"$E_{\text{total}}^{\text{kin}}$ (Nm)"),
-                       (self.df_e_pot, "e_pot", "total", r"$E_{\text{total}}^{\text{pot}}$ (Nm)")]
-        from_general = [(self.df_general, "general", "pos_edge", r"$x_{\text{edge}}$ (m)"),
-                        (self.df_general, "general", "vel_edge_xy", r"$u_{\text{edge}}$ (m/s)"),
-                        (self.df_general, "general", "pos_flap", r"$x_{\text{flap}}$ (m)"),
-                        (self.df_general, "general", "vel_flap_xy", r"$u_{\text{flap}}$ (m/s)"),
-                        (self.df_general, "general", "pos_tors", r"$x_{\text{torsion}}$ (deg)")]
+        from_power = [(self.df_power, "power", "aero_drag", r"$P_{\text{drag}}^{\text{aero}}$ (\newton\per\second)"),
+                      (self.df_power, "power", "aero_lift", r"$P_{\text{lift}}^{\text{aero}}$ (\newton\per\second)"),
+                      (self.df_power, "power", "aero_mom", r"$P_{\text{moment}}^{\text{aero}}$ (\newton\per\second)")]
+        from_energy = [(self.df_e_kin, "e_kin", "total", r"$E_{\text{total}}^{\text{kin}}$ (\newton)"),
+                       (self.df_e_pot, "e_pot", "total", r"$E_{\text{total}}^{\text{pot}}$ (\newton)")]
+        from_general = [(self.df_general, "general", "pos_edge", r"$x_{\text{edge}}$ (\metre)"),
+                        (self.df_general, "general", "vel_edge_xy", r"$u_{\text{edge}}$ (\metre\per\second)"),
+                        (self.df_general, "general", "pos_flap", r"$x_{\text{flap}}$ (\metre)"),
+                        (self.df_general, "general", "vel_flap_xy", r"$u_{\text{flap}}$ (\metre\per\second)"),
+                        (self.df_general, "general", "pos_tors", r"$x_{\text{torsion}}$ (\degree)")]
         # couples = [(a, b), (c, b), (d, b), (f, b), (b, from_general[0])]
         # couples = [(b, a), (b, c), (b, d), (b, f), (from_general[0], b)]
-        couples = [(from_general[1], from_general[0]), (from_general[2], from_general[0]), (from_general[2], from_general[1])]
+        # couples = [(from_general[1], from_general[0]), (from_general[2], from_general[0]), (from_general[2], from_general[1])]
         # couples = [(b, from_general[1])]
-        # couples = [p for p in product(from_f_aero, from_general)] + [p for p in product(from_power, from_general)]
+        couples = [p for p in product(from_f_aero, from_general)] + [p for p in product(from_power, from_general)]
         # couples = [(from_general[1], from_general[0]), (from_general[2], from_general[0]), 
         #             (from_general[2], from_general[1])]
         # couples += [(from_energy[0], from_energy[1])]
-        dir_plots_coupled_root = helper.create_dir(join(self.dir_plots, "coupled"))[0]
+
         time = self.df_general["time"].to_numpy()
+        if time_frame is None:
+            dir_plots_coupled_root = helper.create_dir(join(self.dir_plots, "coupled"))[0]
+        else:
+            time = time[use_ids]
+            dir_plots_coupled_root = helper.create_dir(join(self.dir_plots, "coupled", "time_framed", stime_frame))[0]
+            
         # because this column is used in the loop
         self.df_general["pos_tors"]= np.rad2deg(self.df_general["pos_tors"])
         for (df_specific, ds, col_specific, label_specific), (df_general, dg, col_general, label_general) in couples:
             dir_plots = helper.create_dir(join(dir_plots_coupled_root, f"{dg}_{ds}"))[0]
             save_to = join(dir_plots, f"{col_specific}_{col_general}.pdf")
-            val_general = df_general[col_general].to_numpy()
+            val_general = df_general[col_general]
             # because power values have one values fewer
             val_general = val_general if "P_" not in label_specific else val_general[:-1]
-            val_specifc = df_specific[col_specific].to_numpy()
             
-            # val_general = np.rad2deg(val_general)
-            # val_specifc = np.rad2deg(val_specifc)
+            val_general = val_general if time_frame is None else val_general.iloc[use_ids]
+            val_specifc = df_specific[col_specific] if time_frame is None else df_specific[col_specific].iloc[use_ids]
+
+            skip_points = max(int(val_specifc.size/self.dt_res), 1)
+            time = time[::skip_points]
+            val_general = val_general[::skip_points]
+            val_specifc = val_specifc[::skip_points]
+            
+            if "alpha" in col_specific:
+                val_specifc = np.rad2deg(val_specifc)
+            if "alpha" in col_general:
+                val_general = np.rad2deg(val_general)
+
             add = None
             if col_specific == "C_lus" and "alpha" in col_general:
                 add = (df_polar["alpha"], df_polar["C_l"])
             elif col_specific == "C_dus" and "alpha" in col_general:
                 add = (df_polar["alpha"], df_polar["C_d"])
+            elif col_specific == "C_mus" and "alpha" in col_general:
+                add = (df_polar["alpha"], df_polar["C_m"])
+
             self.coupled_timeseries(time, val_general, val_specifc,
                                     label_general, label_specific, cmap=cmap, linewidth=linewidth, save_to=save_to,add=add)
+            exit()
         self.df_general["pos_tors"]= np.deg2rad(self.df_general["pos_tors"])  # change the column back to rad
     
     @staticmethod
@@ -677,12 +752,14 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                            fig_and_ax: tuple=None, cbar_kwargs: dict={}):
         if fig_and_ax is None:
             fig, ax = plt.subplots()
+            ax.spines[["top", "right"]].set_visible(False)
+            hack = False
         else:
+            hack = True
             fig, ax = fig_and_ax
 
         points = np.asarray([val1, val2]).T.reshape(-1, 1, 2)
         segments = np.concatenate([points[:-1], points[1:]], axis=1)
-
         norm = plt.Normalize(time[0], time[-1])
         lc = LineCollection(segments, cmap=cmap, norm=norm, linewidth=linewidth, linestyle="-", joinstyle="round", 
                             capstyle="round")
@@ -691,14 +768,18 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         ax.autoscale()
         
         cbar = fig.colorbar(line, ax=ax, label="time (s)", **cbar_kwargs)
-        cbar.set_label(label= "time (s)", labelpad=-2)
+        if hack:
+            cbar.set_label(label= "time (s)", labelpad=-2)
+        else:
+            cbar.set_label(label= "time (s)")
         cbar.outline.set_visible(False)
         cbar.set_ticks([time[0], time[-1]])
 
-        # next three lines are a hack to properly display the horizontal cbar
-        cbar = fig.colorbar(line, ax=ax, label="time (s)")
-        cbar.set_ticks([time[0], time[-1]])
-        cbar.remove()
+        if hack:
+            # next three lines are a hack to properly display the horizontal cbar
+            cbar = fig.colorbar(line, ax=ax, label="time (s)")
+            cbar.set_ticks([time[0], time[-1]])
+            cbar.remove()
 
         if add is not None:
             min_x = val1.min()
@@ -723,8 +804,8 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
             plot: dict[str, list[str]],
             data: dict[str, pd.DataFrame|dict],
             map_column_to_settings: Callable,
-            # apply: dict[str, Callable]={"aoa": np.rad2deg},
-            apply: dict[str, Callable]={"aoa": np.rad2deg, "damp": lambda x: -x, "stiff": lambda x: -x}, #todo JUST A TEMPORARY HACK, THE SIGN HAS NOW BEEN CHANGED IN .save() OF ThreeDOFsAirfoil!!! TAKE OUT FOR NEW SIMULATIONS
+            apply: dict[str, Callable]={"aoa": np.rad2deg},
+            # apply: dict[str, Callable]={"aoa": np.rad2deg, "damp": lambda x: -x, "stiff": lambda x: -x}, #todo JUST A TEMPORARY HACK, THE SIGN HAS NOW BEEN CHANGED IN .save() OF ThreeDOFsAirfoil!!! TAKE OUT FOR NEW SIMULATIONS
             time_frame: tuple[float, float]=None) -> dict[str, matplotlib.axes.Axes]:
         if time_frame is not None:
             time_ids = np.logical_and(self.time >= time_frame[0], self.time <= time_frame[1])
@@ -747,8 +828,10 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                 time = base_time
                 time = base_time if ax != "power" else base_time[:-1]
                 use_ids = time_ids if ax != "power" else time_ids[:-1]
-                vals = vals if time_frame is None else vals[use_ids]                
-                axes[ax].plot(time[::skip_points], vals[::skip_points],
+                vals = vals if time_frame is None else vals[use_ids]
+                if vals.size == time.size+1:  #todo look at this funky business at some point
+                    vals = vals.iloc[:-1]
+                axes[ax].plot(time[::skip_points], vals.iloc[::skip_points],
                               **self.plt_settings[map_column_to_settings(col)])
         return axes
     
@@ -771,6 +854,7 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
         apply_to_axs = apply.keys()
         for ax, cols in plot.items():
             for col in cols:
+                # print(ax, col)
                 try: 
                     self.plt_settings[map_column_to_settings(col)]
                 except KeyError:
@@ -780,24 +864,26 @@ class Plotter(DefaultStructure, DefaultPlot, PlotPreparation):
                 use_ids = time_ids if ax != "power" else time_ids[:-1]
                 vals = vals if time_frame is None else vals[use_ids]
                 
-
                 ids_max = find_peaks(vals, distance=peak_distance)[0]
                 ids_min = find_peaks(-vals, distance=peak_distance)[0]
 
-                vals_max = vals[ids_max]
-                vals_min = vals[ids_min]
-                t_max = time[ids_max]
-                t_min = time[ids_min]
+                if ids_max.size > 2 and ids_min.size > 2:
+                    vals_max = vals[ids_max]
+                    vals_min = vals[ids_min]
+                    t_max = time[ids_max]
+                    t_min = time[ids_min]
 
-                fill_time = np.unique(np.sort(np.r_[t_max, t_min]))
-                vals_max_interp = interp1d(t_max, vals_max, fill_value="extrapolate")
-                vals_min_interp = interp1d(t_min, vals_min, fill_value="extrapolate")
-                plt_settings_no_label = self.plt_settings[map_column_to_settings(col)].copy()
-                plt_settings_no_label.pop("label")
-                axes[ax].plot(t_max, vals_max, **self.plt_settings[map_column_to_settings(col)])
-                axes[ax].plot(t_min, vals_min, **plt_settings_no_label)
-                axes[ax].fill_between(fill_time, vals_max_interp(fill_time), vals_min_interp(fill_time), alpha=alpha, 
-                                      facecolor=plt_settings_no_label["color"])
+                    fill_time = np.unique(np.sort(np.r_[t_max, t_min]))
+                    vals_max_interp = interp1d(t_max, vals_max, fill_value="extrapolate")
+                    vals_min_interp = interp1d(t_min, vals_min, fill_value="extrapolate")
+                    plt_settings_no_label = self.plt_settings[map_column_to_settings(col)].copy()
+                    plt_settings_no_label.pop("label")
+                    axes[ax].plot(t_max, vals_max, **self.plt_settings[map_column_to_settings(col)])
+                    axes[ax].plot(t_min, vals_min, **plt_settings_no_label)
+                    axes[ax].fill_between(fill_time, vals_max_interp(fill_time), vals_min_interp(fill_time), alpha=alpha, 
+                                        facecolor=plt_settings_no_label["color"])
+                else:
+                    axes[ax].plot(time, vals, **self.plt_settings[map_column_to_settings(col)])
         return axes
     
 
@@ -1882,26 +1968,30 @@ def _combined_LOC_amplitude(
         scaling: dict[str, list]=None,
         n_levels: int=500,
 ):   
-    dir_plots = helper.create_dir(join(root_dir, "plots"))[0]
+    dir_data = helper.create_dir(join(root_dir, "plots"))[0]
+    if scaling is not None:
+        dir_plots = helper.create_dir(join(dir_data, "scaled_plots"))[0]
+    else:
+        dir_plots = helper.create_dir(join(dir_data, "nonscaled_plots"))[0]
     df_combinations = pd.read_csv(join(root_dir, "combinations.dat"))
 
     velocities = np.sort(df_combinations["velocity"].unique())
     aoas = np.sort(df_combinations["alpha"].unique())[::-1]
 
-    aoa_types = ["alpha_eff", "alpha_qs"]
-    # aoa_types = ["alpha_qs"]
+    # aoa_types = ["alpha_eff", "alpha_qs"]
+    aoa_types = ["alpha_qs"]
     data_params = ["ampl_x", "ampl_y", "conv_x", "conv_y"] + aoa_types
     data = {
-        "ffiles_write": {param: join(dir_plots, param) for param in data_params},
-        "ffiles_read": {param: join(dir_plots, param+".npy") for param in data_params},
+        "ffiles_write": {param: join(dir_data, param) for param in data_params},
+        "ffiles_read": {param: join(dir_data, param+".npy") for param in data_params},
         "values": {param: None for param in data_params},
         "cb_labels": {
             "ampl_x": r"edgewise LCO amplitude (\unit{\metre})",
             "ampl_y": r"flapwise LCO amplitude (\unit{\metre})",
             "conv_x": r"rel. change in edgewise amplitude (\unit{\percent})",
             "conv_y": r"rel. change in flapwise amplitude (\unit{\percent})",
-            "alpha_eff": r"$\max{\left(\alpha_{\text{eff}}\right)}$ (\unit{\degree})",
-            "alpha_qs": r"$\max{\left(\alpha_{\text{qs}}\right)}$ (\unit{\degree})"
+            "alpha_eff": r"$\min{\left(\alpha_{\text{eff}}\right)}$ or $\max{\left(\alpha_{\text{eff}}\right)}$ (\unit{\degree})",
+            "alpha_qs": r"$\min{\left(\alpha_{\text{qs}}\right)}$ or $\max{\left(\alpha_{\text{qs}}\right)}$ (\unit{\degree})"
         }
     }
 
@@ -1925,8 +2015,17 @@ def _combined_LOC_amplitude(
         for i, row in df_combinations.iterrows():
             vel = row["velocity"]
             aoa = row["alpha"] 
+            # print(vel, aoa, i)
             dir_current = join(root_dir, str(i))
             df_aero = pd.read_csv(join(dir_current, "f_aero.dat"))
+            # df_gen = pd.read_csv(join(dir_current, "general.dat"))
+            # u = df_gen["inflow_x"].iloc[0]
+            # v = df_gen["inflow_y"].iloc[0]
+            # vel = np.round(round(np.sqrt(u**2+v**2)*2)/2, 1)
+            # aoa = np.round(round(np.rad2deg(df_aero["alpha_steady"].iloc[0])*2)/2, 1)
+            # if aoa == -24.5:
+            #     aoa = -25
+            # print(vel, aoa, "\n")
             pos = {}
             df = pd.read_csv(join(dir_current, "general.dat"), usecols=[f"pos_{direction}" for direction in directions])
             for direction in directions:
@@ -1961,8 +2060,13 @@ def _combined_LOC_amplitude(
                 end = ppeaks[-1]
                 if direction == directions[0]:
                     for aoa_type in aoa_types:
-                        aoa_max = df_aero[aoa_type].iloc[start:end].abs().max()
-                        data["values"][aoa_type][aoa_to_ind[aoa], vel_to_ind[vel]] = aoa_max
+                        aoa_max = df_aero[aoa_type].iloc[start:end].max()
+                        aoa_min = df_aero[aoa_type].iloc[start:end].min()
+                        if abs(aoa_max) > abs(aoa_min):
+                            exrteme_aoa = aoa_max
+                        else:
+                            exrteme_aoa = aoa_min
+                        data["values"][aoa_type][aoa_to_ind[aoa], vel_to_ind[vel]] = exrteme_aoa
         for param in data_params:
             np.save(data["ffiles_write"][param], data["values"][param])
             
@@ -1989,9 +2093,9 @@ def _combined_LOC_amplitude(
         "BL_AEROHOR": "AEROHOR",
         "qs": "quasi-steady"
     }
-    scaling["conv_x"] = (-3, 3)
-    data["values"]["conv_x"][data["values"]["conv_x"]>0.03] = 0.03
-    data["values"]["conv_x"][data["values"]["conv_x"]< -0.03] = -0.03
+    # scaling["conv_x"] = (-3, 3)
+    # data["values"]["conv_x"][data["values"]["conv_x"]>0.03] = 0.03
+    # data["values"]["conv_x"][data["values"]["conv_x"]< -0.03] = -0.03
     for param in data_params:
         fig, ax = plt.subplots()
         
@@ -2021,13 +2125,14 @@ def _combined_LOC_amplitude(
 
 
 def combined_LOC_amplitude(
-        root_dir: str,
+        root_dir: str|list[str],
         add_resolution: bool=True,
         cmap=_colormap,
         recalculate: bool=False,
         dirs_scaling: tuple[str]=None,
         n_levels: int=500,
 ):
+    root_dir = root_dir if isinstance(root_dir, list) else (root_dir,)
     apply = {
         "conv_x": lambda x: x*1e2,
         "conv_y": lambda x: x*1e2,
@@ -2036,8 +2141,8 @@ def combined_LOC_amplitude(
     }
     scaling = None
     if dirs_scaling is not None:
-        scaling = {param: [1e10, -1e10] for param in ["ampl_x", "ampl_y", "conv_x", "conv_y", "alpha_eff", "alpha_qs"]}
-        # scaling = {param: [1e10, -1e10] for param in ["ampl_x", "ampl_y", "conv_x", "conv_y", "alpha_qs"]}
+        # scaling = {param: [1e10, -1e10] for param in ["ampl_x", "ampl_y", "conv_x", "conv_y", "alpha_eff", "alpha_qs"]}
+        scaling = {param: [1e10, -1e10] for param in ["ampl_x", "ampl_y", "conv_x", "conv_y", "alpha_qs"]}
         for dir_scaling in dirs_scaling:
             dir_plot = join(dir_scaling, "plots")
             for param in scaling:
@@ -2070,20 +2175,10 @@ def combined_LOC_amplitude(
     # for k, v in scaling.items():
     #     print(k, v)
     # exit()
-
-    if root_dir == "all":
-        for directory in dirs_scaling:
-            _combined_LOC_amplitude(
-                root_dir=directory,
-                add_resolution=add_resolution,
-                cmap=cmap,
-                recalculate=recalculate,
-                scaling=scaling,
-                n_levels=n_levels
-            )
-    else:
+    
+    for root in root_dir:
         _combined_LOC_amplitude(
-            root_dir=root_dir,
+            root_dir=root,
             add_resolution=add_resolution,
             cmap=cmap,
             recalculate=recalculate,
