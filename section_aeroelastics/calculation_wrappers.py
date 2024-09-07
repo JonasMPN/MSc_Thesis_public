@@ -276,11 +276,11 @@ def _run_free(
         elif aero_scheme == "BL_AEROHOR":
             NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_AEROHOR", A1=0.3, A2=0.7, b1=0.7,
                                        b2=0.53, pitching_around=0.25, alpha_at=0.75, chord=structure_data["chord"], 
-                                       alpha_critical=14.2)
+                                       alpha_critical=14.2, tau_vortex_pure_decay=7)
         elif aero_scheme == "BL_first_order_IAG2":
             NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_first_order_IAG2", A1=0.3, 
                                        A2=0.7, b1=0.7, b2=0.53, pitching_around=0.25, alpha_at=0.75, 
-                                       chord=structure_data["chord"], alpha_critical=14.2)
+                                       chord=structure_data["chord"], alpha_critical=14.2, tau_vortex_pure_decay=7)
         elif aero_scheme == "BL_openFAST_Cl_disc":
             NACA_643_618.set_aero_calc(dir_airfoil, file_polar=file_polar, scheme="BL_openFAST_Cl_disc", A1=0.165, 
                                        A2=0.335, b1=0.0445, b2=0.3, pitching_around=0.25, alpha_at=0.75, 
