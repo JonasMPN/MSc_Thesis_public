@@ -44,10 +44,10 @@ def set_do(
 
 do = {
     "simulate": False,  # run a simulation
-    "post_calc": True,  # peform post calculations
-    "plot_results": True,  # plot results,
+    "post_calc": False,  # peform post calculations
+    "plot_results": False,  # plot results,
     "plot_results_fill": False,
-    "plot_coupled_timeseries": False,
+    "plot_coupled_timeseries": True,
     "animate_results": False,
     "plot_combined_forced": False,
     "plot_combined_LOC_amplitude": False
@@ -65,8 +65,8 @@ do = set_do(do=do,
 # root = "data/NACA_643_618"  # set which airfoil polars to use. Simulatenously defines to root for the simulation data
 root = "data/FFA_WA3_221"  # set which airfoil polars to use. Simulatenously defines to root for the simulation data
 
-# sim_type = "free"
-sim_type = "free_parallel"
+sim_type = "free"
+# sim_type = "free_parallel"
 # sim_type = "forced"
 n_processes = 2  # for sim_type="forced" and sim_type="free_parallel".
 
@@ -83,7 +83,9 @@ file_polar = "polars_new.dat"
 # alpha_lift = "alpha_qs" if aero_scheme == "qs" else "alpha_eff"
 alpha_lift = "alpha_qs"
 
-case_name = "LCO_final"
+# case_name = "LCO_final"
+case_name = "detailed_comparison"
+# case_name = "test"
 # case_name = "aoa_20_v_35_dt_0.0005"
 # case_name = "test_BL_openFAST"
 # case_name = "test_qs"
@@ -133,7 +135,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         # Otherwise, the NACA definition is used for "free" and "free_parallel" (not yet, do in future).
         dt = 0.001  # if dt<1e-5, the dt rounding in compress_oscillation() in calculation_utils.py needs to be adapted
         t_end = 600
-        save_last = 15  # the last 'save_last' seconds of the simulation will be saved
+        save_last = 600  # the last 'save_last' seconds of the simulation will be saved
         t = dt*np.arange(int(t_end/dt)+1)  # set the time array for the simulation
         NACA_643_618 = ThreeDOFsAirfoil(t, verbose=False)
         # set the calculation scheme for the aerodynamic forces
@@ -147,7 +149,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         elif aero_scheme == "BL_first_order_IAG2":
             NACA_643_618.set_aero_calc(root, file_polar=file_polar, scheme="BL_first_order_IAG2", A1=0.3, A2=0.7, 
                                        b1=0.7, b2=0.53, pitching_around=0.25, alpha_at=0.75, chord=chord, 
-                                       alpha_critical=14.2)
+                                       alpha_critical=14.2, tau_vortex_pure_decay=6)
         elif aero_scheme == "BL_openFAST_Cl_disc":
             NACA_643_618.set_aero_calc(root, file_polar=file_polar, scheme="BL_openFAST_Cl_disc", A1=0.165, A2=0.335,
                                        b1=0.0445, b2=0.3, pitching_around=0.25, alpha_at=0.75, chord=chord)
@@ -176,9 +178,9 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
                 json.dump(structure_def, f, indent=4)
             # alpha = 7  # staeb val
             # # alpha = 17.5
-            alpha = 20
+            alpha = 17.5
 
-            inflow = get_inflow(t, [(0, 0, 35, alpha)], init_velocity=0.1)
+            inflow = get_inflow(t, [(0, 0, 45, alpha)], init_velocity=0.1)
             approx_steady_x = True
             approx_steady_y = True
             approx_steady_tors = True if aero_scheme != "BL_AEROHOR" else False
@@ -277,7 +279,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             post_calc.power()  # calculate and save the work done by the aerodynamic and structural damping forces
             post_calc.kinetic_energy()  # calculate the edgewise, flapwise, and rotational kinetic energy
             post_calc.potential_energy()  # calculate the edgewise, flapwise, and rotational potential energy
-            post_calc.work_per_cycle()
+            post_calc.work_per_cycle(peaks="p_pos_y")
 
         if "forced" in sim_type or sim_type == "free_parallel":
             root_cases = join(root, "simulation", sim_type, aero_scheme, case_name)
@@ -286,7 +288,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             # post_calculations_parallel(root_cases, alpha_lift, n_processes, aoa_thresholds)
 
             # to do post calculations on only one, use the following lines
-            case_id = 387
+            case_id = 356
             post_calc = PostCaluculations(dir_sim_res=join(root, "simulation", sim_type, aero_scheme, case_name, 
                                                            str(case_id)),
                                           alpha_lift=alpha_lift, coordinate_system_structure=coordinate_system)
@@ -297,15 +299,15 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             post_calc.power()  # calculate and save the work done by the aerodynamic and structural damping forces
             post_calc.kinetic_energy()  # calculate the edgewise, flapwise, and rotational kinetic energy
             post_calc.potential_energy()  # calculate the edgewise, flapwise, and rotational potential energy
-            post_calc.work_per_cycle()
+            post_calc.work_per_cycle(peaks="p_pos_y")
 
     if plot_results:
-        time_frame = (592, 600)
+        time_frame = (20, 60)
         file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
         if sim_type == "free":
             dir_sim = join(root, "simulation", "free", aero_scheme, case_name)  # define path to the root of the simulation results
         elif "forced" in sim_type or "parallel" in sim_type:
-            case_id = "387"
+            case_id = "356"
             dir_sim = join(root, "simulation", sim_type, aero_scheme, case_name, case_id)
         dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
         plotter = Plotter(file_profile, dir_sim, dir_plots, structure_def["coordinate_system"]) 
@@ -313,13 +315,12 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         plotter.energy(time_frame=time_frame)  # plot various energies and work done by forces of the simulation
         if "BL" in aero_scheme:
             plotter.Beddoes_Leishman(time_frame=time_frame)
-        # plotter.damping(("alpha_eff", [25, 35]), 
-        #                 polar=["data/FFA_WA3_221/polars_new.dat", 5],
-        #                 time_frame=(0.1, 400),  transient_time=30)
+        plotter.damping("y", ("alpha_eff", [25, 35]), 
+                        polar=["data/FFA_WA3_221/polars_new.dat", 5],
+                        time_frame=(0.1, 600),  transient_time=None)
     
     if plot_results_fill:
-        5
-        peak_distance = 1000
+        peak_distance = 1500
         file_profile = join(root, "profile.dat")  # define path to file containing the profile shape data
         if sim_type == "free":
             dir_sim = join(root, "simulation", "free", aero_scheme, case_name)  # define path to the root of the simulation results
@@ -347,7 +348,7 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
             dir_sim = join(root, "simulation", sim_type, aero_scheme, case_name, case_id)
         dir_plots = join(dir_sim, "plots")  # define path to the directory that the results are plotted into
         plotter = Plotter(file_profile, dir_sim, dir_plots, structure_def["coordinate_system"]) 
-        plotter.couple_timeseries()
+        plotter.couple_timeseries(time_frame=(30,70))
 
     if animate_results:
         time_frame = (398.5, 400)
@@ -374,20 +375,30 @@ def main(simulate, post_calc, plot_results, plot_results_fill, plot_coupled_time
         combined_forced(join(root, "simulation", sim_type, aero_scheme, case_name))
 
     if plot_combined_LOC_amplitude:
-        schemes = [
+        schemes_scale = [
             "BL_openFAST_Cl_disc", 
             "BL_openFAST_Cl_disc_f_scaled", 
             "BL_AEROHOR", 
             "BL_first_order_IAG2"
             # "qs"
             ]
+        schemes_plot =  [
+            "BL_openFAST_Cl_disc", 
+            # "BL_openFAST_Cl_disc_f_scaled", 
+            # "BL_AEROHOR", 
+            # "BL_first_order_IAG2"
+            # "qs"
+            ]
         scaling_dirs = [
-            join(root, "simulation", sim_type, scheme, case_name) for scheme in schemes
+            join(root, "simulation", sim_type, scheme, case_name) for scheme in schemes_scale
+        ]
+        root_dirs = [
+            join(root, "simulation", sim_type, scheme, case_name) for scheme in schemes_plot
         ]
         # scaling_dirs = None
         combined_LOC_amplitude(
             # root_dir=join(root, "simulation", sim_type, aero_scheme, case_name),
-            root_dir="all",
+            root_dir=root_dirs,
             dirs_scaling=scaling_dirs, recalculate=False)
 
 if __name__ == "__main__":
