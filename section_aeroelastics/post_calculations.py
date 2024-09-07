@@ -190,7 +190,8 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         f_stiff = np.asarray([self.df_f_structural[col].to_numpy() for col in self._get_split("stiff")]).T
 
         f_aero_dl = self.project_2D(f_aero[:, :2], alpha_lift+position[:, 2])  # is now (drag, lift)
-        f_aero_ef = self.project_2D(f_aero[:, :2], position[:, 2])  # is now (edge, flap)
+        f_aero_ef = self.project_2D(f_aero[:, :2], position[:, 2])  # is now (-edge, flap)
+        f_aero_ef[:, 0] = -f_aero_ef[:, 0]  # is now (edge, flap)
 
         # projection
         # The projection is different whether the structural CS (meaning in which coordinate system the structural
@@ -199,13 +200,17 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         # The linear stiffness forces are the same but for coding consistency are separated nonetheless. External
         # forces and positions are unaffected by different structural CS. The different projections are needed 
         # because the damping happens in the system the structural parameters are defined in.
-        pos_ef = self.project_2D(position[:, :2], position[:, 2])  # is now in (edge, flap)
-        vel_ef_xy = self.project_2D(velocity[:, :2], position[:, 2])  # vel (edge, flap) as seen in xy
-        vel_ef_ef = self._v_ef(velocity, position, "ef")  # vel (edge, flap) as seen in ef
+        pos_ef = self.project_2D(position[:, :2], position[:, 2])  # is now in (-edge, flap)
+        pos_ef[:, 0] = -pos_ef[:, 0]  # is now in (edge, flap)
+        vel_ef_xy = self.project_2D(velocity[:, :2], position[:, 2])  # vel (-edge, flap) as seen in xy
+        vel_ef_xy[:, 0] = -vel_ef_xy[:, 0]  # is now in (edge, flap)
+        # vel_ef_ef = self._v_ef(velocity, position, "ef")  # vel (edge, flap) as seen in ef
         # if self._cs_struc == "xy":
         if True:
-            f_damp_ef = self.project_2D(f_damp[:, :2], position[:, 2])  # is now (edge, flap) in xy
-            f_stiff_ef = self.project_2D(f_stiff[:, :2], position[:, 2])  # is now (edge, flap) in xy
+            f_damp_ef = self.project_2D(f_damp[:, :2], position[:, 2])  # is now (-edge, flap) in xy
+            f_damp_ef[:, 0] = -f_damp_ef[:, 0]  # is now (edge, flap) in xy
+            f_stiff_ef = self.project_2D(f_stiff[:, :2], position[:, 2])  # is now (-edge, flap) in xy
+            f_stiff_ef[:, 0] = -f_stiff_ef[:, 0]  # is now (edge, flap) in xy
         elif self._cs_struc == "ef":
             f_damp_ef = self.damping[:2]*vel_ef_ef  # is now (edge, flap) in ef
             f_stiff_ef = self.stiffness[:2]*pos_ef  # is now (edge, flap) in ef
@@ -214,7 +219,7 @@ class PostCaluculations(Rotations, DefaultsSimulation):
         for i in range(2):
             self.df_general["pos_"+self._dfl_split["pos_projected"][i]] = pos_ef[:, i]
             self.df_general["vel_"+self._dfl_split["vel_projected_xy"][i]] = vel_ef_xy[:, i]
-            self.df_general["vel_"+self._dfl_split["vel_projected_ef"][i]] = vel_ef_ef[:, i]
+            # self.df_general["vel_"+self._dfl_split["vel_projected_ef"][i]] = vel_ef_ef[:, i]
 
             self.df_f_aero["aero_"+self._dfl_split["aero_projected_dl"][i]] = f_aero_dl[:, i]
             self.df_f_aero["aero_"+self._dfl_split["aero_projected_ef"][i]] = f_aero_ef[:, i]
@@ -229,7 +234,7 @@ class PostCaluculations(Rotations, DefaultsSimulation):
             columns.sort(key=str.lower)
             df.to_csv(join(self.dir_in, self._dfl_filenames[df_name]), index=None, columns=columns)
 
-    def write_peaks(self, cols: dict[str, list[str]]={"general": ["pos_x"]}):
+    def write_peaks(self, cols: dict[str, list[str]]={"general": ["pos_x", "pos_y"]}):
         peaks = {}
         time = pd.read_csv(join(self.dir_in, self._dfl_filenames["general"]))["time"].to_numpy().flatten()
         ff_peaks = join(self.dir_in, self._dfl_filenames["peaks"])
@@ -263,7 +268,8 @@ class PostCaluculations(Rotations, DefaultsSimulation):
             # prepare inputs for __init__ of PowerAndEnergy
             position_xyz = self.df_general[["pos_x", "pos_y", "pos_tors"]].to_numpy()
             previously_projected_data = [
-                (self.df_general, ["pos_edge", "pos_flap", "vel_edge_ef", "vel_flap_ef", "vel_edge_xy", "vel_flap_xy"]),
+                # (self.df_general, ["pos_edge", "pos_flap", "vel_edge_ef", "vel_flap_ef", "vel_edge_xy", "vel_flap_xy"]),
+                (self.df_general, ["pos_edge", "pos_flap", "vel_edge_xy", "vel_flap_xy"]),
                 (self.df_f_aero, ["aero_drag", "aero_lift"]),
                 (self.df_f_structural, ["damp_edge", "damp_flap"])
             ]
