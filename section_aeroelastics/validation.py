@@ -87,20 +87,22 @@ def run_BeddoesLeishman(
     alpha_speed = np.deg2rad(amplitude*omega*np.cos(omega*t))
     airfoil.pos = np.c_[np.zeros((overall_res, 2)), -alpha]
     airfoil.vel = np.c_[np.zeros((overall_res, 2)), -alpha_speed]
-    airfoil.inflow = inflow_speed*np.c_[np.ones_like(t), np.zeros_like(t)]
-    airfoil.inflow_angle = np.zeros_like(t)
+    airfoil.inflow = inflow_speed*np.c_[0.9*np.ones_like(t), 0.1*np.ones_like(t)]
+    # airfoil.inflow = inflow_speed*np.c_[1*np.ones_like(t), 0.0*np.ones_like(t)]
+    airfoil.inflow_angle = np.arctan(airfoil.inflow[:, 1]/airfoil.inflow[:, 0])
     airfoil.dt = np.r_[t[1:]-t[:-1], t[1]]
     airfoil.density = 1
     
     pitch_around = 0.5
     alpha_at = 0.75
+    aoa_crit = 14.2
     airfoil.set_aero_calc(dir_polar=dir_airfoil, file_polar=file_polar, scheme=BL_scheme, A1=A1, A2=A2, b1=b1, 
                           b2=b2, pitching_around=pitch_around, alpha_at=alpha_at,
-                          alpha_critical=15.1,
+                          alpha_critical=aoa_crit, tau_vortex_pure_decay=15,
                           )
     airfoil._init_aero_force(airfoil, chord=chord, pitching_around=pitch_around, alpha_at=alpha_at, A1=A1, A2=A2,
                              b1=b1, b2=b2,
-                             alpha_critical=15.1,
+                             alpha_critical=aoa_crit, tau_vortex_pure_decay=15,
                           )
     coeffs = np.zeros((t.size, 3))
     for i in range(overall_res):
@@ -472,9 +474,9 @@ if __name__ == "__main__":
     do = {
         "separation_point_calculation": False,
         "separation_point_plots": False,
-        "BL": False,
+        "BL": True,
         "plot_BL_results_meas": False,
-        "plot_BL_results_polar": False,
+        "plot_BL_results_polar": True,
         "plot_BL_comparison": False,
         "calc_HHT_alpha_response": False,
         "plot_HHT_alpha_response": False,
@@ -484,15 +486,15 @@ if __name__ == "__main__":
         "HHT_alpha_forced_composite": False,
         "HHT_alpha_step": False,
         "HHT_alpha_rotation": False,
-        "ef_vs_xy": True
+        "ef_vs_xy": False
     }
-    # dir_airfoil = "data/FFA_WA3_221"
-    # file_polar = "polars_new.dat"
-    dir_airfoil = "data/S801/"
-    file_polar = "polars/polars_G075.dat"
+    dir_airfoil = "data/FFA_WA3_221"
+    file_polar = "polars_new.dat"
+    # dir_airfoil = "data/S801/"
+    # file_polar = "polars/polars_G075.dat"
     dir_HHT_alpha_validation = "data/HHT_alpha_validation"
-    # BL_scheme = "BL_AEROHOR"
-    BL_scheme = "BL_first_order_IAG2"
+    BL_scheme = "BL_AEROHOR"
+    # BL_scheme = "BL_first_order_IAG2"
     # BL_scheme = "BL_openFAST_Cl_disc"
     # BL_scheme = "BL_openFAST_Cl_disc_f_scaled"
     # BL_scheme = "BL_Staeblein"
@@ -514,10 +516,10 @@ if __name__ == "__main__":
         plot_sep_points(join(dir_airfoil, "sep_point_tests", str(sep_point_test_res)), alpha_limits=(-30, 30))
 
     if do["BL"]:
-        validation_against = "measurement"
-        cases_defined_in = "cases.dat"
-        # validation_against = "polar"
-        # cases_defined_in = "cases_polar.dat"
+        # validation_against = "measurement"
+        # cases_defined_in = "cases.dat"
+        validation_against = "polar"
+        cases_defined_in = "cases_polar.dat"
         df_cases = pd.read_csv(join(dir_airfoil, "unsteady", cases_defined_in))
         for i, row in df_cases.iterrows():
             run_BeddoesLeishman(dir_airfoil, BL_scheme, validation_against, index_unsteady_data=i,
@@ -558,7 +560,7 @@ if __name__ == "__main__":
     if do["plot_BL_results_polar"]:
         ffile_polar = join(dir_airfoil, file_polar)
         plotter = BLValidationPlotter()
-        plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), ffile_polar)
+        # plotter.plot_preparation(join(dir_airfoil, "preparation", BL_scheme), ffile_polar)
         dir_validations = join(dir_airfoil, "validation", BL_scheme, "polar")
         df_cases = pd.read_csv(join(dir_airfoil, "unsteady", "cases_polar.dat"))
         for case_name in listdir(dir_validations):
