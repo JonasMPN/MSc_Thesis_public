@@ -575,7 +575,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.D_bl_n[i] = sim_res.D_bl_n[i-1]*np.exp(tmp_bl)+(sim_res.f_n[i]-sim_res.f_n[i-1])*np.exp(0.5*tmp_bl)
         sim_res.f_n_Dp[i] = sim_res.f_n[i]-sim_res.D_bl_n[i]
 
-        if sim_res.f_n_Dp[i] != 0:
+        if sim_res.f_n_Dp[i] >= 0:
             sim_res.C_nvisc[i] = self._C_n_slope*(sim_res.alpha_eff[i]-self._alpha_0n_visc)
             sim_res.C_nvisc[i] *= ((1+np.sqrt(sim_res.f_n_Dp[i]))/2)**2
         else:
@@ -624,11 +624,13 @@ class AeroForce(SimulationSubRoutine, Rotations):
         coefficients = np.asarray([sim_res.C_tf[i], 
                                    sim_res.C_nf[i]+sim_res.C_nv[i], 
                                    sim_res.C_mf[i]+sim_res.C_mV[i]+sim_res.C_mC[i]])
-        # not -pos[i, 2] in the next line because for pos[i, 2]=0, the C_t axis is opposite to the
-        # x axis.
-        rot_df = self.passive_3D_planar(sim_res.pos[i, 2]+qs_flow_angle)  # since it's C_t and C_n
-        coeffs = rot_df@coefficients # now as [-drag, lift, mom]
-        coeffs[0] = -coeffs[0]
+        rot_df = np.asarray([
+            [-np.cos(sim_res.alpha_qs[i]), np.sin(sim_res.alpha_qs[i]), 0],
+            [np.sin(sim_res.alpha_qs[i]), np.cos(sim_res.alpha_qs[i]), 0],
+            [0, 0, 1],
+        ])
+        coeffs = rot_df@coefficients # now as [drag, lift, mom]
+
         C_d_polar = self.C_d_polar(sim_res.alpha_qs[i])
         if coeffs[0] < C_d_polar and sim_res.alpha_qs[i]<self._alpha_crit:
             coeffs[0] = C_d_polar
@@ -659,13 +661,14 @@ class AeroForce(SimulationSubRoutine, Rotations):
         # define C_n, C_t, alpha_0n_inv, alpha_0n_visc, C_n_slope
         alpha_interp = np.linspace(self._raoa_given.min(), self._raoa_given.max(), resolution)
 
+        def C_t_visc(alpha):
+            return -np.cos(alpha)*self.C_d_polar(alpha) +np.sin(alpha)*self.C_l_polar(alpha)
+        self._C_t_visc = C_t_visc 
+
         def C_n_visc(alpha):
-            return np.cos(alpha)*self.C_l_polar(alpha)+np.sin(alpha)*self.C_d_polar(alpha)  
+            return np.sin(alpha)*self.C_d_polar(alpha)+np.cos(alpha)*self.C_l_polar(alpha)
         self._C_n_visc = C_n_visc
 
-        def C_t_visc(alpha):
-            return np.sin(alpha)*self.C_l_polar(alpha)-np.cos(alpha)*self.C_d_polar(alpha) 
-        self._C_t_visc = C_t_visc 
 
         dir_BL_data = helper.create_dir(join(self.dir_polar, "preparation", "BL_first_order_IAG2"))[0]
         ff_aero_characteristics = join(dir_BL_data, "aero_characteristics.json")
@@ -712,6 +715,7 @@ class AeroForce(SimulationSubRoutine, Rotations):
         sim_res.X_lag[-1] = 0
         sim_res.Y_lag[-1] = 0
         sim_res.f_n[-1] = self._f_n(sim_res.alpha_qs[-1])
+        sim_res.tau_vortex[-1] = 5*kwargs["tau_vortex_pure_decay"]
         
         if sim_res.f_n[-1] != 0:
             sim_res.C_nc[-1] = self._C_n_slope*(sim_res.alpha_qs[-1]-self._alpha_0n_inv) 
@@ -797,11 +801,13 @@ class AeroForce(SimulationSubRoutine, Rotations):
 
         # --------- Combining everything
         coefficients = np.asarray([sim_res.C_tf[i], sim_res.C_nf[i]+sim_res.C_nv[i], 0])
-        # not -pos[i, 2] in the next line because for pos[i, 2]=0, the C_t axis is opposite to the
-        # x axis.
-        rot_df = self.passive_3D_planar(sim_res.pos[i, 2]+qs_flow_angle)  # since it's C_t and C_n
-        coeffs = rot_df@coefficients # now as [-drag, lift, mom]
-        coeffs[0] = -coeffs[0]+self._C_d0  # C_t is facing forwards, C_d backwards
+        rot_df = np.asarray([
+            [-np.cos(sim_res.alpha_qs[i]), np.sin(sim_res.alpha_qs[i]), 0],
+            [np.sin(sim_res.alpha_qs[i]), np.cos(sim_res.alpha_qs[i]), 0],
+            [0, 0, 1],
+        ])
+        coeffs = rot_df@coefficients # now as [drag, lift, mom]
+        coeffs[0] += self._C_d0
 
         sim_res.C_dus[i] = coeffs[0]
         sim_res.C_lus[i] = coeffs[1]
